@@ -68,6 +68,7 @@ MODULE_LICENSE("GPL");
 #define MT_QUIRK_HOVERING		(1 << 11)
 #define MT_QUIRK_CONTACT_CNT_ACCURATE	(1 << 12)
 #define MT_QUIRK_FORCE_GET_FEATURE	(1 << 13)
+#define MT_QUIRK_TOUCH_SIZE_SCALING	(1 << 15)
 
 #define MT_INPUTMODE_TOUCHSCREEN	0x02
 #define MT_INPUTMODE_TOUCHPAD		0x03
@@ -157,6 +158,7 @@ static void mt_post_parse(struct mt_device *td);
 #define MT_CLS_GENERALTOUCH_TWOFINGERS		0x0108
 #define MT_CLS_GENERALTOUCH_PWT_TENFINGERS	0x0109
 #define MT_CLS_VTL				0x0110
+#define MT_CLS_GOOGLE				0x0111
 
 #define MT_DEFAULT_MAXCONTACT	10
 #define MT_MAX_MAXCONTACT	250
@@ -219,7 +221,8 @@ static struct mt_class mt_classes[] = {
 	 */
 	{ .name = MT_CLS_3M,
 		.quirks = MT_QUIRK_VALID_IS_CONFIDENCE |
-			MT_QUIRK_SLOT_IS_CONTACTID,
+			MT_QUIRK_SLOT_IS_CONTACTID |
+			MT_QUIRK_TOUCH_SIZE_SCALING,
 		.sn_move = 2048,
 		.sn_width = 128,
 		.sn_height = 128,
@@ -266,6 +269,12 @@ static struct mt_class mt_classes[] = {
 		.quirks = MT_QUIRK_ALWAYS_VALID |
 			MT_QUIRK_CONTACT_CNT_ACCURATE |
 			MT_QUIRK_FORCE_GET_FEATURE,
+	},
+	{ .name = MT_CLS_GOOGLE,
+		.quirks = MT_QUIRK_ALWAYS_VALID |
+			MT_QUIRK_CONTACT_CNT_ACCURATE |
+			MT_QUIRK_SLOT_IS_CONTACTID |
+			MT_QUIRK_HOVERING
 	},
 	{ }
 };
@@ -644,9 +653,17 @@ static void mt_complete_slot(struct mt_device *td, struct input_dev *input)
 		if (active) {
 			/* this finger is in proximity of the sensor */
 			int wide = (s->w > s->h);
-			/* divided by two to match visual scale of touch */
-			int major = max(s->w, s->h) >> 1;
-			int minor = min(s->w, s->h) >> 1;
+			int major = max(s->w, s->h);
+			int minor = min(s->w, s->h);
+
+			/*
+			 * divided by two to match visual scale of touch
+			 * for devices with this quirk
+			 */
+			if (td->mtclass.quirks & MT_QUIRK_TOUCH_SIZE_SCALING) {
+				major = major >> 1;
+				minor = minor >> 1;
+			}
 
 			input_event(input, EV_ABS, ABS_MT_POSITION_X, s->x);
 			input_event(input, EV_ABS, ABS_MT_POSITION_Y, s->y);
@@ -1492,6 +1509,11 @@ static const struct hid_device_id mt_devices[] = {
 	{ .driver_data = MT_CLS_NSMU,
 		MT_USB_DEVICE(USB_VENDOR_ID_XIROKU,
 			USB_DEVICE_ID_XIROKU_CSR2) },
+
+	/* Google MT devices */
+	{ .driver_data = MT_CLS_GOOGLE,
+		HID_DEVICE(HID_BUS_ANY, HID_GROUP_ANY, USB_VENDOR_ID_GOOGLE,
+			USB_DEVICE_ID_GOOGLE_TOUCH_ROSE) },
 
 	/* Generic MT device */
 	{ HID_DEVICE(HID_BUS_ANY, HID_GROUP_MULTITOUCH, HID_ANY_ID, HID_ANY_ID) },

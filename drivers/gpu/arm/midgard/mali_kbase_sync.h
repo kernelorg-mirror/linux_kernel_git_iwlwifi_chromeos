@@ -25,7 +25,8 @@
 #ifndef MALI_KBASE_SYNC_H
 #define MALI_KBASE_SYNC_H
 
-#include "sync.h"
+#include <linux/mutex.h>
+#include "sync_debug.h"
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0)
 /* For backwards compatiblility with kernels before 3.17. After 3.17
@@ -35,6 +36,12 @@ static inline struct sync_timeline *sync_pt_parent(struct sync_pt *pt)
 	return pt->parent;
 }
 #endif
+
+struct mali_sync_timeline {
+	struct sync_timeline *timeline;
+	int counter;
+	struct mutex counter_lock;
+};
 
 /*
  * Create a stream object.
@@ -49,7 +56,7 @@ int kbase_stream_create(const char *name, int *const out_fd);
 /*
  * Create a fence in a stream object
  */
-int kbase_stream_create_fence(int tl_fd);
+int kbase_stream_create_fence(int tl_fd, struct sync_file **rsfile);
 
 /*
  * Validate a fd to be a valid fence
@@ -60,14 +67,18 @@ int kbase_stream_create_fence(int tl_fd);
  */
 int kbase_fence_validate(int fd);
 
-/* Returns true if the specified timeline is allocated by Mali */
-int kbase_sync_timeline_is_ours(struct sync_timeline *timeline);
+/* Returns true if the specified fence is allocated by Mali */
+int kbase_sync_fence_is_ours(struct fence *fence);
 
 /* Allocates a timeline for Mali
  *
  * One timeline should be allocated per API context.
  */
-struct sync_timeline *kbase_sync_timeline_alloc(const char *name);
+struct mali_sync_timeline *kbase_sync_timeline_alloc(const char *name);
+
+/* Free Mali timeline.
+ */
+void kbase_sync_timeline_free(struct mali_sync_timeline *mtl);
 
 /* Allocates a sync point within the timeline.
  *
@@ -75,7 +86,7 @@ struct sync_timeline *kbase_sync_timeline_alloc(const char *name);
  *
  * Sync points must be triggered in *exactly* the same order as they are allocated.
  */
-struct sync_pt *kbase_sync_pt_alloc(struct sync_timeline *parent);
+struct fence *kbase_fence_alloc(struct mali_sync_timeline *mtl);
 
 /* Signals a particular sync point
  *
@@ -86,6 +97,6 @@ struct sync_pt *kbase_sync_pt_alloc(struct sync_timeline *parent);
  *
  * result can be negative to indicate error, any other value is interpreted as success.
  */
-void kbase_sync_signal_pt(struct sync_pt *pt, int result);
+void kbase_sync_signal_fence(struct fence *fence, int result);
 
 #endif

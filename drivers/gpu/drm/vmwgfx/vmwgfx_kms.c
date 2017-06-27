@@ -981,14 +981,22 @@ static struct drm_framebuffer *vmw_kms_fb_create(struct drm_device *dev,
 	struct vmw_dma_buffer *bo = NULL;
 	struct ttm_base_object *user_obj;
 	struct drm_mode_fb_cmd mode_cmd;
+	const struct drm_format_info *info;
 	int ret;
+
+	info = drm_format_info(mode_cmd2->pixel_format);
+	if (!info || !info->depth) {
+		DRM_ERROR("Unsupported framebuffer format %s\n",
+			  drm_get_format_name(mode_cmd2->pixel_format));
+		return ERR_PTR(-EINVAL);
+	}
 
 	mode_cmd.width = mode_cmd2->width;
 	mode_cmd.height = mode_cmd2->height;
 	mode_cmd.pitch = mode_cmd2->pitches[0];
 	mode_cmd.handle = mode_cmd2->handles[0];
-	drm_fb_get_bpp_depth(mode_cmd2->pixel_format, &mode_cmd.depth,
-				    &mode_cmd.bpp);
+	mode_cmd.depth = info->depth;
+	mode_cmd.bpp = info->cpp[0] * 8;
 
 	/**
 	 * This code should be conditioned on Screen Objects not being used.
@@ -1373,17 +1381,9 @@ static int vmw_du_update_layout(struct vmw_private *dev_priv, unsigned num,
 	return 0;
 }
 
-void vmw_du_crtc_save(struct drm_crtc *crtc)
-{
-}
-
-void vmw_du_crtc_restore(struct drm_crtc *crtc)
-{
-}
-
-void vmw_du_crtc_gamma_set(struct drm_crtc *crtc,
-			   u16 *r, u16 *g, u16 *b,
-			   uint32_t start, uint32_t size)
+int vmw_du_crtc_gamma_set(struct drm_crtc *crtc,
+			  u16 *r, u16 *g, u16 *b,
+			  uint32_t size)
 {
 	struct vmw_private *dev_priv = vmw_priv(crtc->dev);
 	int i;
@@ -1395,19 +1395,13 @@ void vmw_du_crtc_gamma_set(struct drm_crtc *crtc,
 		vmw_write(dev_priv, SVGA_PALETTE_BASE + i * 3 + 1, g[i] >> 8);
 		vmw_write(dev_priv, SVGA_PALETTE_BASE + i * 3 + 2, b[i] >> 8);
 	}
+
+	return 0;
 }
 
 int vmw_du_connector_dpms(struct drm_connector *connector, int mode)
 {
 	return 0;
-}
-
-void vmw_du_connector_save(struct drm_connector *connector)
-{
-}
-
-void vmw_du_connector_restore(struct drm_connector *connector)
-{
 }
 
 enum drm_connector_status
