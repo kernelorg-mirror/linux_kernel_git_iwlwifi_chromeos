@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2008-2016 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2008-2017 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -12,8 +12,6 @@
  * Boston, MA  02110-1301, USA.
  *
  */
-
-
 
 
 
@@ -41,17 +39,8 @@
 
 #include "mali_kbase_gpuprops_types.h"
 
-/*
- * 10.1:
- * - Do mmap in kernel for SAME_VA memory allocations rather then
- *   calling back into the kernel as a 2nd stage of the allocation request.
- *
- * 10.2:
- * - Add KBASE_FUNC_MEM_JIT_INIT which allows clients to request a custom VA
- *   region for use with JIT (ignored on 32-bit platforms)
- */
-#define BASE_UK_VERSION_MAJOR 10
-#define BASE_UK_VERSION_MINOR 2
+
+#define LINUX_UK_BASE_MAGIC 0x80
 
 struct kbase_uk_mem_alloc {
 	union uk_header header;
@@ -81,7 +70,7 @@ struct kbase_uk_mem_alias {
 	/* IN */
 	u64 stride;
 	u64 nents;
-	union kbase_pointer ai;
+	u64 ai;
 	/* OUT */
 	u64         gpu_va;
 	u64         va_pages;
@@ -90,7 +79,7 @@ struct kbase_uk_mem_alias {
 struct kbase_uk_mem_import {
 	union uk_header header;
 	/* IN */
-	union kbase_pointer phandle;
+	u64 phandle;
 	u32 type;
 	u32 padding;
 	/* IN/OUT */
@@ -111,7 +100,7 @@ struct kbase_uk_mem_flags_change {
 struct kbase_uk_job_submit {
 	union uk_header header;
 	/* IN */
-	union kbase_pointer addr;
+	u64 addr;
 	u32 nr_atoms;
 	u32 stride;		/* bytes between atoms, i.e. sizeof(base_jd_atom_v2) */
 	/* OUT */
@@ -200,7 +189,7 @@ struct kbase_uk_gpuprops {
 	union uk_header header;
 
 	/* IN */
-	struct mali_base_gpu_props props;
+	struct base_gpu_props props;
 	/* OUT */
 };
 
@@ -265,8 +254,8 @@ struct kbase_uk_set_flags {
 struct kbase_exported_test_data {
 	u64 test_addr[TEST_ADDR_COUNT];		/**< memory address */
 	u32 test_addr_pages[TEST_ADDR_COUNT];		/**<  memory size in pages */
-	union kbase_pointer kctx;				/**<  base context created by process */
-	union kbase_pointer mm;				/**< pointer to process address space */
+	u64 kctx;				/**<  base context created by process */
+	u64 mm;				/**< pointer to process address space */
 	u8 buffer1[KBASE_TEST_BUFFER_SIZE];   /**<  unit test defined parameter */
 	u8 buffer2[KBASE_TEST_BUFFER_SIZE];   /**<  unit test defined parameter */
 };
@@ -295,24 +284,6 @@ struct kbase_uk_model_control_params {
 };
 #endif				/* SUPPORT_MALI_NO_MALI */
 
-#define KBASE_MAXIMUM_EXT_RESOURCES       255
-
-struct kbase_uk_ext_buff_kds_data {
-	union uk_header header;
-	union kbase_pointer external_resource;
-	union kbase_pointer file_descriptor;
-	u32 num_res;		/* limited to KBASE_MAXIMUM_EXT_RESOURCES */
-	u32 padding;
-};
-
-#ifdef BASE_LEGACY_UK8_SUPPORT
-struct kbase_uk_keep_gpu_powered {
-	union uk_header header;
-	u32       enabled;
-	u32       padding;
-};
-#endif /* BASE_LEGACY_UK8_SUPPORT */
-
 struct kbase_uk_profiling_controls {
 	union uk_header header;
 	u32 profiling_controls[FBDUMP_CONTROL_MAX];
@@ -321,7 +292,8 @@ struct kbase_uk_profiling_controls {
 struct kbase_uk_debugfs_mem_profile_add {
 	union uk_header header;
 	u32 len;
-	union kbase_pointer buf;
+	u32 padding;
+	u64 buf;
 };
 
 struct kbase_uk_context_id {
@@ -330,17 +302,33 @@ struct kbase_uk_context_id {
 	int id;
 };
 
-#if (defined(MALI_MIPE_ENABLED) && MALI_MIPE_ENABLED) || \
-	!defined(MALI_MIPE_ENABLED)
 /**
  * struct kbase_uk_tlstream_acquire - User/Kernel space data exchange structure
  * @header: UK structure header
+ * @flags:  timeline stream flags
  * @fd:     timeline stream file descriptor
  *
- * This structure is used used when performing a call to acquire kernel side
- * timeline stream file descriptor.
+ * This structure is used when performing a call to acquire kernel side timeline
+ * stream file descriptor.
  */
 struct kbase_uk_tlstream_acquire {
+	union uk_header header;
+	/* IN */
+	u32 flags;
+	/* OUT */
+	s32  fd;
+};
+
+/**
+ * struct kbase_uk_tlstream_acquire_v10_4 - User/Kernel space data exchange
+ *                                          structure
+ * @header: UK structure header
+ * @fd:     timeline stream file descriptor
+ *
+ * This structure is used when performing a call to acquire kernel side timeline
+ * stream file descriptor.
+ */
+struct kbase_uk_tlstream_acquire_v10_4 {
 	union uk_header header;
 	/* IN */
 	/* OUT */
@@ -399,7 +387,6 @@ struct kbase_uk_tlstream_stats {
 	u32 bytes_generated;
 };
 #endif /* MALI_UNIT_TEST */
-#endif /* MALI_MIPE_ENABLED */
 
 /**
  * struct struct kbase_uk_prfcnt_value for the KBASE_FUNC_SET_PRFCNT_VALUES ioctl
@@ -456,9 +443,7 @@ enum kbase_uk_function_id {
 	KBASE_FUNC_MEM_FLAGS_CHANGE = (UK_FUNC_ID + 5),
 	KBASE_FUNC_MEM_ALIAS = (UK_FUNC_ID + 6),
 
-#ifdef BASE_LEGACY_UK6_SUPPORT
-	KBASE_FUNC_JOB_SUBMIT_UK6 = (UK_FUNC_ID + 7),
-#endif /* BASE_LEGACY_UK6_SUPPORT */
+	/* UK_FUNC_ID + 7 not in use since BASE_LEGACY_UK6_SUPPORT dropped */
 
 	KBASE_FUNC_SYNC  = (UK_FUNC_ID + 8),
 
@@ -473,16 +458,13 @@ enum kbase_uk_function_id {
 	KBASE_FUNC_FIND_CPU_OFFSET = (UK_FUNC_ID + 15),
 
 	KBASE_FUNC_GET_VERSION = (UK_FUNC_ID + 16),
-	KBASE_FUNC_EXT_BUFFER_LOCK = (UK_FUNC_ID + 17),
 	KBASE_FUNC_SET_FLAGS = (UK_FUNC_ID + 18),
 
 	KBASE_FUNC_SET_TEST_DATA = (UK_FUNC_ID + 19),
 	KBASE_FUNC_INJECT_ERROR = (UK_FUNC_ID + 20),
 	KBASE_FUNC_MODEL_CONTROL = (UK_FUNC_ID + 21),
 
-#ifdef BASE_LEGACY_UK8_SUPPORT
-	KBASE_FUNC_KEEP_GPU_POWERED = (UK_FUNC_ID + 22),
-#endif /* BASE_LEGACY_UK8_SUPPORT */
+	/* UK_FUNC_ID + 22 not in use since BASE_LEGACY_UK8_SUPPORT dropped */
 
 	KBASE_FUNC_FENCE_VALIDATE = (UK_FUNC_ID + 23),
 	KBASE_FUNC_STREAM_CREATE = (UK_FUNC_ID + 24),
@@ -498,15 +480,12 @@ enum kbase_uk_function_id {
 
 	KBASE_FUNC_GET_CONTEXT_ID = (UK_FUNC_ID + 31),
 
-#if (defined(MALI_MIPE_ENABLED) && MALI_MIPE_ENABLED) || \
-	!defined(MALI_MIPE_ENABLED)
-	KBASE_FUNC_TLSTREAM_ACQUIRE = (UK_FUNC_ID + 32),
+	KBASE_FUNC_TLSTREAM_ACQUIRE_V10_4 = (UK_FUNC_ID + 32),
 #if MALI_UNIT_TEST
 	KBASE_FUNC_TLSTREAM_TEST = (UK_FUNC_ID + 33),
 	KBASE_FUNC_TLSTREAM_STATS = (UK_FUNC_ID + 34),
 #endif /* MALI_UNIT_TEST */
 	KBASE_FUNC_TLSTREAM_FLUSH = (UK_FUNC_ID + 35),
-#endif /* MALI_MIPE_ENABLED */
 
 	KBASE_FUNC_HWCNT_READER_SETUP = (UK_FUNC_ID + 36),
 
@@ -517,6 +496,8 @@ enum kbase_uk_function_id {
 	KBASE_FUNC_SOFT_EVENT_UPDATE = (UK_FUNC_ID + 38),
 
 	KBASE_FUNC_MEM_JIT_INIT = (UK_FUNC_ID + 39),
+
+	KBASE_FUNC_TLSTREAM_ACQUIRE = (UK_FUNC_ID + 40),
 
 	KBASE_FUNC_MAX
 };
