@@ -2469,6 +2469,16 @@ static inline bool iwl7000_cfg80211_rx_control_port(struct net_device *dev,
 int ieee80211_data_to_8023_exthdr(struct sk_buff *skb, struct ethhdr *ehdr,
 				  const u8 *addr, enum nl80211_iftype iftype,
 				  u8 data_offset);
+#else
+static inline int
+backport_cfg80211_sinfo_alloc_tid_stats(struct station_info *sinfo, gfp_t gfp)
+{
+	cfg_station_info_t cfg_info;
+
+	iwl7000_convert_sinfo(sinfo, &cfg_info);
+	return cfg80211_sinfo_alloc_tid_stats(&cfg_info, gfp);
+}
+#define cfg80211_sinfo_alloc_tid_stats backport_cfg80211_sinfo_alloc_tid_stats
 #endif
 
 #if CFG80211_VERSION < KERNEL_VERSION(4,19,0)
