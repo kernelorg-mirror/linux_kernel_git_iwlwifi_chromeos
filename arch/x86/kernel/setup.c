@@ -814,26 +814,6 @@ dump_kernel_offset(struct notifier_block *self, unsigned long v, void *p)
 	return 0;
 }
 
-static void __init simple_udelay_calibration(void)
-{
-	unsigned int tsc_khz, cpu_khz;
-	unsigned long lpj;
-
-	if (!boot_cpu_has(X86_FEATURE_TSC))
-		return;
-
-	cpu_khz = x86_platform.calibrate_cpu();
-	tsc_khz = x86_platform.calibrate_tsc();
-
-	tsc_khz = tsc_khz ? : cpu_khz;
-	if (!tsc_khz)
-		return;
-
-	lpj = tsc_khz * 1000;
-	do_div(lpj, HZ);
-	loops_per_jiffy = lpj;
-}
-
 /*
  * Determine if we were loaded by an EFI loader.  If so, then we have also been
  * passed the efi memmap, systab, etc., so we should use these data structures
@@ -851,6 +831,12 @@ void __init setup_arch(char **cmdline_p)
 {
 	memblock_reserve(__pa_symbol(_text),
 			 (unsigned long)__bss_stop - (unsigned long)_text);
+
+	/*
+	 * Make sure page 0 is always reserved because on systems with
+	 * L1TF its contents can be leaked to user processes.
+	 */
+	memblock_reserve(0, PAGE_SIZE);
 
 	early_reserve_initrd();
 
@@ -894,6 +880,8 @@ void __init setup_arch(char **cmdline_p)
 
 	idt_setup_early_traps();
 	early_cpu_init();
+	arch_init_ideal_nops();
+	jump_label_init();
 	early_ioremap_init();
 
 	setup_olpc_ofw_pgd();
@@ -1040,8 +1028,7 @@ void __init setup_arch(char **cmdline_p)
 	 */
 	init_hypervisor_platform();
 
-	simple_udelay_calibration();
-
+	tsc_early_init();
 	x86_init.resources.probe_roms();
 
 	/* after parse_early_param, so could debug it */
@@ -1125,9 +1112,6 @@ void __init setup_arch(char **cmdline_p)
 
 	memblock_set_current_limit(ISA_END_ADDRESS);
 	e820__memblock_setup();
-
-	if (!early_xdbc_setup_hardware())
-		early_xdbc_register_console();
 
 	reserve_bios_regions();
 
@@ -1234,6 +1218,9 @@ void __init setup_arch(char **cmdline_p)
 	kvmclock_init();
 #endif
 
+	if (!early_xdbc_setup_hardware())
+		early_xdbc_register_console();
+
 	x86_init.paging.pagetable_init();
 
 	kasan_init();
@@ -1300,8 +1287,6 @@ void __init setup_arch(char **cmdline_p)
 	x86_init.timers.wallclock_init();
 
 	mcheck_init();
-
-	arch_init_ideal_nops();
 
 	register_refined_jiffies(CLOCK_TICK_RATE);
 

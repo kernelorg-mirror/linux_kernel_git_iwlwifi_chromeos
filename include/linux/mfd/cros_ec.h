@@ -19,9 +19,9 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/notifier.h>
-#include <linux/power_supply.h>
 #include <linux/mfd/cros_ec_commands.h>
 #include <linux/mutex.h>
+#include <linux/power_supply.h>
 
 #define CROS_EC_DEV_NAME "cros_ec"
 #define CROS_EC_DEV_PD_NAME "cros_pd"
@@ -108,7 +108,6 @@ struct cros_ec_command {
  * @dout_size: size of dout buffer to allocate (zero to use static dout)
  * @wake_enabled: true if this device can wake the system from sleep
  * @suspended: true if this device had been suspended
- * @has_kb_wake_angle: true if at least 2 accelerometer are connected to the EC.
  * @cmd_xfer: send command to EC and get response
  *     Returns the number of bytes received if the communication succeeded, but
  *     that doesn't mean the EC was happy with the command. The caller
@@ -119,7 +118,8 @@ struct cros_ec_command {
  * @event_notifier: interrupt event notifier for transport devices.
  * @event_data: raw payload transferred with the MKBP event.
  * @event_size: size in bytes of the event data.
- * @features: stores the EC features.
+ * @last_event_time: exact time from the hard irq when we got notified of
+ *     a new event.
  */
 struct cros_ec_device {
 
@@ -144,7 +144,6 @@ struct cros_ec_device {
 	int dout_size;
 	bool wake_enabled;
 	bool suspended;
-	bool has_kb_wake_angle;
 	int (*cmd_xfer)(struct cros_ec_device *ec,
 			struct cros_ec_command *msg);
 	int (*pkt_xfer)(struct cros_ec_device *ec,
@@ -157,19 +156,16 @@ struct cros_ec_device {
 	struct ec_response_get_next_event event_data;
 	int event_size;
 	u32 host_event_wake_mask;
-	u32 features[2];
+	s64 last_event_time;
 };
 
 /**
  * struct cros_ec_sensor_platform - ChromeOS EC sensor platform information
  *
  * @sensor_num: Id of the sensor, as reported by the EC.
- * @cmd_offset: offset to apply for each command. Set when
- * registering a devicde behind another one.
  */
 struct cros_ec_sensor_platform {
 	u8 sensor_num;
-	u16 cmd_offset;
 };
 
 /* struct cros_ec_platform - ChromeOS EC platform information
@@ -194,6 +190,7 @@ struct cros_ec_debugfs;
  * @ec_dev: cros_ec_device structure to talk to the physical device
  * @dev: pointer to the platform device
  * @debug_info: cros_ec_debugfs structure for debugging information
+ * @has_kb_wake_angle: true if at least 2 accelerometer are connected to the EC.
  * @cmd_offset: offset to apply for each command.
  */
 struct cros_ec_dev {
@@ -202,7 +199,9 @@ struct cros_ec_dev {
 	struct cros_ec_device *ec_dev;
 	struct device *dev;
 	struct cros_ec_debugfs *debug_info;
+	bool has_kb_wake_angle;
 	u16 cmd_offset;
+	u32 features[2];
 };
 
 /**
@@ -332,6 +331,7 @@ extern struct attribute_group cros_ec_attr_group;
 extern struct attribute_group cros_ec_lightbar_attr_group;
 extern struct attribute_group cros_ec_vbc_attr_group;
 extern struct attribute_group cros_ec_pd_attr_group;
+extern struct attribute_group cros_usb_pd_charger_attr_group;
 
 /* debugfs stuff */
 int cros_ec_debugfs_init(struct cros_ec_dev *ec);
@@ -339,4 +339,17 @@ void cros_ec_debugfs_remove(struct cros_ec_dev *ec);
 void cros_ec_debugfs_suspend(struct cros_ec_dev *ec);
 void cros_ec_debugfs_resume(struct cros_ec_dev *ec);
 
-#endif /* __LINUX_MFD_CROS_EC_H */
+
+/**
+ * cros_ec_get_time_ns - Return time in ns.
+ *
+ * This is the function used to record the time for last_event_time in struct
+ * cros_ec_device during the hard irq.
+ *
+ * This function is probably implemented using ktime_get_boot_ns(), but it's
+ * exposed here to make sure all cros_ec drivers use the same code path to get
+ * the time.
+ */
+s64 cros_ec_get_time_ns(void);
+
+#endif  /* __LINUX_MFD_CROS_EC_H */
