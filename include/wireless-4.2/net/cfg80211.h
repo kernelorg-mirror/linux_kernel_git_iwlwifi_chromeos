@@ -1058,9 +1058,11 @@ struct cfg80211_tid_stats {
  *	from this peer
  * @pertid: per-TID statistics, see &struct cfg80211_tid_stats, using the last
  *	(IEEE80211_NUM_TIDS) index for MSDUs not encapsulated in QoS-MPDUs.
+ * @NL80211_STA_INFO_DATA_ACK_SIGNAL_AVG: avg signal strength of data ACK
+ *	frame(s8, dBm)
  */
 struct station_info {
-	u32 filled;
+	u64 filled;
 	u32 connected_time;
 	u32 inactive_time;
 	u64 rx_bytes;
@@ -1101,6 +1103,7 @@ struct station_info {
 	u64 rx_beacon;
 	u8 rx_beacon_signal_avg;
 	struct cfg80211_tid_stats pertid[IEEE80211_NUM_TIDS + 1];
+	s8 avg_ack_rssi;
 };
 
 /**
@@ -1318,6 +1321,7 @@ struct mesh_config {
 	bool dot11MeshGateAnnouncementProtocol;
 	bool dot11MeshForwarding;
 	s32 rssi_threshold;
+	s32 meshlink_rssi_threshold;
 	u16 ht_opmode;
 	u32 dot11MeshHWMPactivePathToRootTimeout;
 	u16 dot11MeshHWMProotInterval;
@@ -4962,15 +4966,6 @@ void cfg80211_tdls_oper_request(struct net_device *dev, const u8 *peer,
  * return 0 if MCS index >= 32
  */
 u32 cfg80211_calculate_bitrate(struct rate_info *rate);
-
-/**
- * cfg80211_new_mpath - notify userspace about (new) mpath change
- *
- * @dev: the netdev
- * @dst: the destination's address
- * @gfp: allocation flags
- */
-void cfg80211_new_mpath(struct net_device *dev, u8 *dst, gfp_t gfp);
 
 /**
  * cfg80211_unregister_wdev - remove the given wdev

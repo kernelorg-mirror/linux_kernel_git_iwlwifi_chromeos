@@ -423,6 +423,35 @@ static ssize_t ieee80211_if_parse_uapsd_max_sp_len(
 }
 IEEE80211_IF_FILE_RW(uapsd_max_sp_len);
 
+static ssize_t ieee80211_if_fmt_meshlink_rssi_threshold(
+	const struct ieee80211_sub_if_data *sdata, char *buf, int buflen)
+{
+	const struct ieee80211_if_mesh *ifmsch = &sdata->u.mesh;
+
+	return snprintf(buf, buflen, "%d\n",
+			ifmsch->mshcfg.meshlink_rssi_threshold);
+}
+
+static ssize_t ieee80211_if_parse_meshlink_rssi_threshold(
+	struct ieee80211_sub_if_data *sdata, const char *buf, int buflen)
+{
+	struct ieee80211_if_mesh *ifmsch = &sdata->u.mesh;
+	long val;
+	int ret;
+
+	ret = kstrtol(buf, 0, &val);
+	if (ret)
+		return -EINVAL;
+
+	if (val < -255 || val >  0)
+		return -ERANGE;
+
+	ifmsch->mshcfg.meshlink_rssi_threshold = (int)val;
+	return buflen;
+}
+
+IEEE80211_IF_FILE_RW(meshlink_rssi_threshold);
+
 /* AP attributes */
 IEEE80211_IF_FILE(num_mcast_sta, u.ap.num_mcast_sta, ATOMIC);
 IEEE80211_IF_FILE(num_sta_ps, u.ap.ps.num_sta_ps, ATOMIC);
@@ -488,6 +517,72 @@ static ssize_t ieee80211_if_parse_tsf(
 }
 IEEE80211_IF_FILE_RW(tsf);
 
+/* Updates the interface RX limits to all the STA's connected */
+static void update_rx_limit(struct ieee80211_sub_if_data *sdata,
+			    struct sta_info *sta)
+{
+	list_for_each_entry(sta, &sdata->local->sta_list, list) {
+		sta->mc_rx_limit.rate = sdata->mc_rx_limit_rate;
+		sta->bc_rx_limit.rate = sdata->bc_rx_limit_rate;
+
+		/* Calculate the bc/mc receive frame burst size */
+		mc_bc_burst_size(sta);
+	}
+}
+
+static ssize_t ieee80211_if_fmt_mc_bc_rx_limit(
+	const struct ieee80211_sub_if_data *sdata, char *buf, int buflen)
+{
+	return scnprintf(buf, buflen, "mc: %u\nbc: %u\nburst_size: %u\n",
+			 sdata->mc_rx_limit_rate, sdata->bc_rx_limit_rate,
+			 sdata->burst_size);
+}
+
+static ssize_t ieee80211_if_parse_mc_bc_rx_limit(
+	struct ieee80211_sub_if_data *sdata, const char *buf, int buflen)
+{
+	struct sta_info *sta;
+	int ret;
+	bool mc = false, bc = false;
+	u32 rate = 0, burst_size = 0;
+
+	if (strncmp(buf, "mc:", 3) == 0) {
+		buf += 3;
+		mc = true;
+	} else if (strncmp(buf, "bc:", 3) == 0) {
+		buf += 3;
+		bc = true;
+	} else if (strncmp(buf, "reset", 5) == 0) {
+		/* Disables the multicast and broadcast RX limit logic */
+		sdata->mc_rx_limit_rate = 0;
+		sdata->bc_rx_limit_rate = 0;
+		update_rx_limit(sdata, sta);
+	} else if (strncmp(buf, "burst_size:", 11) == 0) {
+		ret = kstrtouint(buf + 11, 0, &burst_size);
+		if (ret < 0)
+			return ret;
+		sdata->burst_size = burst_size;
+	} else {
+		return -EINVAL;
+	}
+
+	if (mc || bc) {
+		ret = kstrtouint(buf, 0, &rate);
+		if (ret < 0)
+			return ret;
+		/* Allow the rates less than 100000Kbps(100Mbps) */
+		if (rate <= 100000) {
+			mc > bc ? (sdata->mc_rx_limit_rate = rate) :
+				  (sdata->bc_rx_limit_rate = rate);
+			update_rx_limit(sdata, sta);
+		} else {
+			return -EINVAL;
+		}
+	}
+	return buflen;
+}
+
+IEEE80211_IF_FILE_RW(mc_bc_rx_limit);
 
 /* WDS attributes */
 IEEE80211_IF_FILE(peer, u.wds.remote_addr, MAC);
@@ -618,6 +713,7 @@ static void add_ap_files(struct ieee80211_sub_if_data *sdata)
 	DEBUGFS_ADD(dtim_count);
 	DEBUGFS_ADD(num_buffered_multicast);
 	DEBUGFS_ADD_MODE(tkip_mic_test, 0200);
+	DEBUGFS_ADD(mc_bc_rx_limit);
 }
 
 static void add_ibss_files(struct ieee80211_sub_if_data *sdata)
@@ -683,6 +779,7 @@ static void add_mesh_config(struct ieee80211_sub_if_data *sdata)
 	MESHPARAMS_ADD(dot11MeshForwarding);
 	MESHPARAMS_ADD(dot11MeshGateAnnouncementProtocol);
 	MESHPARAMS_ADD(rssi_threshold);
+	MESHPARAMS_ADD(meshlink_rssi_threshold);
 	MESHPARAMS_ADD(ht_opmode);
 	MESHPARAMS_ADD(dot11MeshHWMPactivePathToRootTimeout);
 	MESHPARAMS_ADD(dot11MeshHWMProotInterval);
