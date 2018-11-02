@@ -267,9 +267,6 @@ struct ipu3_uapi_stats_3a {
 #define IPU3_UAPI_YUVP2_TCC_GAIN_PCWL_LUT_ELEMENTS	258
 #define IPU3_UAPI_YUVP2_TCC_R_SQR_LUT_ELEMENTS		24
 
-#define IPU3_UAPI_BDS_SAMPLE_PATTERN_ARRAY_SIZE		8
-#define IPU3_UAPI_BDS_PHASE_COEFFS_ARRAY_SIZE		32
-
 #define IPU3_UAPI_ANR_LUT_SIZE				26
 #define IPU3_UAPI_ANR_PYRAMID_SIZE			22
 
@@ -999,99 +996,7 @@ struct ipu3_uapi_yuvp2_tcc_static_config {
 	struct ipu3_uapi_yuvp2_tcc_r_sqr_lut_static_config r_sqr_lut;
 } __packed;
 
-/* Bayer Down-Scaler */
-
-struct ipu3_uapi_bds_hor_ctrl0 {
-	__u32 sample_patrn_length:9;
-	__u32 __reserved0:3;
-	__u32 hor_ds_en:1;
-	__u32 min_clip_val:1;
-	__u32 max_clip_val:2;
-	__u32 out_frame_width:13;
-	__u32 __reserved1:3;
-} __packed;
-
-struct ipu3_uapi_bds_ptrn_arr {
-	__u32 elems[IPU3_UAPI_BDS_SAMPLE_PATTERN_ARRAY_SIZE];
-} __packed;
-
-struct ipu3_uapi_bds_phase_entry {
-	__s8 coeff_min2;
-	__s8 coeff_min1;
-	__s8 coeff_0;
-	__s8 nf;
-	__s8 coeff_pls1;
-	__s8 coeff_pls2;
-	__s8 coeff_pls3;
-	__u8 __reserved;
-} __packed;
-
-struct ipu3_uapi_bds_phase_arr {
-	struct ipu3_uapi_bds_phase_entry
-		even[IPU3_UAPI_BDS_PHASE_COEFFS_ARRAY_SIZE];
-	struct ipu3_uapi_bds_phase_entry
-		odd[IPU3_UAPI_BDS_PHASE_COEFFS_ARRAY_SIZE];
-} __packed;
-
-struct ipu3_uapi_bds_hor_ctrl1 {
-	__u32 hor_crop_start:13;
-	__u32 __reserved0:3;
-	__u32 hor_crop_end:13;
-	__u32 __reserved1:1;
-	__u32 hor_crop_en:1;
-	__u32 __reserved2:1;
-} __packed;
-
-struct ipu3_uapi_bds_hor_ctrl2 {
-	__u32 input_frame_height:13;
-	__u32 __reserved0:19;
-} __packed;
-
-struct ipu3_uapi_bds_hor {
-	struct ipu3_uapi_bds_hor_ctrl0 hor_ctrl0;
-	struct ipu3_uapi_bds_ptrn_arr hor_ptrn_arr;
-	struct ipu3_uapi_bds_phase_arr hor_phase_arr;
-	struct ipu3_uapi_bds_hor_ctrl1 hor_ctrl1;
-	struct ipu3_uapi_bds_hor_ctrl2 hor_ctrl2;
-} __packed;
-
-struct ipu3_uapi_bds_ver_ctrl0 {
-	__u32 sample_patrn_length:9;
-	__u32 __reserved0:3;
-	__u32 ver_ds_en:1;
-	__u32 min_clip_val:1;
-	__u32 max_clip_val:2;
-	__u32 __reserved1:16;
-} __packed;
-
-struct ipu3_uapi_bds_ver_ctrl1 {
-	__u32 out_frame_width:13;
-	__u32 __reserved0:3;
-	__u32 out_frame_height:13;
-	__u32 __reserved1:3;
-} __packed;
-
-struct ipu3_uapi_bds_ver {
-	struct ipu3_uapi_bds_ver_ctrl0 ver_ctrl0;
-	struct ipu3_uapi_bds_ptrn_arr ver_ptrn_arr;
-	struct ipu3_uapi_bds_phase_arr ver_phase_arr;
-	struct ipu3_uapi_bds_ver_ctrl1 ver_ctrl1;
-
-} __packed;
-
-struct ipu3_uapi_bds_config {
-	struct ipu3_uapi_bds_hor hor IPU3_ALIGN;
-	struct ipu3_uapi_bds_ver ver IPU3_ALIGN;
-	__u32 enabled;
-} __packed;
-
 /* Advanced Noise Reduction related structs */
-
-struct ipu3_uapi_anr_search_config {
-	__u32 enable;
-	__u16 frame_width;
-	__u16 frame_height;
-} __packed;
 
 struct ipu3_uapi_anr_alpha {
 	__u16 gr;					/* 9 bits */
@@ -1132,7 +1037,6 @@ struct ipu3_uapi_anr_transform_config {
 	__u16 sqrt_lut[IPU3_UAPI_ANR_LUT_SIZE];	/* 11 bits per element */
 
 	__s16 xreset:13;
-#define IPU3_UAPI_ANR_MAX_XRESET		((1 << 12) - 1)
 	__u16 __reserved3:3;
 	__s16 yreset:13;
 	__u16 __reserved4:3;
@@ -1154,23 +1058,13 @@ struct ipu3_uapi_anr_stitch_pyramid {
 
 struct ipu3_uapi_anr_stitch_config {
 	__u32 anr_stitch_en;
-	__u16 frame_width;
-	__u16 frame_height;
-	__u8 __reserved[40];
+	__u8 __reserved[44];
 	struct ipu3_uapi_anr_stitch_pyramid pyramid[IPU3_UAPI_ANR_PYRAMID_SIZE];
 } __packed;
 
-struct ipu3_uapi_anr_tile2strm_config {
-	__u32 enable;
-	__u16 frame_width;
-	__u16 frame_height;
-} __packed;
-
 struct ipu3_uapi_anr_config {
-	struct ipu3_uapi_anr_search_config search IPU3_ALIGN;
 	struct ipu3_uapi_anr_transform_config transform IPU3_ALIGN;
 	struct ipu3_uapi_anr_stitch_config stitch IPU3_ALIGN;
-	struct ipu3_uapi_anr_tile2strm_config tile2strm IPU3_ALIGN;
 } __packed;
 
 struct ipu3_uapi_awb_fr_config {
@@ -1230,7 +1124,6 @@ struct ipu3_uapi_acc_param {
 	struct ipu3_uapi_yuvp2_y_tm_lut_static_config ytm IPU3_ALIGN;
 	struct ipu3_uapi_yuvp1_yds_config yds2 IPU3_ALIGN;
 	struct ipu3_uapi_yuvp2_tcc_static_config tcc IPU3_ALIGN;
-	struct ipu3_uapi_bds_config bds;
 	struct ipu3_uapi_anr_config anr;
 	struct ipu3_uapi_awb_fr_config awb_fr;
 	struct ipu3_uapi_ae_config ae;
@@ -1399,5 +1292,13 @@ struct ipu3_uapi_params {
 
 	struct ipu3_uapi_obgrid_param obgrid_param;
 } __packed;
+
+/* custom ctrl to set pipe mode */
+#define V4L2_CID_INTEL_IPU3_BASE (V4L2_CID_USER_BASE + 0x10a0)
+#define V4L2_CID_INTEL_IPU3_MODE (V4L2_CID_INTEL_IPU3_BASE + 1)
+enum ipu3_running_mode {
+	IPU3_RUNNING_MODE_VIDEO = 0,
+	IPU3_RUNNING_MODE_STILL = 1,
+};
 
 #endif

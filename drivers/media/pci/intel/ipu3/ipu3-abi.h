@@ -8,7 +8,7 @@
 
 /******************* IMGU Hardware information *******************/
 
-typedef __u32 imgu_addr_t;
+typedef u32 imgu_addr_t;
 
 #define IMGU_ISP_VMEM_ALIGN			128
 #define IMGU_DVS_BLOCK_W			64
@@ -60,7 +60,7 @@ typedef __u32 imgu_addr_t;
 #define IMGU_SYSTEM_REQ_FREQ_DIVIDER		25
 #define IMGU_REG_INT_STATUS			0x30
 #define IMGU_REG_INT_ENABLE			0x34
-#define IMGU_REG_INT_CSS_IRQ			(1 << 31)
+#define IMGU_REG_INT_CSS_IRQ			BIT(31)
 /* STATE_0_5_0_IMGHMMADR */
 #define IMGU_REG_STATE				0x130
 #define IMGU_STATE_HALT_STS			BIT(0)
@@ -237,6 +237,9 @@ typedef __u32 imgu_addr_t;
 #define IMGU_ABI_DVS_STAT_MAX_PROCESS_LINES	52
 #define IMGU_ABI_DVS_STAT_MAX_TRANSFERS		52
 
+#define IMGU_ABI_BDS_SAMPLE_PATTERN_ARRAY_SIZE	8
+#define IMGU_ABI_BDS_PHASE_COEFFS_ARRAY_SIZE	32
+
 #define IMGU_ABI_AWB_FR_MAX_TRANSFERS		30
 #define IMGU_ABI_AWB_FR_MAX_PROCESS_LINES	30
 #define IMGU_ABI_AWB_FR_MAX_OPERATIONS \
@@ -304,7 +307,7 @@ enum imgu_abi_frame_format {
 						  * line; UYVY interleaved
 						  * even line
 						  */
-	IMGU_ABI_FRAME_FORMAT_YCgCo444_16, /* Internal format for ISP2.7,
+	IMGU_ABI_FRAME_FORMAT_YCGCO444_16, /* Internal format for ISP2.7,
 					    * 16 bits per plane YUV 444,
 					    * Y, U, V plane
 					    */
@@ -341,24 +344,24 @@ struct imgu_abi_acc_operation {
 	 * zero means on init,
 	 * others mean upon receiving an ack signal from the BC acc.
 	 */
-	__u8 op_indicator;
-	__u8 op_type;
+	u8 op_indicator;
+	u8 op_type;
 } __packed;
 
 struct imgu_abi_acc_process_lines_cmd_data {
-	__u16 lines;
-	__u8 cfg_set;
-	__u8 __reserved;		/* Align to 4 bytes */
+	u16 lines;
+	u8 cfg_set;
+	u8 __reserved;		/* Align to 4 bytes */
 } __packed;
 
 /* Bayer shading definitions */
 
 struct imgu_abi_shd_transfer_luts_set_data {
-	__u8 set_number;
-	__u8 padding[3];
+	u8 set_number;
+	u8 padding[3];
 	imgu_addr_t rg_lut_ddr_addr;
 	imgu_addr_t bg_lut_ddr_addr;
-	__u32 align_dummy;
+	u32 align_dummy;
 } __packed;
 
 struct imgu_abi_shd_grid_config {
@@ -410,27 +413,27 @@ struct imgu_abi_shd_intra_frame_operations_data {
 } __packed;
 
 struct imgu_abi_shd_config {
-	struct ipu3_uapi_shd_config_static shd IMGU_ABI_PAD;
-	struct imgu_abi_shd_intra_frame_operations_data shd_ops IMGU_ABI_PAD;
-	struct ipu3_uapi_shd_lut shd_lut IMGU_ABI_PAD;
+	struct ipu3_uapi_shd_config_static shd IPU3_ALIGN;
+	struct imgu_abi_shd_intra_frame_operations_data shd_ops IPU3_ALIGN;
+	struct ipu3_uapi_shd_lut shd_lut IPU3_ALIGN;
 } __packed;
 
 struct imgu_abi_stripe_input_frame_resolution {
-	__u16 width;
-	__u16 height;
-	__u32 bayer_order;		/* enum ipu3_uapi_bayer_order */
-	__u32 raw_bit_depth;
+	u16 width;
+	u16 height;
+	u32 bayer_order;		/* enum ipu3_uapi_bayer_order */
+	u32 raw_bit_depth;
 } __packed;
 
 /* Stripe-based processing */
 
 struct imgu_abi_stripes {
 	/* offset from start of frame - measured in pixels */
-	__u16 offset;
+	u16 offset;
 	/* stripe width - measured in pixels */
-	__u16 width;
+	u16 width;
 	/* stripe width - measured in pixels */
-	__u16 height;
+	u16 height;
 } __packed;
 
 struct imgu_abi_stripe_data {
@@ -438,9 +441,9 @@ struct imgu_abi_stripe_data {
 	 * number of stripes for current processing source
 	 * - VLIW binary parameter we currently support 1 or 2 stripes
 	 */
-	__u16 num_of_stripes;
+	u16 num_of_stripes;
 
-	__u8 padding[2];
+	u8 padding[2];
 
 	/*
 	 * the following data is derived from resolution-related
@@ -474,9 +477,9 @@ struct imgu_abi_stripe_data {
 	 * input resolution for output system (equal to bds_out - envelope)
 	 * output-system input frame width as configured by user
 	 */
-	__u16 output_system_in_frame_width;
+	u16 output_system_in_frame_width;
 	/* output-system input frame height as configured by user */
-	__u16 output_system_in_frame_height;
+	u16 output_system_in_frame_height;
 
 	/*
 	 * 'output-stripes' - accounts for stiching on the output (no overlap)
@@ -491,37 +494,37 @@ struct imgu_abi_stripe_data {
 	 */
 	struct imgu_abi_stripes block_stripes[IPU3_UAPI_MAX_STRIPES];
 
-	__u16 effective_frame_width;	/* Needed for vertical cropping */
-	__u16 bds_frame_width;
-	__u16 out_frame_width;	/* Output frame width as configured by user */
-	__u16 out_frame_height;	/* Output frame height as configured by user */
+	u16 effective_frame_width;	/* Needed for vertical cropping */
+	u16 bds_frame_width;
+	u16 out_frame_width;	/* Output frame width as configured by user */
+	u16 out_frame_height;	/* Output frame height as configured by user */
 
 	/* GDC in buffer (A.K.A delay frame,ref buffer) info */
-	__u16 gdc_in_buffer_width;	/* GDC in buffer width  */
-	__u16 gdc_in_buffer_height;	/* GDC in buffer height */
+	u16 gdc_in_buffer_width;	/* GDC in buffer width  */
+	u16 gdc_in_buffer_height;	/* GDC in buffer height */
 	/* GDC in buffer first valid pixel x offset */
-	__u16 gdc_in_buffer_offset_x;
+	u16 gdc_in_buffer_offset_x;
 	/* GDC in buffer first valid pixel y offset */
-	__u16 gdc_in_buffer_offset_y;
+	u16 gdc_in_buffer_offset_y;
 
 	/* Display frame width as configured by user */
-	__u16 display_frame_width;
+	u16 display_frame_width;
 	/* Display frame height as configured by user */
-	__u16 display_frame_height;
-	__u16 bds_aligned_frame_width;
+	u16 display_frame_height;
+	u16 bds_aligned_frame_width;
 	/* Number of vectors to left-crop when writing stripes (not stripe 0) */
-	__u16 half_overlap_vectors;
+	u16 half_overlap_vectors;
 	/* Decimate ISP and fixed func resolutions after BDS (ir_extraction) */
-	__u16 ir_ext_decimation;
-	__u8 padding1[2];
+	u16 ir_ext_decimation;
+	u8 padding1[2];
 } __packed;
 
 /* Input feeder related structs */
 
 struct imgu_abi_input_feeder_data {
-	__u32 row_stride;				/* row stride */
-	__u32 start_row_address;			/* start row address */
-	__u32 start_pixel;				/* start pixel */
+	u32 row_stride;			/* row stride */
+	u32 start_row_address;		/* start row address */
+	u32 start_pixel;		/* start pixel */
 } __packed;
 
 struct imgu_abi_input_feeder_data_aligned {
@@ -544,26 +547,26 @@ struct imgu_abi_input_feeder_config {
 #define IMGU_ABI_DVS_STAT_LEVELS		3
 
 struct imgu_abi_dvs_stat_grd_config {
-	__u8 grid_width;				/* 5 bits */
-	__u8 grid_height;
-	__u8 block_width;				/* 8 bits */
-	__u8 block_height;
-	__u16 x_start;					/* 12 bits */
-	__u16 y_start;
-	__u16 enable;
-	__u16 x_end;					/* 12 bits */
-	__u16 y_end;
+	u8 grid_width;
+	u8 grid_height;
+	u8 block_width;
+	u8 block_height;
+	u16 x_start;
+	u16 y_start;
+	u16 enable;
+	u16 x_end;
+	u16 y_end;
 } __packed;
 
 struct imgu_abi_dvs_stat_cfg {
-	__u8 __reserved0[4];
+	u8 __reserved0[4];
 	struct imgu_abi_dvs_stat_grd_config
 					grd_config[IMGU_ABI_DVS_STAT_LEVELS];
-	__u8 __reserved1[18];
+	u8 __reserved1[18];
 } __packed;
 
 struct imgu_abi_dvs_stat_transfer_op_data {
-	__u8 set_number;
+	u8 set_number;
 } __packed;
 
 struct imgu_abi_dvs_stat_intra_frame_operations_data {
@@ -578,114 +581,125 @@ struct imgu_abi_dvs_stat_intra_frame_operations_data {
 
 struct imgu_abi_dvs_stat_config {
 	struct imgu_abi_dvs_stat_cfg cfg IPU3_ALIGN;
-	__u8 __reserved0[128];
+	u8 __reserved0[128];
 	struct imgu_abi_dvs_stat_intra_frame_operations_data operations_data;
-	__u8 __reserved1[64];
+	u8 __reserved1[64];
+} __packed;
+
+/* Y-tone Mapping */
+#define IMGU_ABI_YUVP2_YTM_LUT_ENTRIES			256
+
+struct imgu_abi_yuvp2_y_tm_lut_static_config {
+	u16 entries[IMGU_ABI_YUVP2_YTM_LUT_ENTRIES];
+	u32 enable;
 } __packed;
 
 /* Output formatter related structs */
 
 struct imgu_abi_osys_formatter_params {
-	__u32 format;
-	__u32 flip;
-	__u32 mirror;
-	__u32 tiling;
-	__u32 reduce_range;
-	__u32 alpha_blending;
-	__u32 release_inp_addr;
-	__u32 release_inp_en;
-	__u32 process_out_buf_addr;
-	__u32 image_width_vecs;
-	__u32 image_height_lines;
-	__u32 inp_buff_y_st_addr;
-	__u32 inp_buff_y_line_stride;
-	__u32 inp_buff_y_buffer_stride;
-	__u32 int_buff_u_st_addr;
-	__u32 int_buff_v_st_addr;
-	__u32 inp_buff_uv_line_stride;
-	__u32 inp_buff_uv_buffer_stride;
-	__u32 out_buff_level;
-	__u32 out_buff_nr_y_lines;
-	__u32 out_buff_u_st_offset;
-	__u32 out_buff_v_st_offset;
-	__u32 out_buff_y_line_stride;
-	__u32 out_buff_uv_line_stride;
-	__u32 hist_buff_st_addr;
-	__u32 hist_buff_line_stride;
-	__u32 hist_buff_nr_lines;
+	u32 format;
+	u32 flip;
+	u32 mirror;
+	u32 tiling;
+	u32 reduce_range;
+	u32 alpha_blending;
+	u32 release_inp_addr;
+	u32 release_inp_en;
+	u32 process_out_buf_addr;
+	u32 image_width_vecs;
+	u32 image_height_lines;
+	u32 inp_buff_y_st_addr;
+	u32 inp_buff_y_line_stride;
+	u32 inp_buff_y_buffer_stride;
+	u32 int_buff_u_st_addr;
+	u32 int_buff_v_st_addr;
+	u32 inp_buff_uv_line_stride;
+	u32 inp_buff_uv_buffer_stride;
+	u32 out_buff_level;
+	u32 out_buff_nr_y_lines;
+	u32 out_buff_u_st_offset;
+	u32 out_buff_v_st_offset;
+	u32 out_buff_y_line_stride;
+	u32 out_buff_uv_line_stride;
+	u32 hist_buff_st_addr;
+	u32 hist_buff_line_stride;
+	u32 hist_buff_nr_lines;
 } __packed;
 
 struct imgu_abi_osys_formatter {
 	struct imgu_abi_osys_formatter_params param IPU3_ALIGN;
 } __packed;
 
+enum imgu_abi_osys_procmode {
+	IMGU_ABI_OSYS_PROCMODE_BYPASS,
+	IMGU_ABI_OSYS_PROCMODE_UPSCALE,
+	IMGU_ABI_OSYS_PROCMODE_DOWNSCALE,
+};
+
 struct imgu_abi_osys_scaler_params {
-	__u32 inp_buf_y_st_addr;
-	__u32 inp_buf_y_line_stride;
-	__u32 inp_buf_y_buffer_stride;
-	__u32 inp_buf_u_st_addr;
-	__u32 inp_buf_v_st_addr;
-	__u32 inp_buf_uv_line_stride;
-	__u32 inp_buf_uv_buffer_stride;
-	__u32 inp_buf_chunk_width;
-	__u32 inp_buf_nr_buffers;
+	u32 inp_buf_y_st_addr;
+	u32 inp_buf_y_line_stride;
+	u32 inp_buf_y_buffer_stride;
+	u32 inp_buf_u_st_addr;
+	u32 inp_buf_v_st_addr;
+	u32 inp_buf_uv_line_stride;
+	u32 inp_buf_uv_buffer_stride;
+	u32 inp_buf_chunk_width;
+	u32 inp_buf_nr_buffers;
 	/* Output buffers */
-	__u32 out_buf_y_st_addr;
-	__u32 out_buf_y_line_stride;
-	__u32 out_buf_y_buffer_stride;
-	__u32 out_buf_u_st_addr;
-	__u32 out_buf_v_st_addr;
-	__u32 out_buf_uv_line_stride;
-	__u32 out_buf_uv_buffer_stride;
-	__u32 out_buf_nr_buffers;
+	u32 out_buf_y_st_addr;
+	u32 out_buf_y_line_stride;
+	u32 out_buf_y_buffer_stride;
+	u32 out_buf_u_st_addr;
+	u32 out_buf_v_st_addr;
+	u32 out_buf_uv_line_stride;
+	u32 out_buf_uv_buffer_stride;
+	u32 out_buf_nr_buffers;
 	/* Intermediate buffers */
-	__u32 int_buf_y_st_addr;
-	__u32 int_buf_y_line_stride;
-	__u32 int_buf_u_st_addr;
-	__u32 int_buf_v_st_addr;
-	__u32 int_buf_uv_line_stride;
-	__u32 int_buf_height;
-	__u32 int_buf_chunk_width;
-	__u32 int_buf_chunk_height;
+	u32 int_buf_y_st_addr;
+	u32 int_buf_y_line_stride;
+	u32 int_buf_u_st_addr;
+	u32 int_buf_v_st_addr;
+	u32 int_buf_uv_line_stride;
+	u32 int_buf_height;
+	u32 int_buf_chunk_width;
+	u32 int_buf_chunk_height;
 	/* Context buffers */
-	__u32 ctx_buf_hor_y_st_addr;
-	__u32 ctx_buf_hor_u_st_addr;
-	__u32 ctx_buf_hor_v_st_addr;
-	__u32 ctx_buf_ver_y_st_addr;
-	__u32 ctx_buf_ver_u_st_addr;
-	__u32 ctx_buf_ver_v_st_addr;
+	u32 ctx_buf_hor_y_st_addr;
+	u32 ctx_buf_hor_u_st_addr;
+	u32 ctx_buf_hor_v_st_addr;
+	u32 ctx_buf_ver_y_st_addr;
+	u32 ctx_buf_ver_u_st_addr;
+	u32 ctx_buf_ver_v_st_addr;
 	/* Addresses for release-input and process-output tokens */
-	__u32 release_inp_buf_addr;
-	__u32 release_inp_buf_en;
-	__u32 release_out_buf_en;
-	__u32 process_out_buf_addr;
+	u32 release_inp_buf_addr;
+	u32 release_inp_buf_en;
+	u32 release_out_buf_en;
+	u32 process_out_buf_addr;
 	/* Settings dimensions, padding, cropping */
-	__u32 input_image_y_width;
-	__u32 input_image_y_height;
-	__u32 input_image_y_start_column;
-	__u32 input_image_uv_start_column;
-	__u32 input_image_y_left_pad;
-	__u32 input_image_uv_left_pad;
-	__u32 input_image_y_right_pad;
-	__u32 input_image_uv_right_pad;
-	__u32 input_image_y_top_pad;
-	__u32 input_image_uv_top_pad;
-	__u32 input_image_y_bottom_pad;
-	__u32 input_image_uv_bottom_pad;
-	__u32 processing_mode;
-#define IMGU_ABI_OSYS_PROCMODE_BYPASS		0
-#define IMGU_ABI_OSYS_PROCMODE_UPSCALE		1
-#define IMGU_ABI_OSYS_PROCMODE_DOWNSCALE	2
-	__u32 scaling_ratio;
-	__u32 y_left_phase_init;
-	__u32 uv_left_phase_init;
-	__u32 y_top_phase_init;
-	__u32 uv_top_phase_init;
-	__u32 coeffs_exp_shift;
-	__u32 out_y_left_crop;
-	__u32 out_uv_left_crop;
-	__u32 out_y_top_crop;
-	__u32 out_uv_top_crop;
+	u32 input_image_y_width;
+	u32 input_image_y_height;
+	u32 input_image_y_start_column;
+	u32 input_image_uv_start_column;
+	u32 input_image_y_left_pad;
+	u32 input_image_uv_left_pad;
+	u32 input_image_y_right_pad;
+	u32 input_image_uv_right_pad;
+	u32 input_image_y_top_pad;
+	u32 input_image_uv_top_pad;
+	u32 input_image_y_bottom_pad;
+	u32 input_image_uv_bottom_pad;
+	u32 processing_mode;	/* enum imgu_abi_osys_procmode */
+	u32 scaling_ratio;
+	u32 y_left_phase_init;
+	u32 uv_left_phase_init;
+	u32 y_top_phase_init;
+	u32 uv_top_phase_init;
+	u32 coeffs_exp_shift;
+	u32 out_y_left_crop;
+	u32 out_uv_left_crop;
+	u32 out_y_top_crop;
+	u32 out_uv_top_crop;
 } __packed;
 
 struct imgu_abi_osys_scaler {
@@ -694,15 +708,15 @@ struct imgu_abi_osys_scaler {
 
 struct imgu_abi_osys_frame_params {
 	/* Output pins */
-	__u32 enable;
-	__u32 format;		/* enum imgu_abi_osys_format */
-	__u32 flip;
-	__u32 mirror;
-	__u32 tiling;		/* enum imgu_abi_osys_tiling */
-	__u32 width;
-	__u32 height;
-	__u32 stride;
-	__u32 scaled;
+	u32 enable;
+	u32 format;		/* enum imgu_abi_osys_format */
+	u32 flip;
+	u32 mirror;
+	u32 tiling;		/* enum imgu_abi_osys_tiling */
+	u32 width;
+	u32 height;
+	u32 stride;
+	u32 scaled;
 } __packed;
 
 struct imgu_abi_osys_frame {
@@ -711,19 +725,19 @@ struct imgu_abi_osys_frame {
 
 struct imgu_abi_osys_stripe {
 	/* Input resolution */
-	__u32 input_width;
-	__u32 input_height;
+	u32 input_width;
+	u32 input_height;
 	/* Output Stripe */
-	__u32 output_width[IMGU_ABI_OSYS_PINS];
-	__u32 output_height[IMGU_ABI_OSYS_PINS];
-	__u32 output_offset[IMGU_ABI_OSYS_PINS];
-	__u32 buf_stride[IMGU_ABI_OSYS_PINS];
+	u32 output_width[IMGU_ABI_OSYS_PINS];
+	u32 output_height[IMGU_ABI_OSYS_PINS];
+	u32 output_offset[IMGU_ABI_OSYS_PINS];
+	u32 buf_stride[IMGU_ABI_OSYS_PINS];
 	/* Scaler params */
-	__u32 block_width;
-	__u32 block_height;
+	u32 block_width;
+	u32 block_height;
 	/* Output Crop factor */
-	__u32 crop_top[IMGU_ABI_OSYS_PINS];
-	__u32 crop_left[IMGU_ABI_OSYS_PINS];
+	u32 crop_top[IMGU_ABI_OSYS_PINS];
+	u32 crop_left[IMGU_ABI_OSYS_PINS];
 } __packed;
 
 struct imgu_abi_osys_config {
@@ -733,22 +747,93 @@ struct imgu_abi_osys_config {
 	struct imgu_abi_osys_frame frame[IMGU_ABI_OSYS_PINS];
 	struct imgu_abi_osys_stripe stripe[IPU3_UAPI_MAX_STRIPES];
 	/* 32 packed coefficients for luma and chroma */
-	__s8 scaler_coeffs_chroma[128];
-	__s8 scaler_coeffs_luma[128];
-} __packed;
-
-/* Defect pixel correction */
-
-struct imgu_abi_dpc_config {
-	__u8 __reserved[240832];
+	s8 scaler_coeffs_chroma[128];
+	s8 scaler_coeffs_luma[128];
 } __packed;
 
 /* BDS */
 
+struct imgu_abi_bds_hor_ctrl0 {
+	u32 sample_patrn_length:9;
+	u32 __reserved0:3;
+	u32 hor_ds_en:1;
+	u32 min_clip_val:1;
+	u32 max_clip_val:2;
+	u32 out_frame_width:13;
+	u32 __reserved1:3;
+} __packed;
+
+struct imgu_abi_bds_ptrn_arr {
+	u32 elems[IMGU_ABI_BDS_SAMPLE_PATTERN_ARRAY_SIZE];
+} __packed;
+
+struct imgu_abi_bds_phase_entry {
+	s8 coeff_min2;
+	s8 coeff_min1;
+	s8 coeff_0;
+	s8 nf;
+	s8 coeff_pls1;
+	s8 coeff_pls2;
+	s8 coeff_pls3;
+	u8 __reserved;
+} __packed;
+
+struct imgu_abi_bds_phase_arr {
+	struct imgu_abi_bds_phase_entry
+		even[IMGU_ABI_BDS_PHASE_COEFFS_ARRAY_SIZE];
+	struct imgu_abi_bds_phase_entry
+		odd[IMGU_ABI_BDS_PHASE_COEFFS_ARRAY_SIZE];
+} __packed;
+
+struct imgu_abi_bds_hor_ctrl1 {
+	u32 hor_crop_start:13;
+	u32 __reserved0:3;
+	u32 hor_crop_end:13;
+	u32 __reserved1:1;
+	u32 hor_crop_en:1;
+	u32 __reserved2:1;
+} __packed;
+
+struct imgu_abi_bds_hor_ctrl2 {
+	u32 input_frame_height:13;
+	u32 __reserved0:19;
+} __packed;
+
+struct imgu_abi_bds_hor {
+	struct imgu_abi_bds_hor_ctrl0 hor_ctrl0;
+	struct imgu_abi_bds_ptrn_arr hor_ptrn_arr;
+	struct imgu_abi_bds_phase_arr hor_phase_arr;
+	struct imgu_abi_bds_hor_ctrl1 hor_ctrl1;
+	struct imgu_abi_bds_hor_ctrl2 hor_ctrl2;
+} __packed;
+
+struct imgu_abi_bds_ver_ctrl0 {
+	u32 sample_patrn_length:9;
+	u32 __reserved0:3;
+	u32 ver_ds_en:1;
+	u32 min_clip_val:1;
+	u32 max_clip_val:2;
+	u32 __reserved1:16;
+} __packed;
+
+struct imgu_abi_bds_ver_ctrl1 {
+	u32 out_frame_width:13;
+	u32 __reserved0:3;
+	u32 out_frame_height:13;
+	u32 __reserved1:3;
+} __packed;
+
+struct imgu_abi_bds_ver {
+	struct imgu_abi_bds_ver_ctrl0 ver_ctrl0;
+	struct imgu_abi_bds_ptrn_arr ver_ptrn_arr;
+	struct imgu_abi_bds_phase_arr ver_phase_arr;
+	struct imgu_abi_bds_ver_ctrl1 ver_ctrl1;
+} __packed;
+
 struct imgu_abi_bds_per_stripe_data {
-	struct ipu3_uapi_bds_hor_ctrl0 hor_ctrl0;
-	struct ipu3_uapi_bds_ver_ctrl1 ver_ctrl1;
-	struct ipu3_uapi_bds_hor_ctrl1 crop;
+	struct imgu_abi_bds_hor_ctrl0 hor_ctrl0;
+	struct imgu_abi_bds_ver_ctrl1 ver_ctrl1;
+	struct imgu_abi_bds_hor_ctrl1 crop;
 } __packed;
 
 struct imgu_abi_bds_per_stripe_data_aligned {
@@ -761,17 +846,46 @@ struct imgu_abi_bds_per_stripe {
 } __packed;
 
 struct imgu_abi_bds_config {
-	struct ipu3_uapi_bds_hor hor IPU3_ALIGN;
-	struct ipu3_uapi_bds_ver ver IPU3_ALIGN;
+	struct imgu_abi_bds_hor hor IPU3_ALIGN;
+	struct imgu_abi_bds_ver ver IPU3_ALIGN;
 	struct imgu_abi_bds_per_stripe per_stripe IPU3_ALIGN;
-	__u32 enabled;
+	u32 enabled;
+} __packed;
+
+/* ANR */
+
+struct imgu_abi_anr_search_config {
+	u32 enable;
+	u16 frame_width;
+	u16 frame_height;
+} __packed;
+
+struct imgu_abi_anr_stitch_config {
+	u32 anr_stitch_en;
+	u16 frame_width;
+	u16 frame_height;
+	u8 __reserved[40];
+	struct ipu3_uapi_anr_stitch_pyramid pyramid[IPU3_UAPI_ANR_PYRAMID_SIZE];
+} __packed;
+
+struct imgu_abi_anr_tile2strm_config {
+	u32 enable;
+	u16 frame_width;
+	u16 frame_height;
+} __packed;
+
+struct imgu_abi_anr_config {
+	struct imgu_abi_anr_search_config search IPU3_ALIGN;
+	struct ipu3_uapi_anr_transform_config transform IPU3_ALIGN;
+	struct imgu_abi_anr_stitch_config stitch IPU3_ALIGN;
+	struct imgu_abi_anr_tile2strm_config tile2strm IPU3_ALIGN;
 } __packed;
 
 /* AF */
 
 struct imgu_abi_af_frame_size {
-	__u16 width;
-	__u16 height;
+	u16 width;
+	u16 height;
 } __packed;
 
 struct imgu_abi_af_config_s {
@@ -826,7 +940,7 @@ struct imgu_abi_awb_fr_config {
 } __packed;
 
 struct imgu_abi_acc_transfer_op_data {
-	__u8 set_number;
+	u8 set_number;
 } __packed;
 
 struct IPU3_ALIGN imgu_abi_awb_intra_frame_operations_data {
@@ -846,7 +960,7 @@ struct imgu_abi_awb_config {
 
 struct imgu_abi_acc_param {
 	struct imgu_abi_stripe_data stripe;
-	__u8 padding[8];
+	u8 padding[8];
 	struct imgu_abi_input_feeder_config input_feeder;
 	struct ipu3_uapi_bnr_static_config bnr;
 	struct ipu3_uapi_bnr_static_config_green_disparity green_disparity
@@ -858,7 +972,7 @@ struct imgu_abi_acc_param {
 	struct ipu3_uapi_cds_params cds IPU3_ALIGN;
 	struct imgu_abi_shd_config shd IPU3_ALIGN;
 	struct imgu_abi_dvs_stat_config dvs_stat;
-	__u8 padding1[224];	/* reserved for lace_stat */
+	u8 padding1[224];	/* reserved for lace_stat */
 	struct ipu3_uapi_yuvp1_iefd_config iefd IPU3_ALIGN;
 	struct ipu3_uapi_yuvp1_yds_config yds_c0 IPU3_ALIGN;
 	struct ipu3_uapi_yuvp1_chnr_config chnr_c0 IPU3_ALIGN;
@@ -868,9 +982,10 @@ struct imgu_abi_acc_param {
 	struct ipu3_uapi_yuvp2_y_tm_lut_static_config ytm IPU3_ALIGN;
 	struct ipu3_uapi_yuvp1_yds_config yds2 IPU3_ALIGN;
 	struct ipu3_uapi_yuvp2_tcc_static_config tcc IPU3_ALIGN;
-	struct imgu_abi_dpc_config dpc IPU3_ALIGN;
+	/* reserved for defect pixel correction */
+	u8 dpc[240832] IPU3_ALIGN;
 	struct imgu_abi_bds_config bds;
-	struct ipu3_uapi_anr_config anr;
+	struct imgu_abi_anr_config anr;
 	struct imgu_abi_awb_fr_config awb_fr;
 	struct imgu_abi_ae_config ae;
 	struct imgu_abi_af_config af;
@@ -883,22 +998,22 @@ struct imgu_abi_acc_param {
 #define IMGU_ABI_GDC_FRAC_BITS		8
 
 struct imgu_abi_gdc_warp_param {
-	__u32 origin_x;
-	__u32 origin_y;
-	__u32 in_addr_offset;
-	__u32 in_block_width;
-	__u32 in_block_height;
-	__u32 p0_x;
-	__u32 p0_y;
-	__u32 p1_x;
-	__u32 p1_y;
-	__u32 p2_x;
-	__u32 p2_y;
-	__u32 p3_x;
-	__u32 p3_y;
-	__u32 in_block_width_a;
-	__u32 in_block_width_b;
-	__u32 padding;			/* struct size multiple of DDR word */
+	u32 origin_x;
+	u32 origin_y;
+	u32 in_addr_offset;
+	u32 in_block_width;
+	u32 in_block_height;
+	u32 p0_x;
+	u32 p0_y;
+	u32 p1_x;
+	u32 p1_y;
+	u32 p2_x;
+	u32 p2_y;
+	u32 p3_x;
+	u32 p3_y;
+	u32 in_block_width_a;
+	u32 in_block_width_b;
+	u32 padding;		/* struct size multiple of DDR word */
 } __packed;
 
 /******************* Firmware ABI definitions *******************/
@@ -940,6 +1055,12 @@ enum imgu_abi_buffer_type {
 	IMGU_ABI_NUM_BUFFER_TYPE
 };
 
+enum imgu_abi_raw_type {
+	IMGU_ABI_RAW_TYPE_BAYER,
+	IMGU_ABI_RAW_TYPE_IR_ON_GR,
+	IMGU_ABI_RAW_TYPE_IR_ON_GB
+};
+
 struct imgu_abi_crop_pos {
 	u16 x;
 	u16 y;
@@ -972,9 +1093,6 @@ struct imgu_abi_frame_sp_info {
 				 * IronGr case - IMGU_ABI_RAW_TYPE_IR_ON_GR
 				 * IronGb case - IMGU_ABI_RAW_TYPE_IR_ON_GB
 				 */
-#define IMGU_ABI_RAW_TYPE_BAYER		0
-#define IMGU_ABI_RAW_TYPE_IR_ON_GR	1
-#define IMGU_ABI_RAW_TYPE_IR_ON_GB	2
 	u8 padding[2];			/* Extend to 32 bit multiple */
 } __packed;
 
@@ -1060,10 +1178,29 @@ struct imgu_abi_uds_info {
 	u16 yc;
 } __packed;
 
+/* The type of pipe stage */
+enum imgu_abi_stage_type {
+	IMGU_ABI_STAGE_TYPE_SP,
+	IMGU_ABI_STAGE_TYPE_ISP,
+};
+
+enum imgu_abi_sp_swstate {
+	IMGU_ABI_SP_SWSTATE_TERMINATED,
+	IMGU_ABI_SP_SWSTATE_INITIALIZED,
+	IMGU_ABI_SP_SWSTATE_CONNECTED,
+	IMGU_ABI_SP_SWSTATE_RUNNING,
+};
+
+enum imgu_abi_bl_swstate {
+	IMGU_ABI_BL_SWSTATE_OK = 0x100,
+	IMGU_ABI_BL_SWSTATE_BUSY,
+	IMGU_ABI_BL_SWSTATE_ERR,
+};
+
 /* Information for a single pipeline stage */
 struct imgu_abi_sp_stage {
 	/* Multiple boolean flags can be stored in an integer */
-	u8 num;				/* Stage number */
+	u8 num;			/* Stage number */
 	u8 isp_online;
 	u8 isp_copy_vf;
 	u8 isp_copy_output;
@@ -1078,13 +1215,7 @@ struct imgu_abi_sp_stage {
 	 */
 	u8 program_input_circuit;
 	u8 func;
-#define IMGU_ABI_STAGE_FUNC_RAW_COPY	0
-#define IMGU_ABI_STAGE_FUNC_BIN_COPY	1
-#define IMGU_ABI_STAGE_FUNC_ISYS_COPY	2
-#define IMGU_ABI_STAGE_FUNC_NO_FUNC	3
-	u8 stage_type;			/* The type of the pipe-stage */
-#define IMGU_ABI_STAGE_TYPE_SP		0
-#define IMGU_ABI_STAGE_TYPE_ISP		1
+	u8 stage_type;		/* enum imgu_abi_stage_type */
 	u8 num_stripes;
 	u8 isp_pipe_version;
 	struct {
@@ -1171,9 +1302,9 @@ struct imgu_abi_blob_info {
 	u32 bss_size;			/* Size of bss section
 					 * Dynamic data filled by loader
 					 */
-	const void *code __aligned(8);	/* Code section absolute pointer */
+	u64 code __aligned(8);	/* Code section absolute pointer */
 					/* within fw, code = icache + text */
-	const void *data __aligned(8);	/* Data section absolute pointer */
+	u64 data __aligned(8);	/* Data section absolute pointer */
 					/* within fw, data = data + bss */
 } __packed;
 
@@ -1187,15 +1318,18 @@ struct imgu_abi_binary_pipeline_info {
 	u32 variable_resolution;
 } __packed;
 
+enum imgu_abi_bin_input_src {
+	IMGU_ABI_BINARY_INPUT_SOURCE_SENSOR,
+	IMGU_ABI_BINARY_INPUT_SOURCE_MEMORY,
+	IMGU_ABI_BINARY_INPUT_SOURCE_VARIABLE,
+};
+
 struct imgu_abi_binary_input_info {
 	u32 min_width;
 	u32 min_height;
 	u32 max_width;
 	u32 max_height;
-	u32 source;			/* memory, sensor, variable */
-#define IMGU_ABI_BINARY_INPUT_SOURCE_SENSOR	0
-#define IMGU_ABI_BINARY_INPUT_SOURCE_MEMORY	1
-#define IMGU_ABI_BINARY_INPUT_SOURCE_VARIABLE	2
+	u32 source;	/* enum imgu_abi_bin_input_src */
 } __packed;
 
 struct imgu_abi_binary_output_info {
@@ -1328,11 +1462,11 @@ struct imgu_abi_binary_info {
 		u8 rgb2yuv;
 		u8 high_quality;
 		u8 kerneltest;
-		u8 routing_shd_to_bnr;		/* connect SHD with BNR ACCs*/
-		u8 routing_bnr_to_anr;		/* connect BNR with ANR ACCs*/
+		u8 routing_shd_to_bnr;		/* connect SHD with BNR ACCs */
+		u8 routing_bnr_to_anr;		/* connect BNR with ANR ACCs */
 		u8 routing_anr_to_de;		/* connect ANR with DE ACCs */
-		u8 routing_rgb_to_yuvp1;	/* connect RGB with YUVP1 ACCs*/
-		u8 routing_yuvp1_to_yuvp2;    /* connect YUVP1 with YUVP2 ACCs*/
+		u8 routing_rgb_to_yuvp1;	/* connect RGB with YUVP1 */
+		u8 routing_yuvp1_to_yuvp2;	/* connect YUVP1 with YUVP2 */
 		u8 luma_only;
 		u8 input_yuv;
 		u8 input_raw;
@@ -1367,8 +1501,6 @@ struct imgu_abi_binary_info {
 		u8 rgbir;
 	} enable;
 	struct {
-		/* DMA channel ID: [0,...,IMGU_NUM_DMA_CHANNELS> */
-#define IMGU_NUM_DMA_CHANNELS		19
 		u8 ref_y_channel;
 		u8 ref_c_channel;
 		u8 tnr_channel;
@@ -1428,24 +1560,22 @@ struct imgu_abi_sp_config {
 	u8 padding[3];
 } __packed;
 
+#define IMGU_ABI_PIPE_CONFIG_ACQUIRE_ISP		BIT(31)
+
+#define IMGU_ABI_PORT_CONFIG_TYPE_INPUT_HOST		BIT(0)
+#define IMGU_ABI_PORT_CONFIG_TYPE_OUTPUT_HOST		BIT(4)
+
 /* Information for a pipeline */
 struct imgu_abi_sp_pipeline {
 	u32 pipe_id;			/* the pipe ID */
 	u32 pipe_num;			/* the dynamic pipe number */
 	u32 thread_id;			/* the sp thread ID */
 	u32 pipe_config;		/* the pipe config */
-#define IMGU_ABI_PIPE_CONFIG_ACQUIRE_ISP	(1 << 31)
 	u32 pipe_qos_config;		/* Bitmap of multiple QOS extension fw
 					 * state, 0xffffffff indicates non
 					 * QOS pipe.
 					 */
 	u32 inout_port_config;
-#define IMGU_ABI_PORT_CONFIG_TYPE_INPUT_HOST		(1 << 0)
-#define IMGU_ABI_PORT_CONFIG_TYPE_INPUT_COPYSINK	(1 << 1)
-#define IMGU_ABI_PORT_CONFIG_TYPE_INPUT_TAGGERSINK	(1 << 2)
-#define IMGU_ABI_PORT_CONFIG_TYPE_OUTPUT_HOST		(1 << 4)
-#define IMGU_ABI_PORT_CONFIG_TYPE_OUTPUT_COPYSINK	(1 << 5)
-#define IMGU_ABI_PORT_CONFIG_TYPE_OUTPUT_TAGGERSINK	(1 << 6)
 	u32 required_bds_factor;
 	u32 dvs_frame_delay;
 	u32 num_stages;		/* the pipe config */
@@ -1493,7 +1623,7 @@ struct imgu_abi_sp_debug_command {
 	u32 dma_sw_reg;
 } __packed;
 
-#define IMGU_ABI_MAX_SP_THREADS	4
+#define IMGU_ABI_MAX_SP_THREADS		4
 
 /*
  * Group all host initialized SP variables into this struct.
@@ -1737,14 +1867,16 @@ struct imgu_abi_buffer {
 #define IMGU_ABI_SP_COMM_COMMAND_TERMINATE	4	/* Terminate */
 
 /* n = 0..IPU3_CSS_PIPE_ID_NUM-1 */
-#define IMGU_ABI_SP_COMM_EVENT_IRQ_MASK(n)	((n) * 4 + 0x60)
+#define IMGU_ABI_SP_COMM_EVENT_IRQ_MASK(n)		((n) * 4 + 0x60)
 #define IMGU_ABI_SP_COMM_EVENT_IRQ_MASK_OR_SHIFT	0
+#define IMGU_ABI_SP_COMM_EVENT_IRQ_MASK_AND_SHIFT	16
+
+#define IMGU_ABI_BL_DMACMD_TYPE_SP_PMEM	1	/* sp_pmem */
 
 struct imgu_abi_bl_dma_cmd_entry {
 	u32 src_addr;			/* virtual DDR address */
 	u32 size;			/* number of bytes to transferred */
 	u32 dst_type;
-#define IMGU_ABI_BL_DMACMD_TYPE_SP_PMEM	1	/* sp_pmem */
 	u32 dst_addr;			/* hmm address of xMEM or MMIO */
 } __packed;
 
