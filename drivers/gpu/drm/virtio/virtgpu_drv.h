@@ -47,8 +47,8 @@
 #define DRIVER_DATE "0"
 
 #define DRIVER_MAJOR 0
-#define DRIVER_MINOR 0
-#define DRIVER_PATCHLEVEL 1
+#define DRIVER_MINOR 1
+#define DRIVER_PATCHLEVEL 0
 
 /* virtgpu_drm_bus.c */
 int drm_virtio_init(struct drm_driver *driver, struct virtio_device *vdev);
@@ -56,6 +56,13 @@ int drm_virtio_init(struct drm_driver *driver, struct virtio_device *vdev);
 struct virtio_gpu_object {
 	struct drm_gem_object gem_base;
 	uint32_t hw_res_handle;
+
+	bool create_callback_done;
+	/* These variables are only valid if create_callback_done is true */
+	uint32_t num_planes;
+	uint64_t format_modifier;
+	uint32_t strides[4];
+	uint32_t offsets[4];
 
 	struct sg_table *pages;
 	uint32_t mapped;
@@ -65,6 +72,7 @@ struct virtio_gpu_object {
 	struct ttm_placement		placement;
 	struct ttm_buffer_object	tbo;
 	struct ttm_bo_kmap_obj		kmap;
+	bool created;
 };
 #define gem_to_virtio_gpu_obj(gobj) \
 	container_of((gobj), struct virtio_gpu_object, gem_base)
@@ -130,6 +138,7 @@ struct virtio_gpu_framebuffer {
 	int x1, y1, x2, y2; /* dirty rect */
 	spinlock_t dirty_lock;
 	uint32_t hw_res_handle;
+	struct virtio_gpu_fence *fence;
 };
 #define to_virtio_gpu_framebuffer(x) \
 	container_of(x, struct virtio_gpu_framebuffer, base)
@@ -142,9 +151,6 @@ struct virtio_gpu_fbdev {
 };
 
 struct virtio_gpu_mman {
-	struct ttm_bo_global_ref        bo_global_ref;
-	struct drm_global_reference	mem_global_ref;
-	bool				mem_global_referenced;
 	struct ttm_bo_device		bdev;
 };
 
@@ -190,8 +196,7 @@ struct virtio_gpu_device {
 	struct kmem_cache *vbufs;
 	bool vqs_ready;
 
-	struct idr	resource_idr;
-	spinlock_t resource_idr_lock;
+	struct ida	resource_ida;
 
 	wait_queue_head_t resp_wq;
 	/* current display info */
@@ -200,8 +205,7 @@ struct virtio_gpu_device {
 
 	struct virtio_gpu_fence_driver fence_drv;
 
-	struct idr	ctx_id_idr;
-	spinlock_t ctx_id_idr_lock;
+	struct ida	ctx_id_ida;
 
 	bool has_virgl_3d;
 
@@ -259,11 +263,8 @@ int virtio_gpu_surface_dirty(struct virtio_gpu_framebuffer *qfb,
 /* virtio vg */
 int virtio_gpu_alloc_vbufs(struct virtio_gpu_device *vgdev);
 void virtio_gpu_free_vbufs(struct virtio_gpu_device *vgdev);
-void virtio_gpu_resource_id_get(struct virtio_gpu_device *vgdev,
-			       uint32_t *resid);
-void virtio_gpu_resource_id_put(struct virtio_gpu_device *vgdev, uint32_t id);
 void virtio_gpu_cmd_create_resource(struct virtio_gpu_device *vgdev,
-				    uint32_t resource_id,
+				    struct virtio_gpu_object *bo,
 				    uint32_t format,
 				    uint32_t width,
 				    uint32_t height);
@@ -285,7 +286,6 @@ void virtio_gpu_cmd_set_scanout(struct virtio_gpu_device *vgdev,
 				uint32_t x, uint32_t y);
 int virtio_gpu_object_attach(struct virtio_gpu_device *vgdev,
 			     struct virtio_gpu_object *obj,
-			     uint32_t resource_id,
 			     struct virtio_gpu_fence **fence);
 void virtio_gpu_object_detach(struct virtio_gpu_device *vgdev,
 			      struct virtio_gpu_object *obj);
@@ -322,8 +322,9 @@ void virtio_gpu_cmd_transfer_to_host_3d(struct virtio_gpu_device *vgdev,
 					uint64_t offset, uint32_t level,
 					struct virtio_gpu_box *box,
 					struct virtio_gpu_fence **fence);
-void
+int
 virtio_gpu_cmd_resource_create_3d(struct virtio_gpu_device *vgdev,
+				  struct virtio_gpu_object *bo,
 				  struct virtio_gpu_resource_create_3d *rc_3d,
 				  struct virtio_gpu_fence **fence);
 void virtio_gpu_ctrl_ack(struct virtqueue *vq);
@@ -353,6 +354,9 @@ void virtio_gpu_ttm_fini(struct virtio_gpu_device *vgdev);
 int virtio_gpu_mmap(struct file *filp, struct vm_area_struct *vma);
 
 /* virtio_gpu_fence.c */
+struct virtio_gpu_fence *virtio_gpu_fence_alloc(
+	struct virtio_gpu_device *vgdev);
+void virtio_gpu_fence_cleanup(struct virtio_gpu_fence *fence);
 int virtio_gpu_fence_emit(struct virtio_gpu_device *vgdev,
 			  struct virtio_gpu_ctrl_hdr *cmd_hdr,
 			  struct virtio_gpu_fence **fence);
@@ -371,6 +375,13 @@ void virtio_gpu_object_free_sg_table(struct virtio_gpu_object *bo);
 int virtio_gpu_object_wait(struct virtio_gpu_object *bo, bool no_wait);
 
 /* virtgpu_prime.c */
+struct dma_buf_ops;
+extern const struct dma_buf_ops virtgpu_dmabuf_ops;
+struct dma_buf *virtgpu_gem_prime_export(struct drm_device *dev,
+					 struct drm_gem_object *obj,
+					 int flags);
+struct drm_gem_object *virtgpu_gem_prime_import(struct drm_device *dev,
+						struct dma_buf *buf);
 int virtgpu_gem_prime_pin(struct drm_gem_object *obj);
 void virtgpu_gem_prime_unpin(struct drm_gem_object *obj);
 struct sg_table *virtgpu_gem_prime_get_sg_table(struct drm_gem_object *obj);

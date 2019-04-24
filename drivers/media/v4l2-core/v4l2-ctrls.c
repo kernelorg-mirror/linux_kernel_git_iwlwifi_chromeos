@@ -825,7 +825,6 @@ const char *v4l2_ctrl_get_name(u32 id)
 	case V4L2_CID_MPEG_VIDEO_H264_HIERARCHICAL_CODING_LAYER:return "H264 Number of HC Layers";
 	case V4L2_CID_MPEG_VIDEO_H264_HIERARCHICAL_CODING_LAYER_QP:
 								return "H264 Set QP Value for HC Layers";
-	case V4L2_CID_MPEG_VIDEO_H264_SPS_PPS_BEFORE_IDR:	return "Prepend each IDR with SPS and PPS";
 	case V4L2_CID_MPEG_VIDEO_MPEG4_I_FRAME_QP:		return "MPEG4 I-Frame QP Value";
 	case V4L2_CID_MPEG_VIDEO_MPEG4_P_FRAME_QP:		return "MPEG4 P-Frame QP Value";
 	case V4L2_CID_MPEG_VIDEO_MPEG4_B_FRAME_QP:		return "MPEG4 B-Frame QP Value";
@@ -1106,7 +1105,6 @@ void v4l2_ctrl_fill(u32 id, const char **name, enum v4l2_ctrl_type *type,
 	case V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE:
 	case V4L2_CID_MPEG_VIDEO_H264_8X8_TRANSFORM:
 	case V4L2_CID_MPEG_VIDEO_H264_VUI_SAR_ENABLE:
-	case V4L2_CID_MPEG_VIDEO_H264_SPS_PPS_BEFORE_IDR:
 	case V4L2_CID_MPEG_VIDEO_MPEG4_QPEL:
 	case V4L2_CID_MPEG_VIDEO_REPEAT_SEQ_HEADER:
 	case V4L2_CID_WIDE_DYNAMIC_RANGE:
@@ -1381,7 +1379,7 @@ static u32 user_flags(const struct v4l2_ctrl *ctrl)
 
 static void fill_event(struct v4l2_event *ev, struct v4l2_ctrl *ctrl, u32 changes)
 {
-	memset(ev->reserved, 0, sizeof(ev->reserved));
+	memset(ev, 0, sizeof(*ev));
 	ev->type = V4L2_EVENT_CTRL;
 	ev->id = ctrl->id;
 	ev->u.ctrl.changes = changes;
@@ -2778,7 +2776,7 @@ int v4l2_query_ext_ctrl(struct v4l2_ctrl_handler *hdl, struct v4l2_query_ext_ctr
 		qc->id = id;
 	else
 		qc->id = ctrl->id;
-	strlcpy(qc->name, ctrl->name, sizeof(qc->name));
+	strscpy(qc->name, ctrl->name, sizeof(qc->name));
 	qc->flags = user_flags(ctrl);
 	qc->type = ctrl->type;
 	qc->elem_size = ctrl->elem_size;
@@ -2810,7 +2808,7 @@ int v4l2_queryctrl(struct v4l2_ctrl_handler *hdl, struct v4l2_queryctrl *qc)
 	qc->id = qec.id;
 	qc->type = qec.type;
 	qc->flags = qec.flags;
-	strlcpy(qc->name, qec.name, sizeof(qc->name));
+	strscpy(qc->name, qec.name, sizeof(qc->name));
 	switch (qc->type) {
 	case V4L2_CTRL_TYPE_INTEGER:
 	case V4L2_CTRL_TYPE_BOOLEAN:
@@ -2869,7 +2867,7 @@ int v4l2_querymenu(struct v4l2_ctrl_handler *hdl, struct v4l2_querymenu *qm)
 	if (ctrl->type == V4L2_CTRL_TYPE_MENU) {
 		if (ctrl->qmenu[i] == NULL || ctrl->qmenu[i][0] == '\0')
 			return -EINVAL;
-		strlcpy(qm->name, ctrl->qmenu[i], sizeof(qm->name));
+		strscpy(qm->name, ctrl->qmenu[i], sizeof(qm->name));
 	} else {
 		qm->value = ctrl->qmenu_int[i];
 	}
@@ -3783,7 +3781,7 @@ int __v4l2_ctrl_s_ctrl_string(struct v4l2_ctrl *ctrl, const char *s)
 
 	/* It's a driver bug if this happens. */
 	WARN_ON(ctrl->type != V4L2_CTRL_TYPE_STRING);
-	strlcpy(ctrl->p_new.p_char, s, ctrl->maximum + 1);
+	strscpy(ctrl->p_new.p_char, s, ctrl->maximum + 1);
 	return set_ctrl(NULL, ctrl, 0);
 }
 EXPORT_SYMBOL(__v4l2_ctrl_s_ctrl_string);

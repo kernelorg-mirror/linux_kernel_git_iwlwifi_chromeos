@@ -97,7 +97,7 @@ exit:
 	return ret;
 }
 
-static int cros_ec_check_features(struct cros_ec_dev *ec, int feature)
+int cros_ec_check_features(struct cros_ec_dev *ec, int feature)
 {
 	struct cros_ec_command *msg;
 	int ret;
@@ -129,8 +129,9 @@ static int cros_ec_check_features(struct cros_ec_dev *ec, int feature)
 		kfree(msg);
 	}
 
-	return ec->features[feature / 32] & EC_FEATURE_MASK_0(feature);
+	return !!(ec->features[feature / 32] & EC_FEATURE_MASK_0(feature));
 }
+EXPORT_SYMBOL_GPL(cros_ec_check_features);
 
 struct cros_ec_priv {
 	struct cros_ec_dev *ec;
@@ -219,7 +220,7 @@ static __poll_t ec_device_poll(struct file *filp, poll_table *wait)
 	if (list_empty(&priv->events))
 		return 0;
 
-	return POLLIN | POLLRDNORM;
+	return EPOLLIN | EPOLLRDNORM;
 }
 
 static int ec_device_release(struct inode *inode, struct file *filp)
@@ -421,6 +422,11 @@ static const struct file_operations fops = {
 #endif
 };
 
+static void cros_ec_class_release(struct device *dev)
+{
+	kfree(to_cros_ec_dev(dev));
+}
+
 static void cros_ec_sensors_register(struct cros_ec_dev *ec)
 {
 	/*
@@ -614,7 +620,7 @@ static int ec_device_probe(struct platform_device *pdev)
 	int retval = -ENOMEM;
 	struct device *dev = &pdev->dev;
 	struct cros_ec_platform *ec_platform = dev_get_platdata(dev);
-	struct cros_ec_dev *ec = devm_kzalloc(dev, sizeof(*ec), GFP_KERNEL);
+	struct cros_ec_dev *ec = kzalloc(sizeof(*ec), GFP_KERNEL);
 
 	if (!ec)
 		return retval;
@@ -649,6 +655,19 @@ static int ec_device_probe(struct platform_device *pdev)
 	}
 
 	/*
+	 * Check whether this is actually an Integrated Sensor Hub (ISH)
+	 * rather than an EC.
+	 */
+	if (cros_ec_check_features(ec, EC_FEATURE_ISH)) {
+		dev_info(dev, "CrOS ISH MCU detected.\n");
+		/*
+		 * Help userspace differentiating ECs from ISH MCU,
+		 * regardless of the probing order.
+		 */
+		ec_platform->ec_name = CROS_EC_DEV_ISH_NAME;
+	}
+
+	/*
 	 * Add the class device
 	 * Link to the character device for creating the /dev entry
 	 * in devtmpfs.
@@ -656,6 +675,7 @@ static int ec_device_probe(struct platform_device *pdev)
 	ec->class_dev.devt = MKDEV(ec_major, pdev->id);
 	ec->class_dev.class = &cros_class;
 	ec->class_dev.parent = dev;
+	ec->class_dev.release = cros_ec_class_release;
 
 	retval = dev_set_name(&ec->class_dev, "%s", ec_platform->ec_name);
 	if (retval) {
@@ -735,6 +755,7 @@ static int ec_device_remove(struct platform_device *pdev)
 
 	cros_ec_debugfs_remove(ec);
 
+	mfd_remove_devices(ec->dev);
 	cdev_del(&ec->cdev);
 	device_unregister(&ec->class_dev);
 	return 0;

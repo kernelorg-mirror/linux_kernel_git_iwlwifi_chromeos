@@ -158,6 +158,18 @@ enum {
 	 */
 	HCI_QUIRK_INVALID_BDADDR,
 
+	/* When this quirk is set, the public Bluetooth address
+	 * initially reported by HCI Read BD Address command
+	 * is considered invalid. The public BD Address can be
+	 * specified in the fwnode property 'local-bd-address'.
+	 * If this property does not exist or is invalid controller
+	 * configuration is required before this device can be used.
+	 *
+	 * This quirk can be set before hci_register_dev is called or
+	 * during the hdev->setup vendor callback.
+	 */
+	HCI_QUIRK_USE_BDADDR_PROPERTY,
+
 	/* When this quirk is set, the duplicate filtering during
 	 * scanning is based on Bluetooth devices addresses. To allow
 	 * RSSI based updates, restart scanning if needed.
@@ -902,6 +914,7 @@ struct hci_cp_sniff_subrate {
 } __packed;
 
 #define HCI_OP_SET_EVENT_MASK		0x0c01
+#define HCI_SET_EVENT_MASK_SIZE         8
 
 #define HCI_OP_RESET			0x0c03
 
@@ -2202,6 +2215,9 @@ struct hci_ev_si_security {
 	__u16    subproto;
 	__u8     incoming;
 } __packed;
+
+/* vendor events */
+#define HCI_EV_VENDOR           0xff
 
 /* ---- HCI Packet structures ---- */
 #define HCI_COMMAND_HDR_SIZE 3

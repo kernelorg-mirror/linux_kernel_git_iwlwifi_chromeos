@@ -1293,8 +1293,14 @@ enum ec_feature_code {
 	EC_FEATURE_UNIFIED_WAKE_MASKS = 32,
 	/* EC supports 64-bit host events */
 	EC_FEATURE_HOST_EVENT64 = 33,
+	/* EC runs code in RAM (not in place, a.k.a. XIP) */
+	EC_FEATURE_EXEC_IN_RAM = 34,
 	/* EC supports CEC commands */
 	EC_FEATURE_CEC = 35,
+	/* EC supports tight sensor timestamping. */
+	EC_FEATURE_MOTION_SENSE_TIGHT_TIMESTAMPS = 36,
+	/* The MCU is an Integrated Sensor Hub */
+	EC_FEATURE_ISH = 40,
 };
 
 #define EC_FEATURE_MASK_0(event_code) (1UL << (event_code % 32))
@@ -2437,6 +2443,7 @@ struct __ec_todo_unpacked ec_motion_sense_activity {
 #define MOTIONSENSE_SENSOR_FLAG_TIMESTAMP (1<<1)
 #define MOTIONSENSE_SENSOR_FLAG_WAKEUP (1<<2)
 #define MOTIONSENSE_SENSOR_FLAG_TABLET_MODE (1<<3)
+#define MOTIONSENSE_SENSOR_FLAG_ODR (1<<4)
 
 /*
  * Send this value for the data element to only perform a read. If you
@@ -3215,6 +3222,14 @@ struct __ec_todo_packed ec_result_keyscan_seq_ctrl {
  */
 #define EC_CMD_GET_NEXT_EVENT 0x0067
 
+#define EC_MKBP_HAS_MORE_EVENTS_SHIFT 7
+
+/* EC can provide more MKBP events to host */
+#define EC_MKBP_HAS_MORE_EVENTS (1 << EC_MKBP_HAS_MORE_EVENTS_SHIFT)
+
+/* The mask to apply to get the raw event type */
+#define EC_MKBP_EVENT_TYPE_MASK ((1 << EC_MKBP_HAS_MORE_EVENTS_SHIFT) - 1)
+
 enum ec_mkbp_event {
 	/* Keyboard matrix changed. The event data is the new matrix state. */
 	EC_MKBP_EVENT_KEY_MATRIX = 0,
@@ -3254,6 +3269,13 @@ enum ec_mkbp_event {
 
 	/* Number of MKBP events */
 	EC_MKBP_EVENT_COUNT,
+
+	/*
+	 * Maximum possible event type
+	 * The most significant bit of event type is used to indicate that
+	 * the EC has multiple events for the AP to serve
+	 */
+	EC_MKBP_EVENT_MAX_TYPE = EC_MKBP_EVENT_TYPE_MASK,
 };
 
 union __ec_align_offset1 ec_response_get_next_data {
@@ -4007,6 +4029,63 @@ struct __ec_align4 ec_response_device_event {
 	uint32_t event_mask;
 };
 
+/*
+ * Use a default timeout value (CONFIG_SLEEP_TIMEOUT_MS) for detecting sleep
+ * transition failures
+ */
+#define EC_HOST_SLEEP_TIMEOUT_DEFAULT 0
+
+/* Disable timeout detection for this sleep transition */
+#define EC_HOST_SLEEP_TIMEOUT_INFINITE 0xFFFF
+
+struct ec_params_host_sleep_event_v1 {
+	/* The type of sleep being entered or exited. */
+	uint8_t sleep_event;
+
+	/* Padding */
+	uint8_t reserved;
+	union {
+		/* Parameters that apply for suspend messages. */
+		struct {
+			/*
+			 * The timeout in milliseconds between when this message
+			 * is received and when the EC will declare sleep
+			 * transition failure if the sleep signal is not
+			 * asserted.
+			 */
+			uint16_t sleep_timeout_ms;
+		} suspend_params;
+
+		/* No parameters for non-suspend messages. */
+	};
+} __packed;
+
+/* A timeout occurred when this bit is set */
+#define EC_HOST_RESUME_SLEEP_TIMEOUT 0x80000000
+
+/*
+ * The mask defining which bits correspond to the number of sleep transitions,
+ * as well as the maximum number of suspend line transitions that will be
+ * reported back to the host.
+ */
+#define EC_HOST_RESUME_SLEEP_TRANSITIONS_MASK 0x7FFFFFFF
+
+struct ec_response_host_sleep_event_v1 {
+	union {
+		/* Response fields that apply for resume messages. */
+		struct {
+			/*
+			 * The number of sleep power signal transitions that
+			 * occurred since the suspend message. The high bit
+			 * indicates a timeout occurred.
+			 */
+			uint32_t sleep_transitions;
+		} resume_response;
+
+		/* No response fields for non-resume messages. */
+	};
+} __packed;
+
 /*****************************************************************************/
 /* Smart battery pass-through */
 
@@ -4161,6 +4240,100 @@ struct __ec_align1 ec_params_i2c_passthru_protect {
 struct __ec_align1 ec_response_i2c_passthru_protect {
 	uint8_t status;		/* Status flags (0: unlocked, 1: locked) */
 };
+
+/*****************************************************************************/
+/* Commands for I2S recording on audio codec. */
+
+#define EC_CMD_CODEC_I2S 0x00BC
+
+enum ec_codec_i2s_subcmd {
+	EC_CODEC_SET_SAMPLE_DEPTH = 0x0,
+	EC_CODEC_SET_GAIN = 0x1,
+	EC_CODEC_GET_GAIN = 0x2,
+	EC_CODEC_I2S_ENABLE = 0x3,
+	EC_CODEC_I2S_SET_CONFIG = 0x4,
+	EC_CODEC_I2S_SET_TDM_CONFIG = 0x5,
+	EC_CODEC_I2S_SET_BCLK = 0x6,
+};
+
+enum ec_sample_depth_value {
+	EC_CODEC_SAMPLE_DEPTH_16 = 0,
+	EC_CODEC_SAMPLE_DEPTH_24 = 1,
+};
+
+enum ec_i2s_config {
+	EC_DAI_FMT_I2S = 0,
+	EC_DAI_FMT_RIGHT_J = 1,
+	EC_DAI_FMT_LEFT_J = 2,
+	EC_DAI_FMT_PCM_A = 3,
+	EC_DAI_FMT_PCM_B = 4,
+	EC_DAI_FMT_PCM_TDM = 5,
+};
+
+struct ec_param_codec_i2s {
+	/*
+	 * enum ec_codec_i2s_subcmd
+	 */
+	uint8_t cmd;
+	union {
+		/*
+		 * EC_CODEC_SET_SAMPLE_DEPTH
+		 * Value should be one of ec_sample_depth_value.
+		 */
+		uint8_t depth;
+
+		/*
+		 * EC_CODEC_SET_GAIN
+		 * Value should be 0~43 for both channels.
+		 */
+		struct ec_param_codec_i2s_set_gain {
+			uint8_t left;
+			uint8_t right;
+		} __packed gain;
+
+		/*
+		 * EC_CODEC_I2S_ENABLE
+		 * 1 to enable, 0 to disable.
+		 */
+		uint8_t i2s_enable;
+
+		/*
+		 * EC_CODEC_I2S_SET_COFNIG
+		 * Value should be one of ec_i2s_config.
+		 */
+		uint8_t i2s_config;
+
+		/*
+		 * EC_CODEC_I2S_SET_TDM_CONFIG
+		 * Value should be one of ec_i2s_config.
+		 */
+		struct ec_param_codec_i2s_tdm {
+			/*
+			 * 0 to 496
+			 */
+			int16_t ch0_delay;
+			/*
+			 * -1 to 496
+			 */
+			int16_t ch1_delay;
+			uint8_t adjacent_to_ch0;
+			uint8_t adjacent_to_ch1;
+		} __packed tdm_param;
+
+		/*
+		 * EC_CODEC_I2S_SET_BCLK
+		 */
+		uint32_t bclk;
+	};
+} __packed;
+
+/*
+ * For subcommand EC_CODEC_GET_GAIN.
+ */
+struct ec_response_codec_gain {
+	uint8_t left;
+	uint8_t right;
+} __packed;
 
 /*****************************************************************************/
 /* System commands */

@@ -10,15 +10,17 @@
 #include "rk3288.dtsi"
 
 / {
-	memory@0 {
+	/*
+	 * The default coreboot on veyron devices ignores memory@0 nodes
+	 * and would instead create another memory node.
+	 */
+	memory {
 		device_type = "memory";
 		reg = <0x0 0x0 0x0 0x80000000>;
 	};
 
 	gpio_keys: gpio-keys {
 		compatible = "gpio-keys";
-		#address-cells = <1>;
-		#size-cells = <0>;
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&pwr_key_l>;
@@ -54,12 +56,19 @@
 		pinctrl-0 = <&bt_enable_l>, <&wifi_enable_h>;
 
 		/*
-		 * On the module itself this is one of these (depending
-		 * on the actual card populated):
+		 * Depending on the actual card populated GPIO4 D4 and D5
+		 * correspond to one of these signals on the module:
+		 *
+		 * D4:
 		 * - SDIO_RESET_L_WL_REG_ON
 		 * - PDN (power down when low)
+		 *
+		 * D5:
+		 * - BT_I2S_WS_BT_RFDISABLE_L
+		 * - No connect
 		 */
-		reset-gpios = <&gpio4 RK_PD4 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&gpio4 RK_PD4 GPIO_ACTIVE_LOW>,
+			      <&gpio4 RK_PD5 GPIO_ACTIVE_LOW>;
 	};
 
 	vcc_5v: vcc-5v {
@@ -87,6 +96,23 @@
 		regulator-boot-on;
 		vin-supply = <&vcc_5v>;
 	};
+
+	vdd_logic: vdd-logic {
+		compatible = "pwm-regulator";
+		regulator-name = "vdd_logic";
+
+		pwms = <&pwm1 0 1994 0>;
+		pwm-supply = <&vcc33_sys>;
+
+		pwm-dutycycle-range = <0x7b 0>;
+		pwm-dutycycle-unit = <0x94>;
+
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <950000>;
+		regulator-max-microvolt = <1350000>;
+		regulator-ramp-delay = <4000>;
+	};
 };
 
 &cpu0 {
@@ -111,6 +137,18 @@
 		opp-hz = /bits/ 64 <1800000000>;
 		opp-microvolt = <1400000>;
 	};
+};
+
+&dmc {
+	logic-supply = <&vdd_logic>;
+	rockchip,odt-disable-freq = <333000000>;
+	rockchip,dll-disable-freq = <333000000>;
+	rockchip,sr-enable-freq = <333000000>;
+	rockchip,auto-self-refresh-cnt = <0>;
+	rockchip,auto-power-down-cnt = <64>;
+	rockchip,ddr-speed-bin = <21>;
+	rockchip,trcd = <10>;
+	rockchip,trp = <10>;
 };
 
 &emmc {
@@ -187,8 +225,7 @@
 				regulator-max-microvolt = <1250000>;
 				regulator-ramp-delay = <6001>;
 				regulator-state-mem {
-					regulator-on-in-suspend;
-					regulator-suspend-microvolt = <1000000>;
+					regulator-off-in-suspend;
 				};
 			};
 
@@ -370,10 +407,6 @@
 &uart0 {
 	status = "okay";
 
-	/* We need to go faster than 24MHz, so adjust clock parents / rates */
-	assigned-clocks = <&cru SCLK_UART0>;
-	assigned-clock-rates = <48000000>;
-
 	/* Pins don't include flow control by default; add that in */
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart0_xfer &uart0_cts &uart0_rts>;
@@ -425,10 +458,14 @@
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <
 		/* Common for sleep and wake, but no owners */
+		&ddr0_retention
+		&ddrio_pwroff
 		&global_pwroff
 	>;
 	pinctrl-1 = <
 		/* Common for sleep and wake, but no owners */
+		&ddr0_retention
+		&ddrio_pwroff
 		&global_pwroff
 	>;
 

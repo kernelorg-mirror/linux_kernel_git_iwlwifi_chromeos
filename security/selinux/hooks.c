@@ -1034,8 +1034,11 @@ static int selinux_sb_clone_mnt_opts(const struct super_block *oldsb,
 	BUG_ON(!(oldsbsec->flags & SE_SBINITIALIZED));
 
 	/* if fs is reusing a sb, make sure that the contexts match */
-	if (newsbsec->flags & SE_SBINITIALIZED)
+	if (newsbsec->flags & SE_SBINITIALIZED) {
+		if ((kern_flags & SECURITY_LSM_NATIVE_LABELS) && !set_context)
+			*set_kern_flags |= SECURITY_LSM_NATIVE_LABELS;
 		return selinux_cmp_sb_context(oldsb, newsb);
+	}
 
 	mutex_lock(&newsbsec->lock);
 
@@ -1769,7 +1772,7 @@ static inline u32 signal_to_av(int sig)
 
 /* Check whether a task is allowed to use a capability. */
 static int cred_has_capability(const struct cred *cred,
-			       int cap, int audit, bool initns)
+			       int cap, unsigned int opts, bool initns)
 {
 	struct common_audit_data ad;
 	struct av_decision avd;
@@ -1796,7 +1799,7 @@ static int cred_has_capability(const struct cred *cred,
 
 	rc = avc_has_perm_noaudit(&selinux_state,
 				  sid, sid, sclass, av, 0, &avd);
-	if (audit == SECURITY_CAP_AUDIT) {
+	if (!(opts & CAP_OPT_NOAUDIT)) {
 		int rc2 = avc_audit(&selinux_state,
 				    sid, sid, sclass, av, &avd, rc, &ad, 0);
 		if (rc2)
@@ -2316,9 +2319,9 @@ static int selinux_capset(struct cred *new, const struct cred *old,
  */
 
 static int selinux_capable(const struct cred *cred, struct user_namespace *ns,
-			   int cap, int audit)
+			   int cap, unsigned int opts)
 {
-	return cred_has_capability(cred, cap, audit, ns == &init_user_ns);
+	return cred_has_capability(cred, cap, opts, ns == &init_user_ns);
 }
 
 static int selinux_quotactl(int cmds, int type, int id, struct super_block *sb)
@@ -2392,7 +2395,7 @@ static int selinux_vm_enough_memory(struct mm_struct *mm, long pages)
 	int rc, cap_sys_admin = 0;
 
 	rc = cred_has_capability(current_cred(), CAP_SYS_ADMIN,
-				 SECURITY_CAP_NOAUDIT, true);
+				 CAP_OPT_NOAUDIT, true);
 	if (rc == 0)
 		cap_sys_admin = 1;
 
@@ -2934,7 +2937,7 @@ static int selinux_sb_kern_mount(struct super_block *sb, int flags, void *data)
 		return rc;
 
 	/* Allow all mounts performed by the kernel */
-	if (flags & MS_KERNMOUNT)
+	if (flags & (MS_KERNMOUNT | MS_SUBMOUNT))
 		return 0;
 
 	ad.type = LSM_AUDIT_DATA_DENTRY;
@@ -3245,11 +3248,11 @@ static int selinux_inode_getattr(const struct path *path)
 static bool has_cap_mac_admin(bool audit)
 {
 	const struct cred *cred = current_cred();
-	int cap_audit = audit ? SECURITY_CAP_AUDIT : SECURITY_CAP_NOAUDIT;
+	unsigned int opts = audit ? CAP_OPT_NONE : CAP_OPT_NOAUDIT;
 
-	if (cap_capable(cred, &init_user_ns, CAP_MAC_ADMIN, cap_audit))
+	if (cap_capable(cred, &init_user_ns, CAP_MAC_ADMIN, opts))
 		return false;
-	if (cred_has_capability(cred, CAP_MAC_ADMIN, cap_audit, true))
+	if (cred_has_capability(cred, CAP_MAC_ADMIN, opts, true))
 		return false;
 	return true;
 }
@@ -3455,10 +3458,14 @@ static int selinux_inode_setsecurity(struct inode *inode, const char *name,
 				     const void *value, size_t size, int flags)
 {
 	struct inode_security_struct *isec = inode_security_novalidate(inode);
+	struct superblock_security_struct *sbsec = inode->i_sb->s_security;
 	u32 newsid;
 	int rc;
 
 	if (strcmp(name, XATTR_SELINUX_SUFFIX))
+		return -EOPNOTSUPP;
+
+	if (!(sbsec->flags & SBLABEL_MNT))
 		return -EOPNOTSUPP;
 
 	if (!value || !size)
@@ -3649,7 +3656,7 @@ static int selinux_file_ioctl(struct file *file, unsigned int cmd,
 	case KDSKBENT:
 	case KDSKBSENT:
 		error = cred_has_capability(cred, CAP_SYS_TTY_CONFIG,
-					    SECURITY_CAP_AUDIT, true);
+					    CAP_OPT_NONE, true);
 		break;
 
 	/* default case assumes that the command will go
@@ -5318,6 +5325,9 @@ static int selinux_sctp_bind_connect(struct sock *sk, int optname,
 	addr_buf = address;
 
 	while (walk_size < addrlen) {
+		if (walk_size + sizeof(sa_family_t) > addrlen)
+			return -EINVAL;
+
 		addr = addr_buf;
 		switch (addr->sa_family) {
 		case AF_UNSPEC:
@@ -5330,6 +5340,9 @@ static int selinux_sctp_bind_connect(struct sock *sk, int optname,
 		default:
 			return -EINVAL;
 		}
+
+		if (walk_size + len > addrlen)
+			return -EINVAL;
 
 		err = -EINVAL;
 		switch (optname) {
@@ -6603,7 +6616,10 @@ static void selinux_inode_invalidate_secctx(struct inode *inode)
  */
 static int selinux_inode_notifysecctx(struct inode *inode, void *ctx, u32 ctxlen)
 {
-	return selinux_inode_setsecurity(inode, XATTR_SELINUX_SUFFIX, ctx, ctxlen, 0);
+	int rc = selinux_inode_setsecurity(inode, XATTR_SELINUX_SUFFIX,
+					   ctx, ctxlen, 0);
+	/* Do not return error when suppressing label (SBLABEL_MNT not set). */
+	return rc == -EOPNOTSUPP ? 0 : rc;
 }
 
 /*

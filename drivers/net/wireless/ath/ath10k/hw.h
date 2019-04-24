@@ -21,6 +21,14 @@
 
 #include "targaddrs.h"
 
+enum ath10k_bus {
+	ATH10K_BUS_PCI,
+	ATH10K_BUS_AHB,
+	ATH10K_BUS_SDIO,
+	ATH10K_BUS_USB,
+	ATH10K_BUS_SNOC,
+};
+
 #define ATH10K_FW_DIR			"ath10k"
 
 #define QCA988X_2_0_DEVICE_ID_UBNT   (0x11ac)
@@ -508,6 +516,7 @@ struct ath10k_hw_clk_params {
 struct ath10k_hw_params {
 	u32 id;
 	u16 dev_id;
+	enum ath10k_bus bus;
 	const char *name;
 	u32 patch_load_addr;
 	int uart_pin;
@@ -713,6 +722,7 @@ ath10k_rx_desc_get_l3_pad_bytes(struct ath10k_hw_params *hw,
 #define TARGET_TLV_NUM_TDLS_VDEVS		1
 #define TARGET_TLV_NUM_TIDS			((TARGET_TLV_NUM_PEERS) * 2)
 #define TARGET_TLV_NUM_MSDU_DESC		(1024 + 32)
+#define TARGET_TLV_NUM_MSDU_DESC_HL		64
 #define TARGET_TLV_NUM_WOW_PATTERNS		22
 #define TARGET_TLV_MGMT_NUM_MSDU_DESC		(50)
 
