@@ -442,8 +442,8 @@ static int fsl_asoc_card_late_probe(struct snd_soc_card *card)
 
 	if (fsl_asoc_card_is_ac97(priv)) {
 #if IS_ENABLED(CONFIG_SND_AC97_CODEC)
-		struct snd_soc_codec *codec = rtd->codec;
-		struct snd_ac97 *ac97 = snd_soc_codec_get_drvdata(codec);
+		struct snd_soc_component *component = rtd->codec_dai->component;
+		struct snd_ac97 *ac97 = snd_soc_component_get_drvdata(component);
 
 		/*
 		 * Use slots 3/4 for S/PDIF so SSI won't try to enable
@@ -689,6 +689,7 @@ static int fsl_asoc_card_probe(struct platform_device *pdev)
 asrc_fail:
 	of_node_put(asrc_np);
 	of_node_put(codec_np);
+	put_device(&cpu_pdev->dev);
 fail:
 	of_node_put(cpu_np);
 
