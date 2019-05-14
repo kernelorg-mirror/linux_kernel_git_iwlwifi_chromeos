@@ -2783,28 +2783,69 @@ cea_mode_alternate_clock(const struct drm_display_mode *cea_mode)
 	return clock;
 }
 
+static bool
+cea_mode_alternate_timings(u8 vic, struct drm_display_mode *mode)
+{
+	/*
+	 * For certain VICs the spec allows the vertical
+	 * front porch to vary by one or two lines.
+	 *
+	 * cea_modes[] stores the variant with the shortest
+	 * vertical front porch. We can adjust the mode to
+	 * get the other variants by simply increasing the
+	 * vertical front porch length.
+	 */
+	BUILD_BUG_ON(edid_cea_modes[8].vtotal != 262 ||
+		     edid_cea_modes[9].vtotal != 262 ||
+		     edid_cea_modes[12].vtotal != 262 ||
+		     edid_cea_modes[13].vtotal != 262 ||
+		     edid_cea_modes[23].vtotal != 312 ||
+		     edid_cea_modes[24].vtotal != 312 ||
+		     edid_cea_modes[27].vtotal != 312 ||
+		     edid_cea_modes[28].vtotal != 312);
+
+	if (((vic == 8 || vic == 9 ||
+	      vic == 12 || vic == 13) && mode->vtotal < 263) ||
+	    ((vic == 23 || vic == 24 ||
+	      vic == 27 || vic == 28) && mode->vtotal < 314)) {
+		mode->vsync_start++;
+		mode->vsync_end++;
+		mode->vtotal++;
+
+		return true;
+	}
+
+	return false;
+}
+
 static u8 drm_match_cea_mode_clock_tolerance(const struct drm_display_mode *to_match,
 					     unsigned int clock_tolerance)
 {
+	unsigned int match_flags = DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_FLAGS;
 	u8 vic;
 
 	if (!to_match->clock)
 		return 0;
 
+	if (to_match->picture_aspect_ratio)
+		match_flags |= DRM_MODE_MATCH_ASPECT_RATIO;
+
 	for (vic = 1; vic < ARRAY_SIZE(edid_cea_modes); vic++) {
-		const struct drm_display_mode *cea_mode = &edid_cea_modes[vic];
+		struct drm_display_mode cea_mode = edid_cea_modes[vic];
 		unsigned int clock1, clock2;
 
 		/* Check both 60Hz and 59.94Hz */
-		clock1 = cea_mode->clock;
-		clock2 = cea_mode_alternate_clock(cea_mode);
+		clock1 = cea_mode.clock;
+		clock2 = cea_mode_alternate_clock(&cea_mode);
 
 		if (abs(to_match->clock - clock1) > clock_tolerance &&
 		    abs(to_match->clock - clock2) > clock_tolerance)
 			continue;
 
-		if (drm_mode_equal_no_clocks(to_match, cea_mode))
-			return vic;
+		do {
+			if (drm_mode_match(to_match, &cea_mode, match_flags))
+				return vic;
+		} while (cea_mode_alternate_timings(vic, &cea_mode));
 	}
 
 	return 0;
@@ -2819,24 +2860,33 @@ static u8 drm_match_cea_mode_clock_tolerance(const struct drm_display_mode *to_m
  */
 u8 drm_match_cea_mode(const struct drm_display_mode *to_match)
 {
+	unsigned int match_flags = DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_FLAGS;
 	u8 vic;
 
 	if (!to_match->clock)
 		return 0;
 
+	if (to_match->picture_aspect_ratio)
+		match_flags |= DRM_MODE_MATCH_ASPECT_RATIO;
+
 	for (vic = 1; vic < ARRAY_SIZE(edid_cea_modes); vic++) {
-		const struct drm_display_mode *cea_mode = &edid_cea_modes[vic];
+		struct drm_display_mode cea_mode = edid_cea_modes[vic];
 		unsigned int clock1, clock2;
 
 		/* Check both 60Hz and 59.94Hz */
-		clock1 = cea_mode->clock;
-		clock2 = cea_mode_alternate_clock(cea_mode);
+		clock1 = cea_mode.clock;
+		clock2 = cea_mode_alternate_clock(&cea_mode);
 
-		if ((KHZ2PICOS(to_match->clock) == KHZ2PICOS(clock1) ||
-		     KHZ2PICOS(to_match->clock) == KHZ2PICOS(clock2)) &&
-		    drm_mode_equal_no_clocks_no_stereo(to_match, cea_mode))
-			return vic;
+		if (KHZ2PICOS(to_match->clock) != KHZ2PICOS(clock1) &&
+		    KHZ2PICOS(to_match->clock) != KHZ2PICOS(clock2))
+			continue;
+
+		do {
+			if (drm_mode_match(to_match, &cea_mode, match_flags))
+				return vic;
+		} while (cea_mode_alternate_timings(vic, &cea_mode));
 	}
+
 	return 0;
 }
 EXPORT_SYMBOL(drm_match_cea_mode);
@@ -2879,6 +2929,7 @@ hdmi_mode_alternate_clock(const struct drm_display_mode *hdmi_mode)
 static u8 drm_match_hdmi_mode_clock_tolerance(const struct drm_display_mode *to_match,
 					      unsigned int clock_tolerance)
 {
+	unsigned int match_flags = DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_FLAGS;
 	u8 vic;
 
 	if (!to_match->clock)
@@ -2896,7 +2947,7 @@ static u8 drm_match_hdmi_mode_clock_tolerance(const struct drm_display_mode *to_
 		    abs(to_match->clock - clock2) > clock_tolerance)
 			continue;
 
-		if (drm_mode_equal_no_clocks(to_match, hdmi_mode))
+		if (drm_mode_match(to_match, hdmi_mode, match_flags))
 			return vic;
 	}
 
@@ -2913,6 +2964,7 @@ static u8 drm_match_hdmi_mode_clock_tolerance(const struct drm_display_mode *to_
  */
 static u8 drm_match_hdmi_mode(const struct drm_display_mode *to_match)
 {
+	unsigned int match_flags = DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_FLAGS;
 	u8 vic;
 
 	if (!to_match->clock)
@@ -2928,7 +2980,7 @@ static u8 drm_match_hdmi_mode(const struct drm_display_mode *to_match)
 
 		if ((KHZ2PICOS(to_match->clock) == KHZ2PICOS(clock1) ||
 		     KHZ2PICOS(to_match->clock) == KHZ2PICOS(clock2)) &&
-		    drm_mode_equal_no_clocks_no_stereo(to_match, hdmi_mode))
+		    drm_mode_match(to_match, hdmi_mode, match_flags))
 			return vic;
 	}
 	return 0;
@@ -4246,12 +4298,14 @@ EXPORT_SYMBOL(drm_set_preferred_mode);
  *                                              data from a DRM display mode
  * @frame: HDMI AVI infoframe
  * @mode: DRM display mode
+ * @is_hdmi2_sink: Sink is HDMI 2.0 compliant
  *
  * Return: 0 on success or a negative error code on failure.
  */
 int
 drm_hdmi_avi_infoframe_from_display_mode(struct hdmi_avi_infoframe *frame,
-					 const struct drm_display_mode *mode)
+					 const struct drm_display_mode *mode,
+					 bool is_hdmi2_sink)
 {
 	int err;
 
@@ -4266,6 +4320,28 @@ drm_hdmi_avi_infoframe_from_display_mode(struct hdmi_avi_infoframe *frame,
 		frame->pixel_repeat = 1;
 
 	frame->video_code = drm_match_cea_mode(mode);
+
+	/*
+	 * HDMI 1.4 VIC range: 1 <= VIC <= 64 (CEA-861-D) but
+	 * HDMI 2.0 VIC range: 1 <= VIC <= 107 (CEA-861-F). So we
+	 * have to make sure we dont break HDMI 1.4 sinks.
+	 */
+	if (!is_hdmi2_sink && frame->video_code > 64)
+		frame->video_code = 0;
+
+	/*
+	 * HDMI spec says if a mode is found in HDMI 1.4b 4K modes
+	 * we should send its VIC in vendor infoframes, else send the
+	 * VIC in AVI infoframes. Lets check if this mode is present in
+	 * HDMI 1.4b 4K modes
+	 */
+	if (frame->video_code) {
+		u8 vendor_if_vic = drm_match_hdmi_mode(mode);
+		bool is_s3d = mode->flags & DRM_MODE_FLAG_3D_MASK;
+
+		if (drm_valid_hdmi_vic(vendor_if_vic) && !is_s3d)
+			frame->video_code = 0;
+	}
 
 	frame->picture_aspect = HDMI_PICTURE_ASPECT_NONE;
 

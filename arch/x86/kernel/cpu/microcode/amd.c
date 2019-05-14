@@ -61,18 +61,19 @@ static u16 this_equiv_id;
 
 static struct cpio_data ucode_cpio;
 
-/*
- * Microcode patch container file is prepended to the initrd in cpio format.
- * See Documentation/x86/early-microcode.txt
- */
-static __initdata char ucode_path[] = "kernel/x86/microcode/AuthenticAMD.bin";
-
 static struct cpio_data __init find_ucode_in_initrd(void)
 {
+#ifdef CONFIG_BLK_DEV_INITRD
 	long offset = 0;
 	char *path;
 	void *start;
 	size_t size;
+
+	/*
+	 * Microcode patch container file is prepended to the initrd in cpio
+	 * format. See Documentation/x86/early-microcode.txt
+	 */
+	static __initdata char ucode_path[] = "kernel/x86/microcode/AuthenticAMD.bin";
 
 #ifdef CONFIG_X86_32
 	struct boot_params *p;
@@ -89,9 +90,12 @@ static struct cpio_data __init find_ucode_in_initrd(void)
 	path    = ucode_path;
 	start   = (void *)(boot_params.hdr.ramdisk_image + PAGE_OFFSET);
 	size    = boot_params.hdr.ramdisk_size;
-#endif
+#endif /* !CONFIG_X86_32 */
 
 	return find_cpio_data(path, start, size, &offset);
+#else
+	return (struct cpio_data){ NULL, 0, "" };
+#endif
 }
 
 static size_t compute_container_size(u8 *data, u32 total_size)
@@ -292,11 +296,11 @@ void __init load_ucode_amd_bsp(unsigned int family)
 	size = &ucode_cpio.size;
 #endif
 
-	cp = find_ucode_in_initrd();
-	if (!cp.data) {
-		if (!load_builtin_amd_microcode(&cp, family))
-			return;
-	}
+	if (!load_builtin_amd_microcode(&cp, family))
+		cp = find_ucode_in_initrd();
+
+	if (!(cp.data && cp.size))
+		return;
 
 	*data = cp.data;
 	*size = cp.size;
@@ -435,8 +439,8 @@ int __init save_microcode_in_initrd_amd(void)
 		container = cont_va;
 
 	if (ucode_new_rev)
-		pr_info("microcode: updated early to new patch_level=0x%08x\n",
-			ucode_new_rev);
+		pr_info_once("microcode updated early to new patch_level=0x%08x\n",
+			     ucode_new_rev);
 
 	eax   = cpuid_eax(0x00000001);
 	eax   = ((eax >> 8) & 0xf) + ((eax >> 20) & 0xff);
@@ -800,15 +804,13 @@ static int verify_and_add_patch(u8 family, u8 *fw, unsigned int leftover)
 		return -EINVAL;
 	}
 
-	patch->data = kzalloc(patch_size, GFP_KERNEL);
+	patch->data = kmemdup(fw + SECTION_HDR_SIZE, patch_size, GFP_KERNEL);
 	if (!patch->data) {
 		pr_err("Patch data allocation failure.\n");
 		kfree(patch);
 		return -EINVAL;
 	}
 
-	/* All looks ok, copy patch... */
-	memcpy(patch->data, fw + SECTION_HDR_SIZE, patch_size);
 	INIT_LIST_HEAD(&patch->plist);
 	patch->patch_id  = mc_hdr->patch_id;
 	patch->equiv_cpu = proc_id;
