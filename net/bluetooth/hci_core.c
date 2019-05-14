@@ -1392,6 +1392,15 @@ static int hci_dev_do_open(struct hci_dev *hdev)
 
 	clear_bit(HCI_INIT, &hdev->flags);
 
+#ifdef CONFIG_BT_ENFORCE_CLASSIC_SECURITY
+	/* Don't allow usage of Bluetooth if the chip doesn't support */
+	/* Read Encryption Key Size command (byte 20 bit 4). */
+	if (!ret && !(hdev->commands[20] & 0x10)) {
+		WARN(1, "Disabling Bluetooth due to unsupported HCI Read Encryption Key Size command");
+		ret = -EIO;
+	}
+#endif
+
 	if (!ret)
 		ret = hci_le_splitter_init_done(hdev);
 
@@ -1567,6 +1576,14 @@ int hci_dev_do_close(struct hci_dev *hdev)
 	drain_workqueue(hdev->workqueue);
 
 	hci_dev_lock(hdev);
+
+	/* This will clear the HCI_LE_SCAN_CHANGE_IN_PROGRESS flag in case its
+	 * already set and exception occurred to sync host and controller state.
+	 */
+	if (hci_dev_test_flag(hdev, HCI_LE_SCAN_CHANGE_IN_PROGRESS)) {
+		hci_dev_clear_flag(hdev, HCI_LE_SCAN_CHANGE_IN_PROGRESS);
+		hdev->count_scan_change_in_progress = 0;
+	}
 
 	hci_discovery_set_state(hdev, DISCOVERY_STOPPED);
 
@@ -3128,6 +3145,10 @@ int hci_register_dev(struct hci_dev *hdev)
 	hci_sock_dev_event(hdev, HCI_DEV_REG);
 	hci_dev_hold(hdev);
 
+	// Don't try to power on if LE splitter is not yet set up.
+	if (hci_le_splitter_get_enabled_state() == SPLITTER_STATE_NOT_SET)
+		return id;
+
 	queue_work(hdev->req_workqueue, &hdev->power_on);
 
 	return id;
@@ -4196,10 +4217,8 @@ static void hci_rx_work(struct work_struct *work)
 			continue;
 		}
 
-		if (!hci_le_splitter_should_allow_bluez_rx(hdev, skb)) {
-			kfree_skb(skb);
+		if (!hci_le_splitter_should_allow_bluez_rx(hdev, skb))
 			continue;
-		}
 
 		if (test_bit(HCI_INIT, &hdev->flags)) {
 			/* Don't process data packets in this states. */
@@ -4361,4 +4380,16 @@ static void hci_cmd_work(struct work_struct *work)
 			queue_work(hdev->workqueue, &hdev->cmd_work);
 		}
 	}
+}
+
+bool is_ltk_blocked(struct smp_ltk *ltk, struct hci_dev *hdev)
+{
+	int i;
+
+	for (i = 0; i < MAX_BLOCKED_LTKS; i++) {
+		if (!memcmp(ltk->val, hdev->blocked_ltks[i], LTK_LENGTH))
+			return true;
+	}
+
+	return false;
 }
