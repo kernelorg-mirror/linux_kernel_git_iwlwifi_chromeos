@@ -39,6 +39,9 @@
 #define ZERO_KEY "\x00\x00\x00\x00\x00\x00\x00\x00" \
 		 "\x00\x00\x00\x00\x00\x00\x00\x00"
 
+/* Minimum encryption key length, value adopted from BLE (7 bytes) */
+#define MIN_ENC_KEY_LEN 7
+
 /* Handle HCI Event packets */
 
 static void hci_cc_inquiry_cancel(struct hci_dev *hdev, struct sk_buff *skb)
@@ -2538,16 +2541,29 @@ static void read_enc_key_size_complete(struct hci_dev *hdev, u8 status,
 	if (!conn)
 		goto unlock;
 
-	/* If we fail to read the encryption key size, assume maximum
-	 * (which is the same we do also when this HCI command isn't
-	 * supported.
+	/* If we fail to read the encryption key size, abort the connection
+	 * since the encryption key entropy is not guaranteed to be large
+	 * enough.
 	 */
 	if (rp->status) {
 		BT_ERR("%s failed to read key size for handle %u", hdev->name,
 		       handle);
 		conn->enc_key_size = HCI_LINK_KEY_SIZE;
+#ifdef CONFIG_BT_ENFORCE_CLASSIC_SECURITY
+		WARN(1, "Read Encryption Key Size command failed, chip may not support this");
+		hci_disconnect(conn, HCI_ERROR_REMOTE_USER_TERM);
+		hci_conn_drop(conn);
+		goto unlock;
+#endif
 	} else {
 		conn->enc_key_size = rp->key_size;
+	}
+
+	if (conn->enc_key_size < MIN_ENC_KEY_LEN) {
+		WARN(1, "Dropping connection with weak encryption key length");
+		hci_disconnect(conn, HCI_ERROR_REMOTE_USER_TERM);
+		hci_conn_drop(conn);
+		goto unlock;
 	}
 
 	if (conn->state == BT_CONFIG) {
@@ -2652,7 +2668,14 @@ static void hci_encrypt_change_evt(struct hci_dev *hdev, struct sk_buff *skb)
 		if (hci_req_run_skb(&req, read_enc_key_size_complete)) {
 			BT_ERR("Sending HCI Read Encryption Key Size failed");
 			conn->enc_key_size = HCI_LINK_KEY_SIZE;
+#ifdef CONFIG_BT_ENFORCE_CLASSIC_SECURITY
+			WARN(1, "Failed sending HCI Read Encryption Key Size, chip may not support this");
+			hci_disconnect(conn, HCI_ERROR_REMOTE_USER_TERM);
+			hci_conn_drop(conn);
+			goto unlock;
+#else
 			goto notify;
+#endif
 		}
 
 		goto unlock;
