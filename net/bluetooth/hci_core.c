@@ -1270,6 +1270,79 @@ done:
 	return err;
 }
 
+static int hci_set_err_data_report_req(struct hci_request *req,
+				       unsigned long opt)
+{
+	struct hci_dev *hdev = req->hdev;
+	struct hci_cp_write_err_data_report cp;
+
+	if (!hdev->wide_band_speech)
+		return -EOPNOTSUPP;
+
+	/* Write Default Erroneous Data Reporting */
+	cp.enable = true;
+	hci_req_add(req, HCI_OP_WRITE_ERR_DATA_REPORT, sizeof(cp), &cp);
+	return 0;
+}
+
+static void hci_set_err_data_report(struct hci_dev *hdev)
+{
+	int err;
+
+	if (!hdev->wide_band_speech) {
+		BT_DBG("wide_band_speech is not supported.");
+		return;
+	}
+
+	/* Enable Erroneous Data Reporting */
+	err = __hci_req_sync(hdev, hci_set_err_data_report_req, 0,
+			     HCI_CMD_TIMEOUT, NULL);
+	if (err) {
+		BT_ERR("HCI_OP_WRITE_ERR_DATA_REPORT failed");
+		hdev->wide_band_speech = false;
+	}
+	BT_DBG("wide_band_speech: %d", hdev->wide_band_speech);
+}
+
+/* TODO(crbug.com/977059): create a blacklist of controllers from other
+ * vendors in addition to Intel that do not support wide-band speech.
+ */
+static const struct controller_id_t blacklist_wide_band_speech[] = {
+	/* Intel Stone Peak 2 (AC7265) */
+	{ CONTROLLER_ID(0x8087, 0x0a2a) },
+
+	/* Intel Wilkins Peak 2 (AC7260) */
+	{ CONTROLLER_ID(0x8087, 0x07dc) },
+
+	/* Terminating entry -- add entries above this line -- */
+	{ }
+};
+
+static void check_wide_band_speech_capability(struct hci_dev *hdev)
+{
+	const struct controller_id_t *id = blacklist_wide_band_speech;
+
+	if (hdev->controller_id.idVendor != 0x8087)
+		goto not_supported;
+
+	for (; id->idVendor || id->idProduct; id++) {
+		if (hdev->controller_id.idVendor == id->idVendor &&
+		    hdev->controller_id.idProduct == id->idProduct) {
+			BT_DBG("controller id (0x%4.4xk, 0x%4.4x) in blacklist",
+			       hdev->controller_id.idVendor,
+			       hdev->controller_id.idProduct);
+			goto not_supported;
+		}
+	}
+
+	hdev->wide_band_speech = true;
+	hci_set_err_data_report(hdev);
+	return;
+
+not_supported:
+	hdev->wide_band_speech = false;
+}
+
 static int hci_dev_do_open(struct hci_dev *hdev)
 {
 	int ret = 0;
@@ -1392,6 +1465,15 @@ static int hci_dev_do_open(struct hci_dev *hdev)
 
 	clear_bit(HCI_INIT, &hdev->flags);
 
+#ifdef CONFIG_BT_ENFORCE_CLASSIC_SECURITY
+	/* Don't allow usage of Bluetooth if the chip doesn't support */
+	/* Read Encryption Key Size command (byte 20 bit 4). */
+	if (!ret && !(hdev->commands[20] & 0x10)) {
+		WARN(1, "Disabling Bluetooth due to unsupported HCI Read Encryption Key Size command");
+		ret = -EIO;
+	}
+#endif
+
 	if (!ret)
 		ret = hci_le_splitter_init_done(hdev);
 
@@ -1402,6 +1484,10 @@ static int hci_dev_do_open(struct hci_dev *hdev)
 		set_bit(HCI_UP, &hdev->flags);
 		hci_sock_dev_event(hdev, HCI_DEV_UP);
 		hci_leds_update_powered(hdev, true);
+
+		/* Check wide band speech capability before power on. */
+		check_wide_band_speech_capability(hdev);
+
 		if (!hci_dev_test_flag(hdev, HCI_SETUP) &&
 		    !hci_dev_test_flag(hdev, HCI_CONFIG) &&
 		    !hci_dev_test_flag(hdev, HCI_UNCONFIGURED) &&
@@ -1567,6 +1653,14 @@ int hci_dev_do_close(struct hci_dev *hdev)
 	drain_workqueue(hdev->workqueue);
 
 	hci_dev_lock(hdev);
+
+	/* This will clear the HCI_LE_SCAN_CHANGE_IN_PROGRESS flag in case its
+	 * already set and exception occurred to sync host and controller state.
+	 */
+	if (hci_dev_test_flag(hdev, HCI_LE_SCAN_CHANGE_IN_PROGRESS)) {
+		hci_dev_clear_flag(hdev, HCI_LE_SCAN_CHANGE_IN_PROGRESS);
+		hdev->count_scan_change_in_progress = 0;
+	}
 
 	hci_discovery_set_state(hdev, DISCOVERY_STOPPED);
 
@@ -3128,6 +3222,10 @@ int hci_register_dev(struct hci_dev *hdev)
 	hci_sock_dev_event(hdev, HCI_DEV_REG);
 	hci_dev_hold(hdev);
 
+	// Don't try to power on if LE splitter is not yet set up.
+	if (hci_le_splitter_get_enabled_state() == SPLITTER_STATE_NOT_SET)
+		return id;
+
 	queue_work(hdev->req_workqueue, &hdev->power_on);
 
 	return id;
@@ -4196,10 +4294,8 @@ static void hci_rx_work(struct work_struct *work)
 			continue;
 		}
 
-		if (!hci_le_splitter_should_allow_bluez_rx(hdev, skb)) {
-			kfree_skb(skb);
+		if (!hci_le_splitter_should_allow_bluez_rx(hdev, skb))
 			continue;
-		}
 
 		if (test_bit(HCI_INIT, &hdev->flags)) {
 			/* Don't process data packets in this states. */
@@ -4361,4 +4457,16 @@ static void hci_cmd_work(struct work_struct *work)
 			queue_work(hdev->workqueue, &hdev->cmd_work);
 		}
 	}
+}
+
+bool is_ltk_blocked(struct smp_ltk *ltk, struct hci_dev *hdev)
+{
+	int i;
+
+	for (i = 0; i < MAX_BLOCKED_LTKS; i++) {
+		if (!memcmp(ltk->val, hdev->blocked_ltks[i], LTK_LENGTH))
+			return true;
+	}
+
+	return false;
 }
