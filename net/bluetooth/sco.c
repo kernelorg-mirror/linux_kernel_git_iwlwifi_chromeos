@@ -392,7 +392,8 @@ static void sco_sock_cleanup_listen(struct sock *parent)
  */
 static void sco_sock_kill(struct sock *sk)
 {
-	if (!sock_flag(sk, SOCK_ZAPPED) || sk->sk_socket)
+	if (!sock_flag(sk, SOCK_ZAPPED) || sk->sk_socket ||
+	    sock_flag(sk, SOCK_DEAD))
 		return;
 
 	BT_DBG("sk %p state %d", sk, sk->sk_state);
@@ -1140,6 +1141,9 @@ void sco_recv_scodata(struct hci_conn *hcon, struct sk_buff *skb)
 
 	if (!conn)
 		goto drop;
+
+	if (sco_pi(conn->sk)->setting != BT_VOICE_TRANSPARENT)
+		skb_pull(skb, HCI_SCO_HDR_SIZE);
 
 	BT_DBG("conn %p len %d", conn, skb->len);
 

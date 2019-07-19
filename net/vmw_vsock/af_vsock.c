@@ -144,7 +144,6 @@ EXPORT_SYMBOL_GPL(vm_sockets_get_local_cid);
  * vsock_bind_table[VSOCK_HASH_SIZE] is for unbound sockets.  The hash function
  * mods with VSOCK_HASH_SIZE to ensure this.
  */
-#define VSOCK_HASH_SIZE         251
 #define MAX_PORT_RETRIES        24
 
 #define VSOCK_HASH(addr)        ((addr)->svm_port % VSOCK_HASH_SIZE)
@@ -159,9 +158,12 @@ EXPORT_SYMBOL_GPL(vm_sockets_get_local_cid);
 #define vsock_connected_sockets_vsk(vsk)				\
 	vsock_connected_sockets(&(vsk)->remote_addr, &(vsk)->local_addr)
 
-static struct list_head vsock_bind_table[VSOCK_HASH_SIZE + 1];
-static struct list_head vsock_connected_table[VSOCK_HASH_SIZE];
-static DEFINE_SPINLOCK(vsock_table_lock);
+struct list_head vsock_bind_table[VSOCK_HASH_SIZE + 1];
+EXPORT_SYMBOL_GPL(vsock_bind_table);
+struct list_head vsock_connected_table[VSOCK_HASH_SIZE];
+EXPORT_SYMBOL_GPL(vsock_connected_table);
+DEFINE_SPINLOCK(vsock_table_lock);
+EXPORT_SYMBOL_GPL(vsock_table_lock);
 
 /* Autobind this socket to the local address if necessary. */
 static int vsock_auto_bind(struct vsock_sock *vsk)
@@ -237,16 +239,6 @@ static struct sock *__vsock_find_connected_socket(struct sockaddr_vm *src,
 	}
 
 	return NULL;
-}
-
-static bool __vsock_in_bound_table(struct vsock_sock *vsk)
-{
-	return !list_empty(&vsk->bound_table);
-}
-
-static bool __vsock_in_connected_table(struct vsock_sock *vsk)
-{
-	return !list_empty(&vsk->connected_table);
 }
 
 static void vsock_insert_unbound(struct vsock_sock *vsk)
@@ -440,14 +432,14 @@ static int vsock_send_shutdown(struct sock *sk, int mode)
 	return transport->shutdown(vsock_sk(sk), mode);
 }
 
-void vsock_pending_work(struct work_struct *work)
+static void vsock_pending_work(struct work_struct *work)
 {
 	struct sock *sk;
 	struct sock *listener;
 	struct vsock_sock *vsk;
 	bool cleanup;
 
-	vsk = container_of(work, struct vsock_sock, dwork.work);
+	vsk = container_of(work, struct vsock_sock, pending_work.work);
 	sk = sk_vsock(vsk);
 	listener = vsk->listener;
 	cleanup = true;
@@ -487,7 +479,6 @@ out:
 	sock_put(sk);
 	sock_put(listener);
 }
-EXPORT_SYMBOL_GPL(vsock_pending_work);
 
 /**** SOCKET OPERATIONS ****/
 
@@ -586,6 +577,8 @@ static int __vsock_bind(struct sock *sk, struct sockaddr_vm *addr)
 	return retval;
 }
 
+static void vsock_connect_timeout(struct work_struct *work);
+
 struct sock *__vsock_create(struct net *net,
 			    struct socket *sock,
 			    struct sock *parent,
@@ -628,6 +621,8 @@ struct sock *__vsock_create(struct net *net,
 	vsk->sent_request = false;
 	vsk->ignore_connecting_rst = false;
 	vsk->peer_shutdown = 0;
+	INIT_DELAYED_WORK(&vsk->connect_work, vsock_connect_timeout);
+	INIT_DELAYED_WORK(&vsk->pending_work, vsock_pending_work);
 
 	psk = parent ? vsock_sk(parent) : NULL;
 	if (parent) {
@@ -1098,7 +1093,7 @@ static void vsock_connect_timeout(struct work_struct *work)
 	struct sock *sk;
 	struct vsock_sock *vsk;
 
-	vsk = container_of(work, struct vsock_sock, dwork.work);
+	vsk = container_of(work, struct vsock_sock, connect_work.work);
 	sk = sk_vsock(vsk);
 
 	lock_sock(sk);
@@ -1199,9 +1194,7 @@ static int vsock_stream_connect(struct socket *sock, struct sockaddr *addr,
 			 * timeout fires.
 			 */
 			sock_hold(sk);
-			INIT_DELAYED_WORK(&vsk->dwork,
-					  vsock_connect_timeout);
-			schedule_delayed_work(&vsk->dwork, timeout);
+			schedule_delayed_work(&vsk->connect_work, timeout);
 
 			/* Skip ahead to preserve error code set above. */
 			goto out_wait;

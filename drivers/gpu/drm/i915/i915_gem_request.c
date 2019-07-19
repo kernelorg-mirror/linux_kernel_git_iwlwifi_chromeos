@@ -94,42 +94,20 @@ const struct dma_fence_ops i915_fence_ops = {
 	.release = i915_fence_release,
 };
 
-int i915_gem_request_add_to_client(struct drm_i915_gem_request *req,
-				   struct drm_file *file)
-{
-	struct drm_i915_private *dev_private;
-	struct drm_i915_file_private *file_priv;
-
-	WARN_ON(!req || !file || req->file_priv);
-
-	if (!req || !file)
-		return -EINVAL;
-
-	if (req->file_priv)
-		return -EINVAL;
-
-	dev_private = req->i915;
-	file_priv = file->driver_priv;
-
-	spin_lock(&file_priv->mm.lock);
-	req->file_priv = file_priv;
-	list_add_tail(&req->client_list, &file_priv->mm.request_list);
-	spin_unlock(&file_priv->mm.lock);
-
-	return 0;
-}
-
 static inline void
 i915_gem_request_remove_from_client(struct drm_i915_gem_request *request)
 {
-	struct drm_i915_file_private *file_priv = request->file_priv;
+	struct drm_i915_file_private *file_priv;
 
+	file_priv = request->file_priv;
 	if (!file_priv)
 		return;
 
 	spin_lock(&file_priv->mm.lock);
-	list_del(&request->client_list);
-	request->file_priv = NULL;
+	if (request->file_priv) {
+		list_del(&request->client_link);
+		request->file_priv = NULL;
+	}
 	spin_unlock(&file_priv->mm.lock);
 }
 
@@ -293,11 +271,7 @@ static void i915_gem_request_retire(struct drm_i915_gem_request *request)
 		engine->context_unpin(engine, engine->last_retired_context);
 	engine->last_retired_context = request->ctx;
 
-	spin_lock_irq(&request->lock);
-	if (request->waitboost)
-		atomic_dec(&request->i915->rps.num_waiters);
-	dma_fence_signal_locked(&request->fence);
-	spin_unlock_irq(&request->lock);
+	dma_fence_signal(&request->fence);
 
 	i915_priotree_fini(request->i915, &request->priotree);
 	i915_gem_request_put(request);
@@ -604,7 +578,6 @@ i915_gem_request_alloc(struct intel_engine_cs *engine,
 	req->global_seqno = 0;
 	req->file_priv = NULL;
 	req->batch = NULL;
-	req->waitboost = false;
 
 	/*
 	 * Reserve space in the ring buffer for all the commands required to
