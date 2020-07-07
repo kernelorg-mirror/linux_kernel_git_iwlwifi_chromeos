@@ -550,6 +550,15 @@ out:
 	return err;
 }
 
+static void mmc_sdio_resend_if_cond(struct mmc_host *host,
+				    struct mmc_card *card)
+{
+	sdio_reset(host);
+	mmc_go_idle(host);
+	mmc_send_if_cond(host, host->ocr_avail);
+	mmc_remove_card(card);
+}
+
 /*
  * Handle the detection and initialisation of a card.
  *
@@ -640,10 +649,7 @@ try_again:
 		err = mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_180,
 					ocr);
 		if (err == -EAGAIN) {
-			sdio_reset(host);
-			mmc_go_idle(host);
-			mmc_send_if_cond(host, host->ocr_avail);
-			mmc_remove_card(card);
+			mmc_sdio_resend_if_cond(host, card);
 			retries--;
 			goto try_again;
 		} else if (err) {
@@ -1003,6 +1009,8 @@ static int mmc_sdio_resume(struct mmc_host *host)
 	return err;
 }
 
+#define SDIO_DEVICE_MVL_8897 0x912c
+
 static int mmc_sdio_power_restore(struct mmc_host *host)
 {
 	int ret;
@@ -1028,6 +1036,12 @@ static int mmc_sdio_power_restore(struct mmc_host *host)
 	 * harmless in other situations.
 	 *
 	 */
+
+	if (host->card->cis.vendor == SDIO_VENDOR_ID_MARVELL &&
+	    host->card->cis.device == SDIO_DEVICE_MVL_8897) {
+		// b/140272233
+		mmc_set_clock(host, host->f_min);
+	}
 
 	sdio_reset(host);
 	mmc_go_idle(host);
@@ -1120,6 +1134,12 @@ int mmc_attach_sdio(struct mmc_host *host)
 	 */
 	if (host->caps & MMC_CAP_POWER_OFF_CARD) {
 		/*
+		 * Do not allow runtime suspend until after SDIO function
+		 * devices are added.
+		 */
+		pm_runtime_get_noresume(&card->dev);
+
+		/*
 		 * Let runtime PM core know our card is active
 		 */
 		err = pm_runtime_set_active(&card->dev);
@@ -1193,19 +1213,23 @@ int mmc_attach_sdio(struct mmc_host *host)
 			goto remove_added;
 	}
 
+	if (host->caps & MMC_CAP_POWER_OFF_CARD)
+		pm_runtime_put(&card->dev);
+
 	mmc_claim_host(host);
 	return 0;
 
 
-remove_added:
-	/* Remove without lock if the device has been added. */
-	mmc_sdio_remove(host);
-	mmc_claim_host(host);
 remove:
-	/* And with lock if it hasn't been added. */
 	mmc_release_host(host);
-	if (host->card)
-		mmc_sdio_remove(host);
+remove_added:
+	/*
+	 * The devices are being deleted so it is not necessary to disable
+	 * runtime PM. Similarly we also don't pm_runtime_put() the SDIO card
+	 * because it needs to be active to remove any function devices that
+	 * were probed, and after that it gets deleted.
+	 */
+	mmc_sdio_remove(host);
 	mmc_claim_host(host);
 err:
 	mmc_detach_bus(host);
