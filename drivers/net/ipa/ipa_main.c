@@ -674,6 +674,11 @@ static void ipa_validate_build(void)
 
 	/* This is used as a divisor */
 	BUILD_BUG_ON(!IPA_AGGR_GRANULARITY);
+
+	/* Aggregation granularity value can't be 0, and must fit */
+	BUILD_BUG_ON(!ipa_aggr_granularity_val(IPA_AGGR_GRANULARITY));
+	BUILD_BUG_ON(ipa_aggr_granularity_val(IPA_AGGR_GRANULARITY) >
+			field_max(AGGR_GRANULARITY));
 #endif /* IPA_VALIDATE */
 }
 
@@ -933,8 +938,8 @@ static int ipa_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops ipa_pm_ops = {
-	.suspend_noirq	= ipa_suspend,
-	.resume_noirq	= ipa_resume,
+	.suspend	= ipa_suspend,
+	.resume		= ipa_resume,
 };
 
 static struct platform_driver ipa_driver = {

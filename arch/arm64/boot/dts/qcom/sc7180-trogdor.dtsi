@@ -8,6 +8,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include <dt-bindings/sound/sc7180-lpass.h>
 
 /* PMICs depend on spmi_bus label and so must come after SoC */
 #include "pm6150.dtsi"
@@ -70,6 +71,7 @@
 		bluetooth0 = &bluetooth;
 		hsuart0 = &uart3;
 		serial0 = &uart8;
+		wifi0 = &wifi;
 	};
 
 	chosen {
@@ -161,7 +163,79 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&ap_edp_bklten>;
 	};
+
+	gpio_keys: gpio-keys {
+		compatible = "gpio-keys";
+		status = "disabled";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pen_pdct_l>;
+
+		pen-insert {
+			label = "Pen Insert";
+
+			/* Insert = low, eject = high */
+			gpios = <&tlmm 52 GPIO_ACTIVE_LOW>;
+			linux,code = <SW_PEN_INSERTED>;
+			linux,input-type = <EV_SW>;
+			wakeup-source;
+		};
+	};
+
+	max98357a: max98357a {
+		compatible = "maxim,max98357a";
+		pinctrl-names = "default";
+		pinctrl-0 = <&amp_en>;
+		sdmode-gpios = <&tlmm 23 GPIO_ACTIVE_HIGH>;
+		#sound-dai-cells = <0>;
+	};
+
+	pwmleds {
+		compatible = "pwm-leds";
+		keyboard_backlight: keyboard-backlight {
+			status = "disabled";
+			label = "cros_ec::kbd_backlight";
+			pwms = <&cros_ec_pwm 0>;
+			max-brightness = <1023>;
+		};
+	};
+
+	sound {
+		compatible = "qcom,sc7180-sndcard";
+		model = "sc7180-snd-card";
+
+		audio-routing =
+			"Headphone Jack", "HPOL",
+			"Headphone Jack", "HPOR";
+
+		dai-link-0 {
+			link-name = "MultiMedia0";
+			cpu {
+				sound-dai = <&lpass_cpu  0>;
+			};
+
+			codec {
+				sound-dai = <&alc5682  0>;
+			};
+		};
+
+		dai-link-1 {
+			link-name = "MultiMedia1";
+			unidirectional = <0>;
+			cpu {
+				sound-dai = <&lpass_cpu  1>;
+			};
+
+			codec {
+				sound-dai = <&max98357a>;
+			};
+		};
+	};
 };
+
+&qfprom {
+	vcc-supply = <&pp1800_l11a>;
+};
+
 
 &qspi {
 	status = "okay";
@@ -628,14 +702,20 @@ hp_i2c: &i2c9 {
 	status = "okay";
 	clock-frequency = <400000>;
 
-	codec@1a {
+	alc5682: codec@1a {
 		compatible = "realtek,rt5682i";
 		reg = <0x1a>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hp_irq>;
 
+		#sound-dai-cells = <1>;
+
 		interrupt-parent = <&tlmm>;
-		interrupts = <28 IRQ_TYPE_LEVEL_HIGH>;
+		/*
+		 * This will get ignored because the interrupt type
+		 * is set in rt5682.c.
+		 */
+		interrupts = <28 IRQ_TYPE_EDGE_BOTH>;
 
 		AVDD-supply = <&pp1800_alc5682>;
 		MICVDD-supply = <&pp3300_codec>;
@@ -647,12 +727,56 @@ hp_i2c: &i2c9 {
 	};
 };
 
+&ipa {
+	status = "okay";
+
+	/*
+	 * Trogdor doesn't have QHEE (Qualcomm's EL2 blob), so the
+	 * modem needs to cover certain init steps (GSI init), and
+	 * the AP needs to wait for it.
+	 */
+	modem-init;
+};
+
+&lpass_cpu {
+	status = "okay";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&sec_mi2s_active &sec_mi2s_dout_active
+		     &sec_mi2s_ws_active &pri_mi2s_active
+		     &pri_mi2s_dout_active &pri_mi2s_ws_active
+		     &pri_mi2s_din_active &pri_mi2s_mclk_active>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	mi2s-primary@0 {
+		reg = <MI2S_PRIMARY>;
+		qcom,playback-sd-lines = <1>;
+		qcom,capture-sd-lines = <0>;
+	};
+
+	mi2s-secondary@1 {
+		reg = <MI2S_SECONDARY>;
+		qcom,playback-sd-lines = <0>;
+	};
+};
+
 &mdp {
 	status = "okay";
 };
 
 &mdss {
 	status = "okay";
+};
+
+&msm_dp {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&dp_hot_plug_det>;
+	data-lanes = <0 1>;
+	vdda-1p2-supply = <&vdda_usb_ss_dp_1p2>;
+	vdda-0p9-supply = <&vdda_usb_ss_dp_core>;
 };
 
 &pm6150_pwrkey {
@@ -665,6 +789,17 @@ hp_i2c: &i2c9 {
 
 &qupv3_id_1 {
 	status = "okay";
+};
+
+&remoteproc_mpss {
+	status = "okay";
+	compatible = "qcom,sc7180-mss-pil";
+	iommus = <&apps_smmu 0x461 0x0>, <&apps_smmu 0x444 0x3>;
+	memory-region = <&mba_mem &mpss_mem>;
+
+	/* This gets overridden for SKUs with LTE support. */
+	firmware-name = "sc7180-mss/google-trogdor-nolte/mba.mbn",
+			"sc7180-mss/google-trogdor-nolte/modem.mdt";
 };
 
 &sdhc_1 {
@@ -734,15 +869,33 @@ ap_spi_fp: &spi10 {
 	vdda-pll-supply = <&vdda_qusb_hs0_1p8>;
 	vdda-phy-dpdm-supply = <&vdda_qusb_hs0_3p1>;
 	qcom,imp-res-offset-value = <8>;
-	qcom,hstx-trim-value = <QUSB2_V2_HSTX_TRIM_21_6_MA>;
-	qcom,preemphasis-level = <QUSB2_V2_PREEMPHASIS_5_PERCENT>;
+	qcom,preemphasis-level = <QUSB2_V2_PREEMPHASIS_15_PERCENT>;
 	qcom,preemphasis-width = <QUSB2_V2_PREEMPHASIS_WIDTH_HALF_BIT>;
+	qcom,bias-ctrl-value = <0x22>;
+	qcom,charge-ctrl-value = <3>;
+	qcom,hsdisc-trim-value = <0>;
 };
 
 &usb_1_qmpphy {
 	status = "okay";
 	vdda-phy-supply = <&vdda_usb_ss_dp_1p2>;
 	vdda-pll-supply = <&vdda_usb_ss_dp_core>;
+};
+
+&wifi {
+	status = "okay";
+	vdd-0.8-cx-mx-supply = <&vdd_cx_wlan>;
+	vdd-1.8-xo-supply = <&pp1800_l1c>;
+	vdd-1.3-rfa-supply = <&pp1300_l2c>;
+
+	/*
+	 * TODO: Put ch1 supply in its rightful place, rather than in ch0's
+	 * spot. Channel 0 is held open by bluetooth for now.
+	 */
+	vdd-3.3-ch0-supply = <&pp3300_l11c>;
+	wifi-firmware {
+		iommus = <&apps_smmu 0xc2 0x1>;
+	};
 };
 
 /* PINCTRL - additions to nodes defined in sdm845.dtsi */
@@ -915,6 +1068,18 @@ ap_spi_fp: &spi10 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&bios_flash_wp_l>, <&ap_suspend_l_neuter>;
 
+	amp_en: amp-en {
+		pinmux {
+			pins = "gpio23";
+			function = "gpio";
+		};
+
+		pinconf {
+			pins = "gpio23";
+			bias-pull-down;
+		};
+	};
+
 	ap_ec_int_l: ap-ec-int-l {
 		pinmux {
 			pins = "gpio94";
@@ -938,6 +1103,9 @@ ap_spi_fp: &spi10 {
 			pins = "gpio12";
 			drive-strength = <2>;
 			bias-disable;
+
+			/* Force backlight to be disabled to match state at boot. */
+			output-low;
 		};
 	};
 
@@ -966,6 +1134,20 @@ ap_spi_fp: &spi10 {
 			bias-disable;
 		};
 	};
+
+	dp_hot_plug_det: dp-hot-plug-det {
+		 pinmux {
+			 pins = "gpio117";
+			 function = "dp_hot";
+		 };
+
+		 config {
+			 pins = "gpio117";
+			 bias-disable;
+			 input-enable;
+			 drive-strength = <2>;
+		 };
+	 };
 
 	edp_brij_en: edp-brij-en {
 		pinmux {
@@ -1098,8 +1280,7 @@ ap_spi_fp: &spi10 {
 
 		pinconf {
 			pins = "gpio28";
-			/* TODO: confirm we want internal pull down */
-			bias-pull-down;
+			bias-pull-up;
 		};
 	};
 
@@ -1194,5 +1375,11 @@ ap_spi_fp: &spi10 {
 			bias-disable;
 			drive-strength = <2>;
 		};
+	};
+};
+
+&venus {
+	video-firmware {
+		iommus = <&apps_smmu 0x0c42 0x0>;
 	};
 };
