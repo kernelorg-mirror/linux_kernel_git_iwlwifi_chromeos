@@ -36,6 +36,8 @@
 #include "hci_request.h"
 #include "smp.h"
 #include "mgmt_util.h"
+#include "mgmt_config.h"
+
 #include "overflow.h"
 
 #define MGMT_VERSION	1
@@ -109,12 +111,14 @@ static const u16 mgmt_commands[] = {
 	MGMT_OP_SET_APPEARANCE,
 	MGMT_OP_SET_BLOCKED_KEYS,
 	MGMT_OP_SET_WIDEBAND_SPEECH,
-	/* Begin Chromium only op codes*/
-	MGMT_OP_SET_ADVERTISING_INTERVALS,
-	MGMT_OP_SET_EVENT_MASK,
-	MGMT_OP_SET_KERNEL_DEBUG,
-	MGMT_OP_SET_WAKE_CAPABLE,
-	/* End Chromium only op codes */
+	MGMT_OP_READ_EXP_FEATURES_INFO,
+	MGMT_OP_SET_EXP_FEATURE,
+	MGMT_OP_READ_DEF_SYSTEM_CONFIG,
+	MGMT_OP_SET_DEF_SYSTEM_CONFIG,
+	MGMT_OP_READ_DEF_RUNTIME_CONFIG,
+	MGMT_OP_SET_DEF_RUNTIME_CONFIG,
+	MGMT_OP_GET_DEVICE_FLAGS,
+	MGMT_OP_SET_DEVICE_FLAGS,
 };
 
 static const u16 mgmt_events[] = {
@@ -153,6 +157,8 @@ static const u16 mgmt_events[] = {
 	MGMT_EV_ADVERTISING_ADDED,
 	MGMT_EV_ADVERTISING_REMOVED,
 	MGMT_EV_EXT_INFO_CHANGED,
+	MGMT_EV_EXP_FEATURE_CHANGED,
+	MGMT_EV_DEVICE_FLAGS_CHANGED,
 };
 
 static const u16 mgmt_untrusted_commands[] = {
@@ -162,6 +168,9 @@ static const u16 mgmt_untrusted_commands[] = {
 	MGMT_OP_READ_CONFIG_INFO,
 	MGMT_OP_READ_EXT_INDEX_LIST,
 	MGMT_OP_READ_EXT_INFO,
+	MGMT_OP_READ_EXP_FEATURES_INFO,
+	MGMT_OP_READ_DEF_SYSTEM_CONFIG,
+	MGMT_OP_READ_DEF_RUNTIME_CONFIG,
 };
 
 static const u16 mgmt_untrusted_events[] = {
@@ -176,6 +185,7 @@ static const u16 mgmt_untrusted_events[] = {
 	MGMT_EV_EXT_INDEX_ADDED,
 	MGMT_EV_EXT_INDEX_REMOVED,
 	MGMT_EV_EXT_INFO_CHANGED,
+	MGMT_EV_EXP_FEATURE_CHANGED,
 };
 
 #define CACHE_TIMEOUT	msecs_to_jiffies(2 * 1000)
@@ -661,7 +671,6 @@ static u32 get_supported_settings(struct hci_dev *hdev)
 		settings |= MGMT_SETTING_SECURE_CONN;
 		settings |= MGMT_SETTING_PRIVACY;
 		settings |= MGMT_SETTING_STATIC_ADDRESS;
-		settings |= MGMT_SETTING_ADVERTISING_INTERVALS;
 	}
 
 	if (test_bit(HCI_QUIRK_EXTERNAL_CONFIG, &hdev->quirks) ||
@@ -738,9 +747,6 @@ static u32 get_current_settings(struct hci_dev *hdev)
 
 	if (hci_dev_test_flag(hdev, HCI_WIDEBAND_SPEECH_ENABLED))
 		settings |= MGMT_SETTING_WIDEBAND_SPEECH;
-
-	if (hci_dev_test_flag(hdev, HCI_ADVERTISING_INTERVALS))
-		settings |= MGMT_SETTING_ADVERTISING_INTERVALS;
 
 	return settings;
 }
@@ -3337,6 +3343,262 @@ unlock:
 	return err;
 }
 
+#ifdef CONFIG_BT_FEATURE_DEBUG
+/* d4992530-b9ec-469f-ab01-6c481c47da1c */
+static const u8 debug_uuid[16] = {
+	0x1c, 0xda, 0x47, 0x1c, 0x48, 0x6c, 0x01, 0xab,
+	0x9f, 0x46, 0xec, 0xb9, 0x30, 0x25, 0x99, 0xd4,
+};
+#endif
+
+static int read_exp_features_info(struct sock *sk, struct hci_dev *hdev,
+				  void *data, u16 data_len)
+{
+	char buf[42];
+	struct mgmt_rp_read_exp_features_info *rp = (void *)buf;
+	u16 idx = 0;
+
+	bt_dev_dbg(hdev, "sock %p", sk);
+
+	memset(&buf, 0, sizeof(buf));
+
+#ifdef CONFIG_BT_FEATURE_DEBUG
+	if (!hdev) {
+		u32 flags = bt_dbg_get() ? BIT(0) : 0;
+
+		memcpy(rp->features[idx].uuid, debug_uuid, 16);
+		rp->features[idx].flags = cpu_to_le32(flags);
+		idx++;
+	}
+#endif
+
+	rp->feature_count = cpu_to_le16(idx);
+
+	/* After reading the experimental features information, enable
+	 * the events to update client on any future change.
+	 */
+	hci_sock_set_flag(sk, HCI_MGMT_EXP_FEATURE_EVENTS);
+
+	return mgmt_cmd_complete(sk, hdev ? hdev->id : MGMT_INDEX_NONE,
+				 MGMT_OP_READ_EXP_FEATURES_INFO,
+				 0, rp, sizeof(*rp) + (20 * idx));
+}
+
+#ifdef CONFIG_BT_FEATURE_DEBUG
+static int exp_debug_feature_changed(bool enabled, struct sock *skip)
+{
+	struct mgmt_ev_exp_feature_changed ev;
+
+	memset(&ev, 0, sizeof(ev));
+	memcpy(ev.uuid, debug_uuid, 16);
+	ev.flags = cpu_to_le32(enabled ? BIT(0) : 0);
+
+	return mgmt_limited_event(MGMT_EV_EXP_FEATURE_CHANGED, NULL,
+				  &ev, sizeof(ev),
+				  HCI_MGMT_EXP_FEATURE_EVENTS, skip);
+}
+#endif
+
+static int set_exp_feature(struct sock *sk, struct hci_dev *hdev,
+			   void *data, u16 data_len)
+{
+	struct mgmt_cp_set_exp_feature *cp = data;
+	struct mgmt_rp_set_exp_feature rp;
+
+	bt_dev_dbg(hdev, "sock %p", sk);
+
+	if (!memcmp(cp->uuid, ZERO_KEY, 16)) {
+		memset(rp.uuid, 0, 16);
+		rp.flags = cpu_to_le32(0);
+
+#ifdef CONFIG_BT_FEATURE_DEBUG
+		if (!hdev) {
+			bool changed = bt_dbg_get();
+
+			bt_dbg_set(false);
+
+			if (changed)
+				exp_debug_feature_changed(false, sk);
+		}
+#endif
+
+		hci_sock_set_flag(sk, HCI_MGMT_EXP_FEATURE_EVENTS);
+
+		return mgmt_cmd_complete(sk, hdev ? hdev->id : MGMT_INDEX_NONE,
+					 MGMT_OP_SET_EXP_FEATURE, 0,
+					 &rp, sizeof(rp));
+	}
+
+#ifdef CONFIG_BT_FEATURE_DEBUG
+	if (!memcmp(cp->uuid, debug_uuid, 16)) {
+		bool val, changed;
+		int err;
+
+		/* Command requires to use the non-controller index */
+		if (hdev)
+			return mgmt_cmd_status(sk, hdev->id,
+					       MGMT_OP_SET_EXP_FEATURE,
+					       MGMT_STATUS_INVALID_INDEX);
+
+		/* Parameters are limited to a single octet */
+		if (data_len != MGMT_SET_EXP_FEATURE_SIZE + 1)
+			return mgmt_cmd_status(sk, MGMT_INDEX_NONE,
+					       MGMT_OP_SET_EXP_FEATURE,
+					       MGMT_STATUS_INVALID_PARAMS);
+
+		/* Only boolean on/off is supported */
+		if (cp->param[0] != 0x00 && cp->param[0] != 0x01)
+			return mgmt_cmd_status(sk, MGMT_INDEX_NONE,
+					       MGMT_OP_SET_EXP_FEATURE,
+					       MGMT_STATUS_INVALID_PARAMS);
+
+		val = !!cp->param[0];
+		changed = val ? !bt_dbg_get() : bt_dbg_get();
+		bt_dbg_set(val);
+
+		memcpy(rp.uuid, debug_uuid, 16);
+		rp.flags = cpu_to_le32(val ? BIT(0) : 0);
+
+		hci_sock_set_flag(sk, HCI_MGMT_EXP_FEATURE_EVENTS);
+
+		err = mgmt_cmd_complete(sk, MGMT_INDEX_NONE,
+					MGMT_OP_SET_EXP_FEATURE, 0,
+					&rp, sizeof(rp));
+
+		if (changed)
+			exp_debug_feature_changed(val, sk);
+
+		return err;
+	}
+#endif
+
+	return mgmt_cmd_status(sk, hdev ? hdev->id : MGMT_INDEX_NONE,
+			       MGMT_OP_SET_EXP_FEATURE,
+			       MGMT_STATUS_NOT_SUPPORTED);
+}
+
+#define SUPPORTED_DEVICE_FLAGS() ((1U << HCI_CONN_FLAG_MAX) - 1)
+
+static int get_device_flags(struct sock *sk, struct hci_dev *hdev, void *data,
+			    u16 data_len)
+{
+	struct mgmt_cp_get_device_flags *cp = data;
+	struct mgmt_rp_get_device_flags rp;
+	struct bdaddr_list_with_flags *br_params;
+	struct hci_conn_params *params;
+	u32 supported_flags = SUPPORTED_DEVICE_FLAGS();
+	u32 current_flags = 0;
+	u8 status = MGMT_STATUS_INVALID_PARAMS;
+
+	bt_dev_dbg(hdev, "Get device flags %pMR (type 0x%x)\n",
+		   &cp->addr.bdaddr, cp->addr.type);
+
+	hci_dev_lock(hdev);
+
+	if (cp->addr.type == BDADDR_BREDR) {
+		br_params = hci_bdaddr_list_lookup_with_flags(&hdev->whitelist,
+							      &cp->addr.bdaddr,
+							      cp->addr.type);
+		if (!br_params)
+			goto done;
+
+		current_flags = br_params->current_flags;
+	} else {
+		params = hci_conn_params_lookup(hdev, &cp->addr.bdaddr,
+						le_addr_type(cp->addr.type));
+
+		if (!params)
+			goto done;
+
+		current_flags = params->current_flags;
+	}
+
+	bacpy(&rp.addr.bdaddr, &cp->addr.bdaddr);
+	rp.addr.type = cp->addr.type;
+	rp.supported_flags = cpu_to_le32(supported_flags);
+	rp.current_flags = cpu_to_le32(current_flags);
+
+	status = MGMT_STATUS_SUCCESS;
+
+done:
+	hci_dev_unlock(hdev);
+
+	return mgmt_cmd_complete(sk, hdev->id, MGMT_OP_GET_DEVICE_FLAGS, status,
+				&rp, sizeof(rp));
+}
+
+static void device_flags_changed(struct sock *sk, struct hci_dev *hdev,
+				 bdaddr_t *bdaddr, u8 bdaddr_type,
+				 u32 supported_flags, u32 current_flags)
+{
+	struct mgmt_ev_device_flags_changed ev;
+
+	bacpy(&ev.addr.bdaddr, bdaddr);
+	ev.addr.type = bdaddr_type;
+	ev.supported_flags = cpu_to_le32(supported_flags);
+	ev.current_flags = cpu_to_le32(current_flags);
+
+	mgmt_event(MGMT_EV_DEVICE_FLAGS_CHANGED, hdev, &ev, sizeof(ev), sk);
+}
+
+static int set_device_flags(struct sock *sk, struct hci_dev *hdev, void *data,
+			    u16 len)
+{
+	struct mgmt_cp_set_device_flags *cp = data;
+	struct bdaddr_list_with_flags *br_params;
+	struct hci_conn_params *params;
+	u8 status = MGMT_STATUS_INVALID_PARAMS;
+	u32 supported_flags = SUPPORTED_DEVICE_FLAGS();
+	u32 current_flags = __le32_to_cpu(cp->current_flags);
+
+	bt_dev_dbg(hdev, "Set device flags %pMR (type 0x%x) = 0x%x",
+		   &cp->addr.bdaddr, cp->addr.type,
+		   __le32_to_cpu(current_flags));
+
+	if ((supported_flags | current_flags) != supported_flags) {
+		bt_dev_warn(hdev, "Bad flag given (0x%x) vs supported (0x%0x)",
+			    current_flags, supported_flags);
+		goto done;
+	}
+
+	hci_dev_lock(hdev);
+
+	if (cp->addr.type == BDADDR_BREDR) {
+		br_params = hci_bdaddr_list_lookup_with_flags(&hdev->whitelist,
+							      &cp->addr.bdaddr,
+							      cp->addr.type);
+
+		if (br_params) {
+			br_params->current_flags = current_flags;
+			status = MGMT_STATUS_SUCCESS;
+		} else {
+			bt_dev_warn(hdev, "No such BR/EDR device %pMR (0x%x)",
+				    &cp->addr.bdaddr, cp->addr.type);
+		}
+	} else {
+		params = hci_conn_params_lookup(hdev, &cp->addr.bdaddr,
+						le_addr_type(cp->addr.type));
+		if (params) {
+			params->current_flags = current_flags;
+			status = MGMT_STATUS_SUCCESS;
+		} else {
+			bt_dev_warn(hdev, "No such LE device %pMR (0x%x)",
+				    &cp->addr.bdaddr,
+				    le_addr_type(cp->addr.type));
+		}
+	}
+
+done:
+	hci_dev_unlock(hdev);
+
+	if (status == MGMT_STATUS_SUCCESS)
+		device_flags_changed(sk, hdev, &cp->addr.bdaddr, cp->addr.type,
+				     supported_flags, current_flags);
+
+	return mgmt_cmd_complete(sk, hdev->id, MGMT_OP_SET_DEVICE_FLAGS, status,
+				 &cp->addr, sizeof(cp->addr));
+}
+
 static void read_local_oob_data_complete(struct hci_dev *hdev, u8 status,
 				         u16 opcode, struct sk_buff *skb)
 {
@@ -4443,187 +4705,6 @@ unlock:
 	return err;
 }
 
-static int set_advertising_intervals(struct sock *sk, struct hci_dev *hdev,
-				     void *data, u16 len)
-{
-	struct mgmt_cp_set_advertising_intervals *cp = data;
-	int err;
-	u16 max_interval_ms, grace_period;
-	/* If both min_interval and max_interval are 0, use default values. */
-	bool use_default = cp->min_interval == 0 && cp->max_interval == 0;
-	struct adv_info *adv_instance;
-	int instance;
-
-	BT_DBG("%s", hdev->name);
-
-	/* This method is intended for LE devices only.*/
-	if (!hci_dev_test_flag(hdev, HCI_LE_ENABLED))
-		return mgmt_cmd_status(sk, hdev->id,
-				       MGMT_OP_SET_ADVERTISING_INTERVALS,
-				       MGMT_STATUS_REJECTED);
-
-	/* Check the validity of the intervals. */
-	if (!use_default && (cp->min_interval < HCI_VALID_LE_ADV_MIN_INTERVAL ||
-			     cp->max_interval > HCI_VALID_LE_ADV_MAX_INTERVAL ||
-			     cp->min_interval > cp->max_interval)) {
-		return mgmt_cmd_status(sk, hdev->id,
-				       MGMT_OP_SET_ADVERTISING_INTERVALS,
-				       MGMT_STATUS_INVALID_PARAMS);
-	}
-
-	hci_dev_lock(hdev);
-
-	if (use_default) {
-		hci_dev_clear_flag(hdev, HCI_ADVERTISING_INTERVALS);
-		hdev->le_adv_min_interval = HCI_DEFAULT_LE_ADV_MIN_INTERVAL;
-		hdev->le_adv_max_interval = HCI_DEFAULT_LE_ADV_MAX_INTERVAL;
-		hdev->le_adv_duration = HCI_DEFAULT_ADV_DURATION;
-	} else {
-		hci_dev_set_flag(hdev, HCI_ADVERTISING_INTERVALS);
-		hdev->le_adv_min_interval = cp->min_interval;
-		hdev->le_adv_max_interval = cp->max_interval;
-
-		max_interval_ms = CONVERT_TO_ADV_INTERVAL_MS(cp->max_interval);
-		grace_period = ADV_DURATION_GRACE_PERIOD(max_interval_ms);
-		if (grace_period < ADV_DURATION_MIN_GRACE_PERIOD)
-			grace_period = ADV_DURATION_MIN_GRACE_PERIOD;
-		hdev->le_adv_duration = max_interval_ms + grace_period;
-	}
-	hdev->le_adv_param_changed = true;
-
-	/* hdev->le_adv_duration would be copied to adv instances created
-	 * hereafter. However, for any existing adv instance of which the
-	 * individual_duration_flag is false, we should modify its duration.
-	 */
-	for (instance = 1;  instance <= HCI_MAX_ADV_INSTANCES; instance++) {
-		adv_instance = hci_find_adv_instance(hdev, instance);
-		if (adv_instance && !adv_instance->individual_duration_flag)
-			adv_instance->duration = hdev->le_adv_duration;
-	}
-
-	/* If advertising is not enabled, the new parameters will take effect
-	 * when advertising is enabled.
-	 * If advertising has been enabled, the new parameters will take effect
-	 * when next adv instance is scheduled by
-	 * __hci_req_schedule_adv_instance().
-	 * Hence, it is ok to send settings response now.
-	 */
-	err = send_settings_rsp(sk, MGMT_OP_SET_ADVERTISING_INTERVALS, hdev);
-	new_settings(hdev, sk);
-
-	hci_dev_unlock(hdev);
-
-	return err;
-}
-
-static void set_event_mask_complete(struct hci_dev *hdev, u8 status, u16 opcode)
-{
-	struct mgmt_pending_cmd *cmd;
-
-	BT_DBG("status 0x%02x", status);
-
-	hci_dev_lock(hdev);
-
-	/* Saving of the new event mask is done in  */
-	cmd = pending_find_data(MGMT_OP_SET_EVENT_MASK, hdev, NULL);
-	if (!cmd)
-		goto unlock;
-
-	cmd->cmd_complete(cmd, mgmt_status(status));
-	mgmt_pending_remove(cmd);
-
-unlock:
-	hci_dev_unlock(hdev);
-}
-
-static int set_event_mask(struct sock *sk, struct hci_dev *hdev,
-			  void *data, u16 len)
-{
-	struct mgmt_cp_set_event_mask *cp = data;
-	struct mgmt_pending_cmd *cmd;
-	struct hci_request req;
-	u8 new_events[8], i;
-	int err;
-
-	BT_DBG("request for %s", hdev->name);
-
-	hci_dev_lock(hdev);
-
-	if (pending_find(MGMT_OP_SET_EVENT_MASK, hdev)) {
-		err = mgmt_cmd_complete(sk, hdev->id, MGMT_OP_SET_EVENT_MASK,
-					MGMT_STATUS_BUSY, NULL, 0);
-		goto failed;
-	}
-
-	cmd = mgmt_pending_add(sk, MGMT_OP_SET_EVENT_MASK, hdev, data, len);
-	if (!cmd) {
-		err = -ENOMEM;
-		goto failed;
-	}
-
-	cmd->cmd_complete = generic_cmd_complete;
-
-	hci_req_init(&req, hdev);
-	for (i = 0 ; i < HCI_SET_EVENT_MASK_SIZE; i++) {
-		/* Modify only bits that are requested by the stack */
-		new_events[i] = hdev->event_mask[i];
-		new_events[i] &= ~cp->mask[i];
-		new_events[i] |= cp->mask[i] & cp->events[i];
-	}
-
-	hci_req_add(&req, HCI_OP_SET_EVENT_MASK, sizeof(new_events),
-		    new_events);
-	err = hci_req_run(&req, set_event_mask_complete);
-	if (err < 0)
-		mgmt_pending_remove(cmd);
-
-failed:
-	hci_dev_unlock(hdev);
-	return err;
-}
-
-static int set_wake_capable(struct sock *sk, struct hci_dev *hdev, void *data,
-			    u16 len)
-{
-	struct mgmt_cp_set_wake_capable *cp = data;
-	struct hci_conn_params *params;
-	int err;
-	u8 status = MGMT_STATUS_FAILED;
-	u8 addr_type = cp->addr.type == BDADDR_BREDR ?
-			       cp->addr.type :
-			       le_addr_type(cp->addr.type);
-
-	bt_dev_dbg(hdev, "Set wake capable %pMR (type 0x%x) = 0x%x\n",
-		   &cp->addr.bdaddr, addr_type, cp->wake_capable);
-
-	if (cp->addr.type == BDADDR_BREDR) {
-		if (cp->wake_capable)
-			err = hci_bdaddr_list_add(&hdev->wakeable,
-						  &cp->addr.bdaddr, addr_type);
-		else
-			err = hci_bdaddr_list_del(&hdev->wakeable,
-						  &cp->addr.bdaddr, addr_type);
-
-		if (!err || err == -EEXIST || err == -ENOENT)
-			status = MGMT_STATUS_SUCCESS;
-
-		goto done;
-	}
-
-	/* Add wakeable param to le connection parameters */
-	params = hci_conn_params_lookup(hdev, &cp->addr.bdaddr, addr_type);
-	if (params) {
-		params->wakeable = cp->wake_capable;
-		status = MGMT_STATUS_SUCCESS;
-	}
-
-done:
-	err = mgmt_cmd_complete(sk, hdev->id, MGMT_OP_SET_WAKE_CAPABLE, status,
-				cp, sizeof(*cp));
-
-	return err;
-}
-
 static void set_bredr_complete(struct hci_dev *hdev, u8 status, u16 opcode)
 {
 	struct mgmt_pending_cmd *cmd;
@@ -5627,7 +5708,9 @@ static int add_device(struct sock *sk, struct hci_dev *hdev,
 {
 	struct mgmt_cp_add_device *cp = data;
 	u8 auto_conn, addr_type;
+	struct hci_conn_params *params;
 	int err;
+	u32 current_flags = 0;
 
 	BT_DBG("%s", hdev->name);
 
@@ -5654,8 +5737,9 @@ static int add_device(struct sock *sk, struct hci_dev *hdev,
 			goto unlock;
 		}
 
-		err = hci_bdaddr_list_add(&hdev->whitelist, &cp->addr.bdaddr,
-					  cp->addr.type);
+		err = hci_bdaddr_list_add_with_flags(&hdev->whitelist,
+						     &cp->addr.bdaddr,
+						     cp->addr.type, 0);
 		if (err)
 			goto unlock;
 
@@ -5694,12 +5778,19 @@ static int add_device(struct sock *sk, struct hci_dev *hdev,
 					MGMT_STATUS_FAILED, &cp->addr,
 					sizeof(cp->addr));
 		goto unlock;
+	} else {
+		params = hci_conn_params_lookup(hdev, &cp->addr.bdaddr,
+						addr_type);
+		if (params)
+			current_flags = params->current_flags;
 	}
 
 	hci_update_background_scan(hdev);
 
 added:
 	device_added(sk, hdev, &cp->addr.bdaddr, cp->addr.type, cp->action);
+	device_flags_changed(NULL, hdev, &cp->addr.bdaddr, cp->addr.type,
+			     SUPPORTED_DEVICE_FLAGS(), current_flags);
 
 	err = mgmt_cmd_complete(sk, hdev->id, MGMT_OP_ADD_DEVICE,
 				MGMT_STATUS_SUCCESS, &cp->addr,
@@ -5747,13 +5838,6 @@ static int remove_device(struct sock *sk, struct hci_dev *hdev,
 			err = hci_bdaddr_list_del(&hdev->whitelist,
 						  &cp->addr.bdaddr,
 						  cp->addr.type);
-
-			/* Don't check result since it either succeeds or device
-			 * wasn't there (not wakeable or invalid params as
-			 * covered by deleting from whitelist).
-			 */
-			hci_bdaddr_list_del(&hdev->wakeable, &cp->addr.bdaddr,
-					    cp->addr.type);
 			if (err) {
 				err = mgmt_cmd_complete(sk, hdev->id,
 							MGMT_OP_REMOVE_DEVICE,
@@ -6848,17 +6932,6 @@ static int get_adv_size_info(struct sock *sk, struct hci_dev *hdev,
 	return err;
 }
 
-static int set_kernel_debug(struct sock *sk, struct hci_dev *hdev,
-			    void *data, u16 data_len)
-{
-	struct mgmt_cp_set_kernel_debug *cp = data;
-
-	bt_set_debug(cp->enabled);
-
-	return mgmt_cmd_complete(sk, MGMT_INDEX_NONE, MGMT_OP_SET_KERNEL_DEBUG,
-				 MGMT_STATUS_SUCCESS, NULL, 0);
-}
-
 static const struct hci_mgmt_handler mgmt_handlers[] = {
 	{ NULL }, /* 0x0000 (no command) */
 	{ read_version,            MGMT_READ_VERSION_SIZE,
@@ -6957,39 +7030,22 @@ static const struct hci_mgmt_handler mgmt_handlers[] = {
 						HCI_MGMT_VAR_LEN },
 	{ set_wideband_speech,	   MGMT_SETTING_SIZE },
 	{ NULL }, // 0x0048
-	{ NULL }, // 0x0049
-	{ NULL }, // 0x004A
-	{ NULL }, // 0x0048
-	{ NULL }, // 0x004C
-	{ NULL }, // 0x004D
-	{ NULL }, // 0x004E
-	{ NULL }, // 0x004F
-	{ NULL }, // 0x0050
-	{ NULL }, // 0x0051
-	{ NULL }, // 0x0052
-	{ NULL }, // 0x0053
-	{ NULL }, // 0x0054
-	{ NULL }, // 0x0055
-	{ NULL }, // 0x0056
-	{ NULL }, // 0x0057
-	{ NULL }, // 0x0058
-	{ NULL }, // 0x0059
-	{ NULL }, // 0x005A
-	{ NULL }, // 0x005B
-	{ NULL }, // 0x005C
-	{ NULL }, // 0x005D
-	{ NULL }, // 0x005E
-	{ NULL }, // 0x005F
-	/* Begin Chromium only op_codes */
-	{ set_advertising_intervals, MGMT_SET_ADVERTISING_INTERVALS_SIZE },
-	{ set_event_mask,	   MGMT_SET_EVENT_MASK_CP_SIZE },
-	{ NULL }, // 0x0062
-	{ NULL }, // 0x0063
-	{ set_kernel_debug,	   MGMT_SET_KERNEL_DEBUG_SIZE,
-						HCI_MGMT_NO_HDEV |
+	{ read_exp_features_info,  MGMT_READ_EXP_FEATURES_INFO_SIZE,
+						HCI_MGMT_UNTRUSTED |
+						HCI_MGMT_HDEV_OPTIONAL },
+	{ set_exp_feature,         MGMT_SET_EXP_FEATURE_SIZE,
+						HCI_MGMT_VAR_LEN |
+						HCI_MGMT_HDEV_OPTIONAL },
+	{ read_def_system_config,  MGMT_READ_DEF_SYSTEM_CONFIG_SIZE,
 						HCI_MGMT_UNTRUSTED },
-	{ set_wake_capable,		MGMT_SET_WAKE_CAPABLE_SIZE },
-	/* End Chromium only op_codes */
+	{ set_def_system_config,   MGMT_SET_DEF_SYSTEM_CONFIG_SIZE,
+						HCI_MGMT_VAR_LEN },
+	{ read_def_runtime_config, MGMT_READ_DEF_RUNTIME_CONFIG_SIZE,
+						HCI_MGMT_UNTRUSTED },
+	{ set_def_runtime_config,  MGMT_SET_DEF_RUNTIME_CONFIG_SIZE,
+						HCI_MGMT_VAR_LEN },
+	{ get_device_flags,        MGMT_GET_DEVICE_FLAGS_SIZE },
+	{ set_device_flags,        MGMT_SET_DEVICE_FLAGS_SIZE },
 };
 
 void mgmt_index_added(struct hci_dev *hdev)
