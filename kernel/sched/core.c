@@ -5059,7 +5059,8 @@ static void sched_core_balance(struct rq *rq)
 	struct sched_domain *sd;
 	int cpu = cpu_of(rq);
 
-	rcu_read_lock_sched();
+	preempt_disable();
+	rcu_read_lock();
 	raw_spin_unlock_irq(rq_lockp(rq));
 	for_each_domain(cpu, sd) {
 		if (!(sd->flags & SD_LOAD_BALANCE))
@@ -5072,7 +5073,8 @@ static void sched_core_balance(struct rq *rq)
 			break;
 	}
 	raw_spin_lock_irq(rq_lockp(rq));
-	rcu_read_unlock_sched();
+	rcu_read_unlock();
+	preempt_enable();
 }
 
 static DEFINE_PER_CPU(struct callback_head, core_balance_head);
@@ -8076,9 +8078,6 @@ int task_set_core_sched(int set, struct task_struct *tsk)
 
 	if (!set)
 		sched_core_put();
-
-	pr_alert("coresched: prctl success: %s/%d %lx (fork: %d)\n", tsk->comm,
-		 tsk->pid, tsk->core_cookie, tsk != current);
 	return 0;
 }
 #endif
