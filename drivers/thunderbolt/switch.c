@@ -601,6 +601,13 @@ int tb_port_add_nfc_credits(struct tb_port *port, int credits)
 	if (credits == 0 || port->sw->is_unplugged)
 		return 0;
 
+	/*
+	 * USB4 restricts programming NFC buffers to lane adapters only
+	 * so skip other ports.
+	 */
+	if (tb_switch_is_usb4(port->sw) && !tb_port_is_null(port))
+		return 0;
+
 	nfc_credits = port->config.nfc_credits & ADP_CS_4_NFC_BUFFERS_MASK;
 	nfc_credits += credits;
 
@@ -2672,11 +2679,23 @@ int tb_switch_resume(struct tb_switch *sw)
 	return 0;
 }
 
-void tb_switch_suspend(struct tb_switch *sw)
+/**
+ * tb_switch_suspend() - Put a switch to sleep
+ * @sw: Switch to suspend
+ * @runtime: Is this runtime suspend or system sleep
+ *
+ * Suspends router and all its children. Enables wakes according to
+ * value of @runtime and then sets sleep bit for the router. If @sw is
+ * host router the domain is ready to go to sleep once this function
+ * returns.
+ */
+void tb_switch_suspend(struct tb_switch *sw, bool runtime)
 {
 	unsigned int flags = 0;
 	struct tb_port *port;
 	int err;
+
+	tb_sw_dbg(sw, "suspending switch\n");
 
 	err = tb_plug_events_active(sw, false);
 	if (err)
@@ -2684,11 +2703,16 @@ void tb_switch_suspend(struct tb_switch *sw)
 
 	tb_switch_for_each_port(sw, port) {
 		if (tb_port_has_remote(port))
-			tb_switch_suspend(port->remote->sw);
+			tb_switch_suspend(port->remote->sw, runtime);
 	}
 
-	if (device_may_wakeup(&sw->dev))
-		flags = TB_WAKE_ON_USB4 | TB_WAKE_ON_USB3 | TB_WAKE_ON_PCIE;
+	if (runtime) {
+		/* Trigger wake when something is plugged in/out */
+		flags |= TB_WAKE_ON_CONNECT | TB_WAKE_ON_DISCONNECT;
+		flags |= TB_WAKE_ON_USB4 | TB_WAKE_ON_USB3 | TB_WAKE_ON_PCIE;
+	} else if (device_may_wakeup(&sw->dev)) {
+		flags |= TB_WAKE_ON_USB4 | TB_WAKE_ON_USB3 | TB_WAKE_ON_PCIE;
+	}
 
 	tb_switch_set_wake(sw, flags);
 

@@ -509,6 +509,7 @@ struct cfs_rq {
 
 	u64			exec_clock;
 	u64			min_vruntime;
+	u64			min_vruntime_fi;
 #ifndef CONFIG_64BIT
 	u64			min_vruntime_copy;
 #endif
@@ -2478,7 +2479,7 @@ static inline void cpufreq_update_util(struct rq *rq, unsigned int flags) {}
 unsigned long uclamp_eff_value(struct task_struct *p, enum uclamp_id clamp_id);
 
 /**
- * uclamp_rq_util_with - clamp @util with @rq and @p effective uclamp values.
+ * uclamp_util_with - clamp @util with @rq and @p effective uclamp values.
  * @rq:		The rq to clamp against. Must not be NULL.
  * @util:	The util value to clamp.
  * @p:		The task to clamp against. Can be NULL if you want to clamp

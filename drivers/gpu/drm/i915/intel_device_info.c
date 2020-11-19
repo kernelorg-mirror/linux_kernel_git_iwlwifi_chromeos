@@ -24,6 +24,7 @@
 
 #include <drm/drm_print.h>
 
+#include "display/intel_cdclk.h"
 #include "intel_device_info.h"
 #include "i915_drv.h"
 
@@ -132,6 +133,7 @@ void intel_device_info_print_runtime(const struct intel_runtime_info *info,
 {
 	sseu_dump(&info->sseu, p);
 
+	drm_printf(p, "rawclk rate: %u kHz\n", info->rawclk_freq);
 	drm_printf(p, "CS timestamp frequency: %u kHz\n",
 		   info->cs_timestamp_frequency_khz);
 }
@@ -743,7 +745,7 @@ static u32 read_timestamp_frequency(struct drm_i915_private *dev_priv)
 		 *      hclks." (through the “Clocking Configuration”
 		 *      (“CLKCFG”) MCHBAR register)
 		 */
-		return dev_priv->rawclk_freq / 16;
+		return RUNTIME_INFO(dev_priv)->rawclk_freq / 16;
 	} else if (INTEL_GEN(dev_priv) <= 8) {
 		/* PRMs say:
 		 *
@@ -1040,8 +1042,17 @@ void intel_device_info_runtime_init(struct drm_i915_private *dev_priv)
 		info->ppgtt_type = INTEL_PPGTT_NONE;
 	}
 
+	runtime->rawclk_freq = intel_read_rawclk(dev_priv);
+	drm_dbg(&dev_priv->drm, "rawclk rate: %d kHz\n", runtime->rawclk_freq);
+
 	/* Initialize command stream timestamp frequency */
 	runtime->cs_timestamp_frequency_khz = read_timestamp_frequency(dev_priv);
+	runtime->cs_timestamp_period_ns =
+		div_u64(1e6, runtime->cs_timestamp_frequency_khz);
+	drm_dbg(&dev_priv->drm,
+		"CS timestamp wraparound in %lldms\n",
+		div_u64(mul_u32_u32(runtime->cs_timestamp_period_ns, S32_MAX),
+			USEC_PER_SEC));
 }
 
 void intel_driver_caps_print(const struct intel_driver_caps *caps,

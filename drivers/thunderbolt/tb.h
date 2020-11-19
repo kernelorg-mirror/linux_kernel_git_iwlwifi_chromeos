@@ -186,7 +186,7 @@ struct tb_switch {
  * @cap_adap: Offset of the adapter specific capability (%0 if not present)
  * @cap_usb4: Offset to the USB4 port capability (%0 if not present)
  * @port: Port number on switch
- * @disabled: Disabled by eeprom or enabled, but not implemented
+ * @disabled: Disabled by eeprom or enabled but not implemented
  * @bonded: true if the port is bonded (two lanes combined as one)
  * @dual_link_port: If the switch is connected using two ports, points
  *		    to the other port.
@@ -639,7 +639,7 @@ struct tb_switch *tb_switch_alloc_safe_mode(struct tb *tb,
 int tb_switch_configure(struct tb_switch *sw);
 int tb_switch_add(struct tb_switch *sw);
 void tb_switch_remove(struct tb_switch *sw);
-void tb_switch_suspend(struct tb_switch *sw);
+void tb_switch_suspend(struct tb_switch *sw, bool runtime);
 int tb_switch_resume(struct tb_switch *sw);
 int tb_switch_reset(struct tb_switch *sw);
 void tb_sw_set_unplugged(struct tb_switch *sw);
@@ -747,21 +747,15 @@ static inline bool tb_switch_is_titan_ridge(const struct tb_switch *sw)
 	}
 }
 
-static bool tb_switch_is_tgl_es(const struct tb_switch *sw)
-{
-	return sw->config.thunderbolt_version != USB4_VERSION_1_0 &&
-	       (sw->config.device_id == PCI_DEVICE_ID_INTEL_TGL_NHI0 ||
-		sw->config.device_id == PCI_DEVICE_ID_INTEL_TGL_NHI1);
-}
-
 /**
-  * tb_switch_is_usb4() - Is the switch USB4 compliant
-  * @sw: Switch to check
-  */
+ * tb_switch_is_usb4() - Is the switch USB4 compliant
+ * @sw: Switch to check
+ *
+ * Returns true if the @sw is USB4 compliant router, false otherwise.
+ */
 static inline bool tb_switch_is_usb4(const struct tb_switch *sw)
 {
-	return sw->config.thunderbolt_version == USB4_VERSION_1_0 ||
-	       tb_switch_is_tgl_es(sw);
+	return sw->config.thunderbolt_version == USB4_VERSION_1_0;
 }
 
 /**
