@@ -6,18 +6,17 @@
 
 #include <linux/cpu.h>
 #include <linux/kernel.h>
-#include <linux/debugfs.h>
 #include <linux/device.h>
 #include <linux/seq_buf.h>
 
-#include <asm/debug.h>
 #include <asm/asm-prototypes.h>
 #include <asm/code-patching.h>
+#include <asm/debugfs.h>
 #include <asm/security_features.h>
 #include <asm/setup.h>
 
 
-unsigned long powerpc_security_features __read_mostly = SEC_FTR_DEFAULT;
+u64 powerpc_security_features __read_mostly = SEC_FTR_DEFAULT;
 
 enum count_cache_flush_type {
 	COUNT_CACHE_FLUSH_NONE	= 0x1,
@@ -59,7 +58,7 @@ void setup_barrier_nospec(void)
 	enable = security_ftr_enabled(SEC_FTR_FAVOUR_SECURITY) &&
 		 security_ftr_enabled(SEC_FTR_BNDS_CHK_SPEC_BAR);
 
-	if (!no_nospec)
+	if (!no_nospec && !cpu_mitigations_off())
 		enable_barrier_nospec(enable);
 }
 
@@ -106,6 +105,14 @@ static __init int barrier_nospec_debugfs_init(void)
 	return 0;
 }
 device_initcall(barrier_nospec_debugfs_init);
+
+static __init int security_feature_debugfs_init(void)
+{
+	debugfs_create_x64("security_features", 0400, powerpc_debugfs_root,
+			   &powerpc_security_features);
+	return 0;
+}
+device_initcall(security_feature_debugfs_init);
 #endif /* CONFIG_DEBUG_FS */
 
 #if defined(CONFIG_PPC_FSL_BOOK3E) || defined(CONFIG_PPC_BOOK3S_64)
@@ -121,7 +128,7 @@ early_param("nospectre_v2", handle_nospectre_v2);
 #ifdef CONFIG_PPC_FSL_BOOK3E
 void setup_spectre_v2(void)
 {
-	if (no_spectrev2)
+	if (no_spectrev2 || cpu_mitigations_off())
 		do_btb_flush_fixups();
 	else
 		btb_flush_enabled = true;
@@ -291,7 +298,9 @@ void setup_stf_barrier(void)
 	hv = cpu_has_feature(CPU_FTR_HVMODE);
 
 	/* Default to fallback in case fw-features are not available */
-	if (cpu_has_feature(CPU_FTR_ARCH_207S))
+	if (cpu_has_feature(CPU_FTR_ARCH_300))
+		type = STF_BARRIER_EIEIO;
+	else if (cpu_has_feature(CPU_FTR_ARCH_207S))
 		type = STF_BARRIER_SYNC_ORI;
 	else if (cpu_has_feature(CPU_FTR_ARCH_206))
 		type = STF_BARRIER_FALLBACK;
@@ -312,7 +321,7 @@ void setup_stf_barrier(void)
 
 	stf_enabled_flush_types = type;
 
-	if (!no_stf_barrier)
+	if (!no_stf_barrier && !cpu_mitigations_off())
 		stf_barrier_enable(enable);
 }
 

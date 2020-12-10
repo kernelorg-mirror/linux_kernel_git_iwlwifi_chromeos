@@ -48,7 +48,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxutils.h"
 #include "rgxfwutils.h"
 #include "rgxcompute.h"
-#include "rgx_bvnc_defs_km.h"
+#include "km/rgx_bvnc_defs_km.h"
 #include "rgxmem.h"
 #include "allocmem.h"
 #include "devicemem.h"
@@ -56,6 +56,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "osfunc.h"
 #include "rgxccb.h"
 #include "rgxhwperf.h"
+#include "ospvr_gputrace.h"
 #include "rgxtimerquery.h"
 #include "htbuffer.h"
 
@@ -117,7 +118,7 @@ PVRSRV_ERROR PVRSRVRGXCreateComputeContextKM(CONNECTION_DATA			*psConnection,
 	}
 
 #if !defined(PVRSRV_USE_BRIDGE_LOCK)
-	eError = OSLockCreate(&psComputeContext->hLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psComputeContext->hLock);
 
 	if(eError != PVRSRV_OK)
 	{
@@ -743,10 +744,9 @@ PVRSRV_ERROR PVRSRVRGXKickCDMKM(RGX_SERVER_COMPUTE_CONTEXT	*psComputeContext,
 	}
 	else
 	{
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-		RGXHWPerfFTraceGPUEnqueueEvent(psComputeContext->psDeviceNode->pvDevice,
-				ui32FWCtx, ui32IntJobRef, RGX_HWPERF_KICK_TYPE_CDM);
-#endif
+		PVRGpuTraceEnqueueEvent(psComputeContext->psDeviceNode->pvDevice,
+					ui32FWCtx, ui32ExtJobRef, ui32IntJobRef,
+					RGX_HWPERF_KICK_TYPE_CDM);
 	}
 	/*
 	 * Now check eError (which may have returned an error from our earlier call

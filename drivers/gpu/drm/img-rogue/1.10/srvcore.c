@@ -1000,7 +1000,7 @@ PVRSRV_ERROR BridgeInit(void)
 	PVRSRV_ERROR eError = PVRSRV_OK;
 
 #if defined(DEBUG_BRIDGE_KM)
-	eError = OSLockCreate(&g_hStatsLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&g_hStatsLock);
 
 	if(eError != PVRSRV_OK)
 	{

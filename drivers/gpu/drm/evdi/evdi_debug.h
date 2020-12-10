@@ -1,4 +1,5 @@
-/*
+/* SPDX-License-Identifier: GPL-2.0-only
+ *
  * Copyright (c) 2015 - 2016 DisplayLink (UK) Ltd.
  *
  * This file is subject to the terms and conditions of the GNU General Public
@@ -19,9 +20,9 @@
 
 extern unsigned int evdi_loglevel;
 
-#define EVDI_PRINTK(kLEVEL, lEVEL, FORMAT_STR, ...)	do { \
+#define EVDI_PRINTK(KERN_LEVEL, lEVEL, FORMAT_STR, ...)	do { \
 	if (lEVEL <= evdi_loglevel) {\
-		printk(kLEVEL "evdi: " FORMAT_STR, ##__VA_ARGS__); \
+		printk(KERN_LEVEL "evdi: " FORMAT_STR, ##__VA_ARGS__); \
 	} \
 } while (0)
 
@@ -52,8 +53,6 @@ extern unsigned int evdi_loglevel;
 #define EVDI_CHECKPT() EVDI_VERBOSE("\n")
 #define EVDI_ENTER() EVDI_VERBOSE("enter\n")
 #define EVDI_EXIT() EVDI_VERBOSE("exit\n")
-
-void evdi_log_process(void);
 
 #endif /* EVDI_DEBUG_H */
 

@@ -1,18 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * vpd.c
  *
  * Driver for exporting VPD content to sysfs.
  *
  * Copyright 2017 Google Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License v2.0 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/ctype.h>
@@ -78,9 +70,8 @@ static ssize_t vpd_attrib_read(struct file *filp, struct kobject *kobp,
  *
  * The VPD specification supports only [a-zA-Z0-9_]+ characters in key names but
  * old firmware versions may have entries like "S/N" which are problematic when
- * exporting them as sysfs attributes. These keys present in old firmware images
- * are ignored. Meanwhile, during manufacturing some intermediate VPD values
- * with "." in name may be created and we do want to export them as well.
+ * exporting them as sysfs attributes. These keys present in old firmwares are
+ * ignored.
  *
  * Returns VPD_OK for a valid key name, VPD_FAIL otherwise.
  *
@@ -94,7 +85,7 @@ static int vpd_section_check_key_name(const u8 *key, s32 key_len)
 	while (key_len-- > 0) {
 		c = *key++;
 
-		if (!isalnum(c) && c != '_' && c != '.')
+		if (!isalnum(c) && c != '_')
 			return VPD_FAIL;
 	}
 
@@ -117,11 +108,14 @@ static int vpd_section_attrib_add(const u8 *key, u32 key_len,
 		return VPD_OK;
 
 	info = kzalloc(sizeof(*info), GFP_KERNEL);
-	info->key = kzalloc(key_len + 1, GFP_KERNEL);
-	if (!info->key)
+	if (!info)
 		return -ENOMEM;
 
-	memcpy(info->key, key, key_len);
+	info->key = kstrndup(key, key_len, GFP_KERNEL);
+	if (!info->key) {
+		ret = -ENOMEM;
+		goto free_info;
+	}
 
 	sysfs_bin_attr_init(&info->bin_attr);
 	info->bin_attr.attr.name = info->key;
@@ -133,15 +127,20 @@ static int vpd_section_attrib_add(const u8 *key, u32 key_len,
 	info->value = value;
 
 	INIT_LIST_HEAD(&info->list);
-	list_add_tail(&info->list, &sec->attribs);
 
 	ret = sysfs_create_bin_file(sec->kobj, &info->bin_attr);
-	if (ret) {
-		kfree(info->key);
-		return ret;
-	}
+	if (ret)
+		goto free_info_key;
 
+	list_add_tail(&info->list, &sec->attribs);
 	return 0;
+
+free_info_key:
+	kfree(info->key);
+free_info:
+	kfree(info);
+
+	return ret;
 }
 
 static void vpd_section_attrib_destroy(struct vpd_section *sec)
@@ -150,8 +149,8 @@ static void vpd_section_attrib_destroy(struct vpd_section *sec)
 	struct vpd_attrib_info *temp;
 
 	list_for_each_entry_safe(info, temp, &sec->attribs, list) {
-		kfree(info->key);
 		sysfs_remove_bin_file(sec->kobj, &info->bin_attr);
+		kfree(info->key);
 		kfree(info);
 	}
 }
@@ -183,8 +182,7 @@ static int vpd_section_create_attribs(struct vpd_section *sec)
 static int vpd_section_init(const char *name, struct vpd_section *sec,
 			    phys_addr_t physaddr, size_t size)
 {
-	int ret;
-	int raw_len;
+	int err;
 
 	sec->baseaddr = memremap(physaddr, size, MEMREMAP_WB);
 	if (!sec->baseaddr)
@@ -192,11 +190,12 @@ static int vpd_section_init(const char *name, struct vpd_section *sec,
 
 	sec->name = name;
 
-	/* We want to export the raw partion with name ${name}_raw */
-	raw_len = strlen(name) + 5;
-	sec->raw_name = kzalloc(raw_len, GFP_KERNEL);
-	strncpy(sec->raw_name, name, raw_len);
-	strncat(sec->raw_name, "_raw", raw_len);
+	/* We want to export the raw partition with name ${name}_raw */
+	sec->raw_name = kasprintf(GFP_KERNEL, "%s_raw", name);
+	if (!sec->raw_name) {
+		err = -ENOMEM;
+		goto err_memunmap;
+	}
 
 	sysfs_bin_attr_init(&sec->bin_attr);
 	sec->bin_attr.attr.name = sec->raw_name;
@@ -205,14 +204,14 @@ static int vpd_section_init(const char *name, struct vpd_section *sec,
 	sec->bin_attr.read = vpd_section_read;
 	sec->bin_attr.private = sec;
 
-	ret = sysfs_create_bin_file(vpd_kobj, &sec->bin_attr);
-	if (ret)
-		goto free_sec;
+	err = sysfs_create_bin_file(vpd_kobj, &sec->bin_attr);
+	if (err)
+		goto err_free_raw_name;
 
 	sec->kobj = kobject_create_and_add(name, vpd_kobj);
 	if (!sec->kobj) {
-		ret = -EINVAL;
-		goto sysfs_remove;
+		err = -EINVAL;
+		goto err_sysfs_remove;
 	}
 
 	INIT_LIST_HEAD(&sec->attribs);
@@ -222,24 +221,24 @@ static int vpd_section_init(const char *name, struct vpd_section *sec,
 
 	return 0;
 
-sysfs_remove:
+err_sysfs_remove:
 	sysfs_remove_bin_file(vpd_kobj, &sec->bin_attr);
-
-free_sec:
+err_free_raw_name:
 	kfree(sec->raw_name);
-	iounmap(sec->baseaddr);
-
-	return ret;
+err_memunmap:
+	memunmap(sec->baseaddr);
+	return err;
 }
 
 static int vpd_section_destroy(struct vpd_section *sec)
 {
 	if (sec->enabled) {
 		vpd_section_attrib_destroy(sec);
-		kobject_del(sec->kobj);
+		kobject_put(sec->kobj);
 		sysfs_remove_bin_file(vpd_kobj, &sec->bin_attr);
 		kfree(sec->raw_name);
-		iounmap(sec->baseaddr);
+		memunmap(sec->baseaddr);
+		sec->enabled = false;
 	}
 
 	return 0;
@@ -247,7 +246,7 @@ static int vpd_section_destroy(struct vpd_section *sec)
 
 static int vpd_sections_init(phys_addr_t physaddr)
 {
-	struct vpd_cbmem __iomem *temp;
+	struct vpd_cbmem *temp;
 	struct vpd_cbmem header;
 	int ret = 0;
 
@@ -255,8 +254,8 @@ static int vpd_sections_init(phys_addr_t physaddr)
 	if (!temp)
 		return -ENOMEM;
 
-	memcpy_fromio(&header, temp, sizeof(struct vpd_cbmem));
-	iounmap(temp);
+	memcpy(&header, temp, sizeof(struct vpd_cbmem));
+	memunmap(temp);
 
 	if (header.magic != VPD_CBMEM_MAGIC)
 		return -ENODEV;
@@ -273,61 +272,51 @@ static int vpd_sections_init(phys_addr_t physaddr)
 		ret = vpd_section_init("rw", &rw_vpd,
 				       physaddr + sizeof(struct vpd_cbmem) +
 				       header.ro_size, header.rw_size);
-		if (ret)
+		if (ret) {
+			vpd_section_destroy(&ro_vpd);
 			return ret;
+		}
 	}
 
 	return 0;
 }
 
-static int vpd_probe(struct platform_device *pdev)
+static int vpd_probe(struct coreboot_device *dev)
 {
 	int ret;
-	struct lb_cbmem_ref entry;
-
-	ret = coreboot_table_find(CB_TAG_VPD, &entry, sizeof(entry));
-	if (ret)
-		return ret;
-
-	return vpd_sections_init(entry.cbmem_addr);
-}
-
-static struct platform_driver vpd_driver = {
-	.probe = vpd_probe,
-	.driver = {
-		.name = "vpd",
-	},
-};
-
-static int __init vpd_platform_init(void)
-{
-	struct platform_device *pdev;
-
-	pdev = platform_device_register_simple("vpd", -1, NULL, 0);
-	if (!pdev)
-		return -ENODEV;
 
 	vpd_kobj = kobject_create_and_add("vpd", firmware_kobj);
 	if (!vpd_kobj)
 		return -ENOMEM;
 
-	memset(&ro_vpd, 0, sizeof(ro_vpd));
-	memset(&rw_vpd, 0, sizeof(rw_vpd));
-
-	platform_driver_register(&vpd_driver);
+	ret = vpd_sections_init(dev->cbmem_ref.cbmem_addr);
+	if (ret) {
+		kobject_put(vpd_kobj);
+		return ret;
+	}
 
 	return 0;
 }
 
-static void __exit vpd_platform_exit(void)
+static int vpd_remove(struct coreboot_device *dev)
 {
 	vpd_section_destroy(&ro_vpd);
 	vpd_section_destroy(&rw_vpd);
-	kobject_del(vpd_kobj);
+
+	kobject_put(vpd_kobj);
+
+	return 0;
 }
 
-module_init(vpd_platform_init);
-module_exit(vpd_platform_exit);
+static struct coreboot_driver vpd_driver = {
+	.probe = vpd_probe,
+	.remove = vpd_remove,
+	.drv = {
+		.name = "vpd",
+	},
+	.tag = CB_TAG_VPD,
+};
+module_coreboot_driver(vpd_driver);
 
 MODULE_AUTHOR("Google, Inc.");
 MODULE_LICENSE("GPL");

@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for I2C adapter in Rockchip RK3xxx SoC
  *
  * Max Schwarz <max.schwarz@online.de>
  * based on the patches by Rockchip Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -58,7 +55,7 @@ enum {
 #define REG_CON_LASTACK   BIT(5) /* 1: send NACK after last received byte */
 #define REG_CON_ACTACK    BIT(6) /* 1: stop if NACK is received */
 
-#define REG_CON_TUNING_MASK GENMASK(15, 8)
+#define REG_CON_TUNING_MASK GENMASK_ULL(15, 8)
 
 #define REG_CON_SDA_CFG(cfg) ((cfg) << 8)
 #define REG_CON_STA_CFG(cfg) ((cfg) << 12)
@@ -161,6 +158,7 @@ enum rk3x_i2c_state {
 };
 
 /**
+ * struct rk3x_i2c_soc_data:
  * @grf_offset: offset inside the grf regmap for setting the i2c type
  * @calc_timings: Callback function for i2c timing information calculated
  */
@@ -194,7 +192,7 @@ struct rk3x_i2c_soc_data {
 struct rk3x_i2c {
 	struct i2c_adapter adap;
 	struct device *dev;
-	struct rk3x_i2c_soc_data *soc_data;
+	const struct rk3x_i2c_soc_data *soc_data;
 
 	/* Hardware resources */
 	void __iomem *regs;
@@ -541,9 +539,9 @@ out:
  */
 static const struct i2c_spec_values *rk3x_i2c_get_spec(unsigned int speed)
 {
-	if (speed <= 100000)
+	if (speed <= I2C_MAX_STANDARD_MODE_FREQ)
 		return &standard_mode_spec;
-	else if (speed <= 400000)
+	else if (speed <= I2C_MAX_FAST_MODE_FREQ)
 		return &fast_mode_spec;
 	else
 		return &fast_mode_plus_spec;
@@ -580,8 +578,8 @@ static int rk3x_i2c_v0_calc_timings(unsigned long clk_rate,
 	int ret = 0;
 
 	/* Only support standard-mode and fast-mode */
-	if (WARN_ON(t->bus_freq_hz > 400000))
-		t->bus_freq_hz = 400000;
+	if (WARN_ON(t->bus_freq_hz > I2C_MAX_FAST_MODE_FREQ))
+		t->bus_freq_hz = I2C_MAX_FAST_MODE_FREQ;
 
 	/* prevent scl_rate_khz from becoming 0 */
 	if (WARN_ON(t->bus_freq_hz < 1000))
@@ -694,6 +692,8 @@ static int rk3x_i2c_v0_calc_timings(unsigned long clk_rate,
 	t_calc->div_low--;
 	t_calc->div_high--;
 
+	/* Give the tuning value 0, that would not update con register */
+	t_calc->tuning = 0;
 	/* Maximum divider supported by hw is 0xffff */
 	if (t_calc->div_low > 0xffff) {
 		t_calc->div_low = 0xffff;
@@ -742,7 +742,7 @@ static int rk3x_i2c_v1_calc_timings(unsigned long clk_rate,
 				    struct i2c_timings *t,
 				    struct rk3x_i2c_calced_timings *t_calc)
 {
-	unsigned long min_low_ns, min_high_ns, min_total_ns;
+	unsigned long min_low_ns, min_high_ns;
 	unsigned long min_setup_start_ns, min_setup_data_ns;
 	unsigned long min_setup_stop_ns, max_hold_data_ns;
 
@@ -758,8 +758,8 @@ static int rk3x_i2c_v1_calc_timings(unsigned long clk_rate,
 	int ret = 0;
 
 	/* Support standard-mode, fast-mode and fast-mode plus */
-	if (WARN_ON(t->bus_freq_hz > 1000000))
-		t->bus_freq_hz = 1000000;
+	if (WARN_ON(t->bus_freq_hz > I2C_MAX_FAST_MODE_PLUS_FREQ))
+		t->bus_freq_hz = I2C_MAX_FAST_MODE_PLUS_FREQ;
 
 	/* prevent scl_rate_khz from becoming 0 */
 	if (WARN_ON(t->bus_freq_hz < 1000))
@@ -793,13 +793,12 @@ static int rk3x_i2c_v1_calc_timings(unsigned long clk_rate,
 
 	/* These are the min dividers needed for min hold times. */
 	min_div_for_hold = (min_low_div + min_high_div);
-	min_total_ns = min_low_ns + min_high_ns;
 
 	/*
 	 * This is the maximum divider so we don't go over the maximum.
 	 * We don't round up here (we round down) since this is a maximum.
 	 */
-	 if (min_div_for_hold >= min_total_div) {
+	if (min_div_for_hold >= min_total_div) {
 		/*
 		 * Time needed to meet hold requirements is important.
 		 * Just use that.
@@ -918,7 +917,7 @@ static void rk3x_i2c_adapt_div(struct rk3x_i2c *i2c, unsigned long clk_rate)
  * Code adapted from i2c-cadence.c.
  *
  * Return:	NOTIFY_STOP if the rate change should be aborted, NOTIFY_OK
- *		to acknowedge the change, NOTIFY_DONE if the notification is
+ *		to acknowledge the change, NOTIFY_DONE if the notification is
  *		considered irrelevant.
  */
 static int rk3x_i2c_clk_notifier_cb(struct notifier_block *nb, unsigned long
@@ -1130,6 +1129,11 @@ static const struct i2c_algorithm rk3x_i2c_algorithm = {
 	.functionality		= rk3x_i2c_func,
 };
 
+static const struct rk3x_i2c_soc_data rv1108_soc_data = {
+	.grf_offset = -1,
+	.calc_timings = rk3x_i2c_v1_calc_timings,
+};
+
 static const struct rk3x_i2c_soc_data rk3066_soc_data = {
 	.grf_offset = 0x154,
 	.calc_timings = rk3x_i2c_v0_calc_timings,
@@ -1157,24 +1161,28 @@ static const struct rk3x_i2c_soc_data rk3399_soc_data = {
 
 static const struct of_device_id rk3x_i2c_match[] = {
 	{
+		.compatible = "rockchip,rv1108-i2c",
+		.data = &rv1108_soc_data
+	},
+	{
 		.compatible = "rockchip,rk3066-i2c",
-		.data = (void *)&rk3066_soc_data
+		.data = &rk3066_soc_data
 	},
 	{
 		.compatible = "rockchip,rk3188-i2c",
-		.data = (void *)&rk3188_soc_data
+		.data = &rk3188_soc_data
 	},
 	{
 		.compatible = "rockchip,rk3228-i2c",
-		.data = (void *)&rk3228_soc_data
+		.data = &rk3228_soc_data
 	},
 	{
 		.compatible = "rockchip,rk3288-i2c",
-		.data = (void *)&rk3288_soc_data
+		.data = &rk3288_soc_data
 	},
 	{
 		.compatible = "rockchip,rk3399-i2c",
-		.data = (void *)&rk3399_soc_data
+		.data = &rk3399_soc_data
 	},
 	{},
 };
@@ -1197,7 +1205,7 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	match = of_match_node(rk3x_i2c_match, np);
-	i2c->soc_data = (struct rk3x_i2c_soc_data *)match->data;
+	i2c->soc_data = match->data;
 
 	/* use common interface to get I2C timing properties */
 	i2c_parse_fw_timings(&pdev->dev, &i2c->t, true);
@@ -1312,12 +1320,8 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 	rk3x_i2c_adapt_div(i2c, clk_rate);
 
 	ret = i2c_add_adapter(&i2c->adap);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Could not register adapter\n");
+	if (ret < 0)
 		goto err_clk_notifier;
-	}
-
-	dev_info(&pdev->dev, "Initialized RK3xxx I2C bus at %p\n", i2c->regs);
 
 	return 0;
 
@@ -1343,7 +1347,7 @@ static int rk3x_i2c_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const SIMPLE_DEV_PM_OPS(rk3x_i2c_pm_ops, NULL, rk3x_i2c_resume);
+static SIMPLE_DEV_PM_OPS(rk3x_i2c_pm_ops, NULL, rk3x_i2c_resume);
 
 static struct platform_driver rk3x_i2c_driver = {
 	.probe   = rk3x_i2c_probe,

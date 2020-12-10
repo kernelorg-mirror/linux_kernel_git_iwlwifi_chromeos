@@ -231,7 +231,7 @@ out:
  * superblock-level name-space lock for renames and copy-ups.
  */
 static int esdfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-			struct inode *new_dir, struct dentry *new_dentry)
+			struct inode *new_dir, struct dentry *new_dentry, unsigned int flags)
 {
 	int err = 0;
 	struct esdfs_sb_info *sbi = ESDFS_SB(old_dir->i_sb);
@@ -298,7 +298,7 @@ static int esdfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	err = vfs_rename(lower_old_dir_dentry->d_inode, lower_old_dentry,
 			 lower_new_dir_dentry->d_inode, lower_new_dentry,
-			 NULL, 0);
+			 NULL, flags);
 	if (err)
 		goto out;
 
@@ -382,7 +382,7 @@ static int esdfs_setattr(struct dentry *dentry, struct iattr *ia)
 	 * this user can change the lower inode: that should happen when
 	 * calling notify_change on the lower inode.
 	 */
-	err = inode_change_ok(inode, ia);
+	err = setattr_prepare(dentry, ia);
 	if (err)
 		return err;
 
@@ -426,7 +426,7 @@ static int esdfs_setattr(struct dentry *dentry, struct iattr *ia)
 #endif
 		i_size_write(inode, newsize);
 #if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
-		spin_lock(&inode->i_lock);
+		spin_unlock(&inode->i_lock);
 #endif
 		if (newsize > oldsize)
 			pagecache_isize_extended(inode, oldsize, newsize);
@@ -448,10 +448,10 @@ static int esdfs_setattr(struct dentry *dentry, struct iattr *ia)
 	 * unlinked (no inode->i_sb and i_ino==0.  This happens if someone
 	 * tries to open(), unlink(), then ftruncate() a file.
 	 */
-	mutex_lock(&lower_dentry->d_inode->i_mutex);
+	inode_lock(lower_dentry->d_inode);
 	err = notify_change(lower_dentry, &lower_ia, /* note: lower_ia */
 			    NULL);
-	mutex_unlock(&lower_dentry->d_inode->i_mutex);
+	inode_unlock(lower_dentry->d_inode);
 	if (err)
 		goto out;
 
@@ -469,10 +469,11 @@ out:
 	return err;
 }
 
-static int esdfs_getattr(struct vfsmount *mnt, struct dentry *dentry,
-			 struct kstat *stat)
+static int esdfs_getattr(const struct path *path, struct kstat *stat,
+			u32 request_mask, unsigned int flags)
 {
 	int err;
+	struct dentry *dentry = path->dentry;
 	struct path lower_path;
 	struct kstat lower_stat;
 	struct inode *lower_inode;
@@ -491,7 +492,7 @@ static int esdfs_getattr(struct vfsmount *mnt, struct dentry *dentry,
 	esdfs_get_lower_path(dentry, &lower_path);
 
 	/* We need the lower getattr to calculate stat->blocks for us. */
-	err = vfs_getattr(&lower_path, &lower_stat);
+	err = vfs_getattr(&lower_path, &lower_stat, request_mask, flags);
 	if (err)
 		goto out;
 

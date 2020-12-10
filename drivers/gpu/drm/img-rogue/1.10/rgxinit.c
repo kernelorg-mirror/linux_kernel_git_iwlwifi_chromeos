@@ -51,7 +51,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_notifier.h"
 #include "pvrsrv.h"
 #include "pvrsrv_bridge_init.h"
-#include "syscommon.h"
+#include "system/syscommon.h"
 #include "rgx_heaps.h"
 #include "rgxheapconfig.h"
 #include "rgxpower.h"
@@ -85,9 +85,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "rgxdebug.h"
 #include "rgxhwperf.h"
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-#include "pvr_gputrace.h"
-#endif
 #include "htbserver.h"
 
 #include "rgx_options.h"
@@ -100,7 +97,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxta3d.h"
 #include "rgxtimecorr.h"
 
-#include "rgx_bvnc_defs_km.h"
+#include "km/rgx_bvnc_defs_km.h"
 #if defined(PDUMP)
 #include "rgxstartstop.h"
 #endif
@@ -1056,8 +1053,8 @@ PVRSRV_ERROR PVRSRVRGXInitDevPart2KM (PVRSRV_DEVICE_NODE	*psDeviceNode,
 	psDevInfo->ui32DeviceFlags = 0;
 	RGXSetDeviceFlags(psDevInfo, ui32DeviceFlags, IMG_TRUE);
 
-	/* Allocate DVFS Table (needs to be allocated before SUPPORT_GPUTRACE_EVENTS
-	 * is initialised because there is a dependency between them) */
+	/* Allocate DVFS Table (needs to be allocated before GPU trace events
+	 *  component is initialised because there is a dependency between them) */
 	psDevInfo->psGpuDVFSTable = OSAllocZMem(sizeof(*(psDevInfo->psGpuDVFSTable)));
 	if (psDevInfo->psGpuDVFSTable == NULL)
 	{
@@ -1089,35 +1086,35 @@ PVRSRV_ERROR PVRSRVRGXInitDevPart2KM (PVRSRV_DEVICE_NODE	*psDeviceNode,
 	}
 
 	/* Initialise lists of ZSBuffers */
-	eError = OSLockCreate(&psDevInfo->hLockZSBuffer,LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hLockZSBuffer);
 	PVR_ASSERT(eError == PVRSRV_OK);
 	dllist_init(&psDevInfo->sZSBufferHead);
 	psDevInfo->ui32ZSBufferCurrID = 1;
 
 	/* Initialise lists of growable Freelists */
-	eError = OSLockCreate(&psDevInfo->hLockFreeList,LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hLockFreeList);
 	PVR_ASSERT(eError == PVRSRV_OK);
 	dllist_init(&psDevInfo->sFreeListHead);
 	psDevInfo->ui32FreelistCurrID = 1;
 
 #if defined(SUPPORT_RAY_TRACING)
-	eError = OSLockCreate(&psDevInfo->hLockRPMFreeList,LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hLockRPMFreeList);
 	PVR_ASSERT(eError == PVRSRV_OK);
 	dllist_init(&psDevInfo->sRPMFreeListHead);
 	psDevInfo->ui32RPMFreelistCurrID = 1;
-	eError = OSLockCreate(&psDevInfo->hLockRPMContext,LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hLockRPMContext);
 	PVR_ASSERT(eError == PVRSRV_OK);
 #endif
 
 #if defined(SUPPORT_PAGE_FAULT_DEBUG)
-	eError = OSLockCreate(&psDevInfo->hDebugFaultInfoLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hDebugFaultInfoLock);
 
 	if (eError != PVRSRV_OK)
 	{
 		return eError;
 	}
 
-	eError = OSLockCreate(&psDevInfo->hMMUCtxUnregLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hMMUCtxUnregLock);
 
 	if (eError != PVRSRV_OK)
 	{
@@ -1127,7 +1124,7 @@ PVRSRV_ERROR PVRSRVRGXInitDevPart2KM (PVRSRV_DEVICE_NODE	*psDeviceNode,
 
 	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, MIPS))
 	{
-		eError = OSLockCreate(&psDevInfo->hNMILock, LOCK_TYPE_DISPATCH);
+		eError = OSLockCreate(&psDevInfo->hNMILock);
 
 		if (eError != PVRSRV_OK)
 		{
@@ -1140,7 +1137,7 @@ PVRSRV_ERROR PVRSRVRGXInitDevPart2KM (PVRSRV_DEVICE_NODE	*psDeviceNode,
 	psDevInfo->pfnGetGpuUtilStats = RGXGetGpuUtilStats;
 #endif
 
-	eError = OSLockCreate(&psDevInfo->hGPUUtilLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hGPUUtilLock);
 	PVR_ASSERT(eError == PVRSRV_OK);
 
 	eDefaultPowerState = PVRSRV_DEV_POWER_STATE_ON;
@@ -4105,8 +4102,8 @@ PVRSRV_ERROR RGXRegisterDevice(PVRSRV_DEVICE_NODE *psDeviceNode,
 	/*Set the Dummy page phys addr */
 	psDeviceNode->sDummyPage.ui64DummyPgPhysAddr = MMU_BAD_PHYS_ADDR;
 
-	/*The lock type need to be dispatch type here because it can be acquired from MISR (Z-buffer) path */
-	eError = OSLockCreate(&psDeviceNode->sDummyPage.psDummyPgLock ,LOCK_TYPE_DISPATCH);
+	/* The lock can be acquired from MISR (Z-buffer) path */
+	eError = OSLockCreate(&psDeviceNode->sDummyPage.psDummyPgLock);
 	if (PVRSRV_OK != eError)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create dummy page lock", __func__));
@@ -4183,7 +4180,7 @@ PVRSRV_ERROR RGXRegisterDevice(PVRSRV_DEVICE_NODE *psDeviceNode,
 		goto e6;
 	}
 
-	eError = OSLockCreate(&psDevInfo->hLockKCCBDeferredCommandsList,LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hLockKCCBDeferredCommandsList);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to KCCB deferred commands list lock", __func__));
@@ -4211,21 +4208,21 @@ PVRSRV_ERROR RGXRegisterDevice(PVRSRV_DEVICE_NODE *psDeviceNode,
 	}
 
 #if !defined(PVRSRV_USE_BRIDGE_LOCK)
-	eError = OSLockCreate(&psDevInfo->sRegCongfig.hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->sRegCongfig.hLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create register configuration lock", __func__));
 		goto e9;
 	}
 
-	eError = OSLockCreate(&psDevInfo->hBPLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hBPLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create lock for break points", __func__));
 		goto e10;
 	}
 
-	eError = OSLockCreate(&psDevInfo->hRGXFWIfBufInitLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hRGXFWIfBufInitLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create lock for trace buffers", __func__));
@@ -4233,13 +4230,13 @@ PVRSRV_ERROR RGXRegisterDevice(PVRSRV_DEVICE_NODE *psDeviceNode,
 	}
 #endif
 
-	eError = OSLockCreate(&psDevInfo->hCCBStallCheckLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hCCBStallCheckLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create stalled CCB checking lock", __func__));
 		goto e12;
 	}
-	eError = OSLockCreate(&psDevInfo->hCCBRecoveryLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hCCBRecoveryLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create stalled CCB recovery lock", __func__));
@@ -4331,7 +4328,7 @@ PVRSRV_ERROR RGXRegisterDevice(PVRSRV_DEVICE_NODE *psDeviceNode,
 	PVR_LOG_IF_ERROR(eError, "DeviceDepBridgeInit");
 
 #if defined(SUPPORT_POWER_SAMPLING_VIA_DEBUGFS)
-	eError = OSLockCreate(&psDevInfo->hCounterDumpingLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDevInfo->hCounterDumpingLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create lock for counter sampling.", __func__));

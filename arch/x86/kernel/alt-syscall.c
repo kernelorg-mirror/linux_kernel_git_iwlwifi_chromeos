@@ -52,7 +52,6 @@ failed:
 #endif
 	return -ENOMEM;
 }
-EXPORT_SYMBOL_GPL(arch_dup_sys_call_table);
 
 /* Operates on "current", which isn't racey, since it's _in_ a syscall. */
 int arch_set_sys_call_table(struct alt_sys_call_table *entry)
@@ -69,4 +68,3 @@ int arch_set_sys_call_table(struct alt_sys_call_table *entry)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(arch_set_sys_call_table);

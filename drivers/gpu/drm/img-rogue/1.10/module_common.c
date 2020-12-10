@@ -65,14 +65,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_sync.h"
 #endif
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0))
-#include <linux/trace_events.h>
-#else
-#include <linux/ftrace_event.h>
-#endif
-#endif
-#include "pvr_gputrace.h"
+#include "ospvr_gputrace.h"
 
 #include "km_apphint.h"
 #include "srvinit.h"
@@ -203,19 +196,23 @@ int PVRSRVCommonDriverInit(void)
 			 __func__, error));
 	}
 
+	pvrerr = PVRGpuTraceSupportInit();
+	if (pvrerr != PVRSRV_OK)
+	{
+		return -ENOMEM;
+	}
+
 	pvrerr = PVRSRVDriverInit();
 	if (pvrerr != PVRSRV_OK)
 	{
 		return -ENODEV;
 	}
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
 	/* calling here because we need to handle input from the file even
 	 * before the devices are initialised
-	 * note: we're not passing a device node because apphint callback don't
+	 * note: we're not passing a device node because apphint callbacks don't
 	 * need it */
 	PVRGpuTraceInitAppHintCallbacks(NULL);
-#endif
 
 	return 0;
 }
@@ -228,6 +225,8 @@ int PVRSRVCommonDriverInit(void)
 void PVRSRVCommonDriverDeinit(void)
 {
 	PVRSRVDriverDeInit();
+
+	PVRGpuTraceSupportDeInit();
 
 	pvr_apphint_deinit();
 
@@ -277,7 +276,6 @@ int PVRSRVCommonDeviceInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 			 __func__, error));
 	}
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
 	error = PVRGpuTraceInitDevice(psDeviceNode);
 	if (error != 0)
 	{
@@ -285,7 +283,6 @@ int PVRSRVCommonDeviceInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 			 "%s: failed to initialise PVR GPU Tracing on device%d (%d)",
 			 __func__, psDeviceNode->sDevId.i32UMIdentifier, error));
 	}
-#endif
 
 	/* register the AppHint device control before device initialisation
 	 * so individual AppHints can be configured during the init phase
@@ -313,9 +310,7 @@ void PVRSRVCommonDeviceDeinit(PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	pvr_apphint_device_unregister(psDeviceNode);
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
 	PVRGpuTraceDeInitDevice(psDeviceNode);
-#endif
 
 	PVRDebugRemoveDebugFSEntries();
 
@@ -464,48 +459,7 @@ int PVRSRVCommonDeviceOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 			goto e1;
 		}
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-		if (PVRGpuTraceEnabled())
-		{
-			PVRSRV_ERROR eError = PVRGpuTraceEnabledSetNoBridgeLock(psDeviceNode,
-			                                                        IMG_TRUE);
-			if (eError != PVRSRV_OK)
-			{
-				PVR_DPF((PVR_DBG_ERROR, "Failed to initialise GPU event tracing"
-				        " (%s)", PVRSRVGetErrorStringKM(eError)));
-			}
-
-			/* below functions will enable FTrace events which in turn will
-			 * execute HWPerf callbacks that set appropriate filter values
-			 * note: unfortunately the functions don't allow to pass private
-			 *       data so they enable events for all of the devices
-			 *       at once, which means that this can happen more than once
-			 *       if there is more than one device */
-
-			/* single events can be enabled by calling trace_set_clr_event()
-			 * with the event name, e.g.:
-			 * trace_set_clr_event("rogue", "rogue_ufo_update", 1) */
-			if (trace_set_clr_event("gpu", NULL, 1))
-			{
-				PVR_DPF((PVR_DBG_ERROR, "Failed to enable \"gpu\" event"
-				        " group"));
-			}
-			else
-			{
-				PVR_LOG(("FTrace events from \"gpu\" group enabled"));
-			}
-			if (trace_set_clr_event("rogue", NULL, 1))
-			{
-				PVR_DPF((PVR_DBG_ERROR, "Failed to enable \"rogue\" event"
-				        " group"));
-			}
-			else
-			{
-				PVR_LOG(("FTrace events from \"rogue\" group enabled"));
-			}
-		}
-
-#endif
+		PVRGpuTraceInitIfEnabled(psDeviceNode);
 	}
 
 	sPrivData.psDevNode = psDeviceNode;

@@ -13,23 +13,24 @@
 
 #include "esdfs.h"
 
-static int esdfs_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+static vm_fault_t esdfs_fault(struct vm_fault *vmf)
 {
-	int err;
+	vm_fault_t err;
 	struct file *file;
 	const struct vm_operations_struct *lower_vm_ops;
 	struct esdfs_sb_info *sbi;
 	const struct cred *creds;
+	const struct vm_area_struct *vma = vmf->vma;
 
 	file = (struct file *)vma->vm_private_data;
 	sbi = ESDFS_SB(file->f_path.dentry->d_sb);
 	creds = esdfs_override_creds(sbi, ESDFS_I(file->f_inode), NULL);
 	if (!creds)
-		return -ENOMEM;
+		return VM_FAULT_OOM;
 
 	lower_vm_ops = ESDFS_F(file)->lower_vm_ops;
 	BUG_ON(!lower_vm_ops);
-	err = lower_vm_ops->fault(vma, vmf);
+	err = lower_vm_ops->fault(vmf);
 	esdfs_revert_creds(creds, NULL);
 	return err;
 }
@@ -48,34 +49,34 @@ static void esdfs_vm_close(struct vm_area_struct *vma)
 	fput(file);
 }
 
-static int esdfs_page_mkwrite(struct vm_area_struct *vma,
-			       struct vm_fault *vmf)
+static vm_fault_t esdfs_page_mkwrite(struct vm_fault *vmf)
 {
-	int err = 0;
+	vm_fault_t err = 0;
 	struct file *file;
 	const struct vm_operations_struct *lower_vm_ops;
 	struct esdfs_sb_info *sbi;
 	const struct cred *creds;
+	const struct vm_area_struct *vma = vmf->vma;
 
 	file = (struct file *)vma->vm_private_data;
 	sbi = ESDFS_SB(file->f_path.dentry->d_sb);
 	creds = esdfs_override_creds(sbi, ESDFS_I(file->f_inode), NULL);
 	if (!creds)
-		return -ENOMEM;
+		return VM_FAULT_OOM;
 
 	lower_vm_ops = ESDFS_F(file)->lower_vm_ops;
 	BUG_ON(!lower_vm_ops);
 	if (!lower_vm_ops->page_mkwrite)
 		goto out;
 
-	err = lower_vm_ops->page_mkwrite(vma, vmf);
+	err = lower_vm_ops->page_mkwrite(vmf);
 out:
 	esdfs_revert_creds(creds, NULL);
 	return err;
 }
 
 static ssize_t esdfs_direct_IO(struct kiocb *iocb,
-				struct iov_iter *iter, loff_t pos)
+				struct iov_iter *iter)
 {
 	/*
 	 * This function should never be called directly.  We need it

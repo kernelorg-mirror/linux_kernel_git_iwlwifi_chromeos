@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2002 Intersil Americas Inc.
  *  Copyright 2004 Jens Maurer <Jens.Maurer@gmx.net>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, see <http://www.gnu.org/licenses/>.
- *
  */
 
 #include <linux/netdevice.h>
@@ -130,7 +118,7 @@ islpci_mgmt_rx_fill(struct net_device *ndev)
 			buf->pci_addr = pci_map_single(priv->pdev, buf->mem,
 						       MGMT_FRAME_SIZE,
 						       PCI_DMA_FROMDEVICE);
-			if (!buf->pci_addr) {
+			if (pci_dma_mapping_error(priv->pdev, buf->pci_addr)) {
 				printk(KERN_WARNING
 				       "Failed to make memory DMA'able.\n");
 				return -ENOMEM;
@@ -217,7 +205,7 @@ islpci_mgt_transmit(struct net_device *ndev, int operation, unsigned long oid,
 	err = -ENOMEM;
 	buf.pci_addr = pci_map_single(priv->pdev, buf.mem, frag_len,
 				      PCI_DMA_TODEVICE);
-	if (!buf.pci_addr) {
+	if (pci_dma_mapping_error(priv->pdev, buf.pci_addr)) {
 		printk(KERN_WARNING "%s: cannot map PCI memory for mgmt\n",
 		       ndev->name);
 		goto error_free;

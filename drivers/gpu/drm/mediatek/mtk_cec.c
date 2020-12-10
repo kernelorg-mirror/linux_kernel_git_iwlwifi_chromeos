@@ -1,21 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 MediaTek Inc.
  * Author: Jie Qiu <jie.qiu@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #include <linux/clk.h>
 #include <linux/delay.h>
-#include <linux/hdmi-notifier.h>
 #include <linux/io.h>
 #include <linux/interrupt.h>
+#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 
 #include "mtk_cec.h"
@@ -106,12 +98,6 @@ void mtk_cec_set_hpd_event(struct device *dev,
 	cec->hdmi_dev = hdmi_dev;
 	cec->hpd_event = hpd_event;
 	spin_unlock_irqrestore(&cec->lock, flags);
-
-	/* Initial notification event to set jack state */
-	if (mtk_cec_hpd_high(dev))
-		hdmi_event_connect(hdmi_dev);
-	else
-		hdmi_event_disconnect(hdmi_dev);
 }
 
 bool mtk_cec_hpd_high(struct device *dev)
@@ -186,10 +172,6 @@ static irqreturn_t mtk_cec_htplg_isr_thread(int irq, void *arg)
 	if (cec->hpd != hpd) {
 		dev_dbg(dev, "hotplug event! cur hpd = %d, hpd = %d\n",
 			cec->hpd, hpd);
-		if (hpd)
-			hdmi_event_connect(cec->hdmi_dev);
-		else
-			hdmi_event_disconnect(cec->hdmi_dev);
 		cec->hpd = hpd;
 		mtk_cec_hpd_event(cec, hpd);
 	}

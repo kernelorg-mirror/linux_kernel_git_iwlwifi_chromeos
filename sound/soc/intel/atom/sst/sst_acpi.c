@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * sst_acpi.c - SST (LPE) driver init file for ACPI enumeration.
  *
@@ -5,17 +6,6 @@
  *
  *  Authors:	Ramesh Babu K V <Ramesh.Babu@intel.com>
  *  Authors:	Omair Mohammed Abdullah <omair.m.abdullah@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- *
  */
 
 #include <linux/module.h>
@@ -23,7 +13,6 @@
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/io.h>
-#include <linux/miscdevice.h>
 #include <linux/platform_device.h>
 #include <linux/firmware.h>
 #include <linux/pm_runtime.h>
@@ -39,9 +28,11 @@
 #include <acpi/platform/aclinux.h>
 #include <acpi/actypes.h>
 #include <acpi/acpi_bus.h>
+#include <sound/soc-acpi.h>
+#include <sound/soc-acpi-intel-match.h>
 #include "../sst-mfld-platform.h"
 #include "../../common/sst-dsp.h"
-#include "../../common/sst-acpi.h"
+#include "../../common/soc-intel-quirks.h"
 #include "sst.h"
 
 /* LPE viewpoint addresses */
@@ -113,16 +104,39 @@ static const struct sst_res_info byt_rvp_res_info = {
 	.acpi_ipc_irq_index = 5,
 };
 
+/* BYTCR has different BIOS from BYT */
+static const struct sst_res_info bytcr_res_info = {
+	.shim_offset = 0x140000,
+	.shim_size = 0x000100,
+	.shim_phy_addr = SST_BYT_SHIM_PHY_ADDR,
+	.ssp0_offset = 0xa0000,
+	.ssp0_size = 0x1000,
+	.dma0_offset = 0x98000,
+	.dma0_size = 0x4000,
+	.dma1_offset = 0x9c000,
+	.dma1_size = 0x4000,
+	.iram_offset = 0x0c0000,
+	.iram_size = 0x14000,
+	.dram_offset = 0x100000,
+	.dram_size = 0x28000,
+	.mbox_offset = 0x144000,
+	.mbox_size = 0x1000,
+	.acpi_lpe_res_index = 0,
+	.acpi_ddr_index = 2,
+	.acpi_ipc_irq_index = 0
+};
+
 static struct sst_platform_info byt_rvp_platform_data = {
 	.probe_data = &byt_fwparse_info,
 	.ipc_info = &byt_ipc_info,
 	.lib_info = &byt_lib_dnld_info,
 	.res_info = &byt_rvp_res_info,
 	.platform = "sst-mfld-platform",
+	.streams_lost_on_suspend = true,
 };
 
 /* Cherryview (Cherrytrail and Braswell) uses same mrfld dpcm fw as Baytrail,
- * so pdata is same as Baytrail.
+ * so pdata is same as Baytrail, minus the streams_lost_on_suspend quirk.
  */
 static struct sst_platform_info chv_platform_data = {
 	.probe_data = &byt_fwparse_info,
@@ -142,7 +156,7 @@ static int sst_platform_get_resources(struct intel_sst_drv *ctx)
 	rsrc = platform_get_resource(pdev, IORESOURCE_MEM,
 					ctx->pdata->res_info->acpi_lpe_res_index);
 	if (!rsrc) {
-		dev_err(ctx->dev, "Invalid SHIM base from IFWI");
+		dev_err(ctx->dev, "Invalid SHIM base from IFWI\n");
 		return -EIO;
 	}
 	dev_info(ctx->dev, "LPE base: %#x size:%#x", (unsigned int) rsrc->start,
@@ -154,7 +168,7 @@ static int sst_platform_get_resources(struct intel_sst_drv *ctx)
 	ctx->iram = devm_ioremap_nocache(ctx->dev, ctx->iram_base,
 					 ctx->pdata->res_info->iram_size);
 	if (!ctx->iram) {
-		dev_err(ctx->dev, "unable to map IRAM");
+		dev_err(ctx->dev, "unable to map IRAM\n");
 		return -EIO;
 	}
 
@@ -164,7 +178,7 @@ static int sst_platform_get_resources(struct intel_sst_drv *ctx)
 	ctx->dram = devm_ioremap_nocache(ctx->dev, ctx->dram_base,
 					 ctx->pdata->res_info->dram_size);
 	if (!ctx->dram) {
-		dev_err(ctx->dev, "unable to map DRAM");
+		dev_err(ctx->dev, "unable to map DRAM\n");
 		return -EIO;
 	}
 
@@ -173,7 +187,7 @@ static int sst_platform_get_resources(struct intel_sst_drv *ctx)
 	ctx->shim = devm_ioremap_nocache(ctx->dev, ctx->shim_phy_add,
 					ctx->pdata->res_info->shim_size);
 	if (!ctx->shim) {
-		dev_err(ctx->dev, "unable to map SHIM");
+		dev_err(ctx->dev, "unable to map SHIM\n");
 		return -EIO;
 	}
 
@@ -186,7 +200,7 @@ static int sst_platform_get_resources(struct intel_sst_drv *ctx)
 	ctx->mailbox = devm_ioremap_nocache(ctx->dev, ctx->mailbox_add,
 					    ctx->pdata->res_info->mbox_size);
 	if (!ctx->mailbox) {
-		dev_err(ctx->dev, "unable to map mailbox");
+		dev_err(ctx->dev, "unable to map mailbox\n");
 		return -EIO;
 	}
 
@@ -196,7 +210,7 @@ static int sst_platform_get_resources(struct intel_sst_drv *ctx)
 	rsrc = platform_get_resource(pdev, IORESOURCE_MEM,
 					ctx->pdata->res_info->acpi_ddr_index);
 	if (!rsrc) {
-		dev_err(ctx->dev, "Invalid DDR base from IFWI");
+		dev_err(ctx->dev, "Invalid DDR base from IFWI\n");
 		return -EIO;
 	}
 	ctx->ddr_base = rsrc->start;
@@ -205,13 +219,16 @@ static int sst_platform_get_resources(struct intel_sst_drv *ctx)
 	ctx->ddr = devm_ioremap_nocache(ctx->dev, ctx->ddr_base,
 					resource_size(rsrc));
 	if (!ctx->ddr) {
-		dev_err(ctx->dev, "unable to map DDR");
+		dev_err(ctx->dev, "unable to map DDR\n");
 		return -EIO;
 	}
 
 	/* Find the IRQ */
 	ctx->irq_num = platform_get_irq(pdev,
 				ctx->pdata->res_info->acpi_ipc_irq_index);
+	if (ctx->irq_num <= 0)
+		return ctx->irq_num < 0 ? ctx->irq_num : -EIO;
+
 	return 0;
 }
 
@@ -221,7 +238,7 @@ static int sst_acpi_probe(struct platform_device *pdev)
 	int ret = 0;
 	struct intel_sst_drv *ctx;
 	const struct acpi_device_id *id;
-	struct sst_acpi_mach *mach;
+	struct snd_soc_acpi_mach *mach;
 	struct platform_device *mdev;
 	struct platform_device *plat_dev;
 	struct sst_platform_info *pdata;
@@ -230,15 +247,19 @@ static int sst_acpi_probe(struct platform_device *pdev)
 	id = acpi_match_device(dev->driver->acpi_match_table, dev);
 	if (!id)
 		return -ENODEV;
-	dev_dbg(dev, "for %s", id->id);
+	dev_dbg(dev, "for %s\n", id->id);
 
-	mach = (struct sst_acpi_mach *)id->driver_data;
-	mach = sst_acpi_find_machine(mach);
+	mach = (struct snd_soc_acpi_mach *)id->driver_data;
+	mach = snd_soc_acpi_find_machine(mach);
 	if (mach == NULL) {
 		dev_err(dev, "No matching machine driver found\n");
 		return -ENODEV;
 	}
 
+	if (soc_intel_is_byt())
+		mach->pdata = &byt_rvp_platform_data;
+	else
+		mach->pdata = &chv_platform_data;
 	pdata = mach->pdata;
 
 	ret = kstrtouint(id->id, 16, &dev_id);
@@ -249,22 +270,38 @@ static int sst_acpi_probe(struct platform_device *pdev)
 
 	dev_dbg(dev, "ACPI device id: %x\n", dev_id);
 
-	plat_dev = platform_device_register_data(dev, pdata->platform, -1, NULL, 0);
-	if (IS_ERR(plat_dev)) {
-		dev_err(dev, "Failed to create machine device: %s\n", pdata->platform);
-		return PTR_ERR(plat_dev);
-	}
-
-	/* Create platform device for sst machine driver */
-	mdev = platform_device_register_data(dev, mach->drv_name, -1, NULL, 0);
-	if (IS_ERR(mdev)) {
-		dev_err(dev, "Failed to create machine device: %s\n", mach->drv_name);
-		return PTR_ERR(mdev);
-	}
-
 	ret = sst_alloc_drv_context(&ctx, dev, dev_id);
 	if (ret < 0)
 		return ret;
+
+	if (soc_intel_is_byt_cr(pdev)) {
+		/* override resource info */
+		byt_rvp_platform_data.res_info = &bytcr_res_info;
+	}
+
+	/* update machine parameters */
+	mach->mach_params.acpi_ipc_irq_index =
+		pdata->res_info->acpi_ipc_irq_index;
+
+	plat_dev = platform_device_register_data(dev, pdata->platform, -1,
+						NULL, 0);
+	if (IS_ERR(plat_dev)) {
+		dev_err(dev, "Failed to create machine device: %s\n",
+			pdata->platform);
+		return PTR_ERR(plat_dev);
+	}
+
+	/*
+	 * Create platform device for sst machine driver,
+	 * pass machine info as pdata
+	 */
+	mdev = platform_device_register_data(dev, mach->drv_name, -1,
+					(const void *)mach, sizeof(*mach));
+	if (IS_ERR(mdev)) {
+		dev_err(dev, "Failed to create machine device: %s\n",
+			mach->drv_name);
+		return PTR_ERR(mdev);
+	}
 
 	/* Fill sst platform data */
 	ctx->pdata = pdata;
@@ -278,22 +315,8 @@ static int sst_acpi_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	/* need to save shim registers in BYT */
-	ctx->shim_regs64 = devm_kzalloc(ctx->dev, sizeof(*ctx->shim_regs64),
-					GFP_KERNEL);
-	if (!ctx->shim_regs64) {
-		ret = -ENOMEM;
-		goto do_sst_cleanup;
-	}
-
 	sst_configure_runtime_pm(ctx);
 	platform_set_drvdata(pdev, ctx);
-	return ret;
-
-do_sst_cleanup:
-	sst_context_cleanup(ctx);
-	platform_set_drvdata(pdev, NULL);
-	dev_err(ctx->dev, "failed with %d\n", ret);
 	return ret;
 }
 
@@ -315,102 +338,9 @@ static int sst_acpi_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static unsigned long cht_machine_id;
-
-#define CHT_SURFACE_MACH 1
-
-static int cht_surface_quirk_cb(const struct dmi_system_id *id)
-{
-	cht_machine_id = CHT_SURFACE_MACH;
-	return 1;
-}
-
-static const struct dmi_system_id cht_table[] = {
-	{
-		.callback = cht_surface_quirk_cb,
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "Surface 3"),
-		},
-	},
-};
-
-static struct sst_acpi_mach cht_surface_mach = {
-	.id = "10EC5640",
-	.drv_name = "cht-bsw-rt5645",
-	.fw_filename = "intel/fw_sst_22a8.bin",
-	.board = "cht-bsw",
-	.pdata = &chv_platform_data,
-};
-
-struct sst_acpi_mach *cht_quirk(void *arg)
-{
-	struct sst_acpi_mach *mach = arg;
-
-	dmi_check_system(cht_table);
-
-	if (cht_machine_id == CHT_SURFACE_MACH)
-		return &cht_surface_mach;
-	else
-		return mach;
-}
-
-static struct sst_acpi_mach sst_acpi_bytcr[] = {
-	{
-		.id = "10EC5640",
-		.drv_name = "bytt100_rt5640",
-		.fw_filename = "intel/fw_sst_0f28.bin",
-		.board = "T100",
-		.pdata = &byt_rvp_platform_data,
-	},
-	{},
-};
-
-/* Cherryview-based platforms: CherryTrail and Braswell */
-static struct sst_acpi_mach sst_acpi_chv[] = {
-	{
-		.id = "10EC5670",
-		.drv_name = "cht-bsw-rt5672",
-		.fw_filename = "intel/fw_sst_22a8.bin",
-		.board = "cht-bsw",
-		.pdata = &chv_platform_data
-	},
-	{
-		.id = "10EC5645",
-		.drv_name = "cht-bsw-rt5645",
-		.fw_filename = "intel/fw_sst_22a8.bin",
-		.board = "cht-bsw",
-		.pdata = &chv_platform_data
-	},
-	{
-		.id = "10EC5650",
-		.drv_name = "cht-bsw-rt5645",
-		.fw_filename = "intel/fw_sst_22a8.bin",
-		.board = "cht-bsw",
-		.pdata = &chv_platform_data
-	},
-	{
-		.id = "193C9890",
-		.drv_name = "cht-bsw-max98090",
-		.fw_filename = "intel/fw_sst_22a8.bin",
-		.board = "cht-bsw",
-		.pdata = &chv_platform_data
-	},
-	/* some CHT-T platforms rely on RT5640, use Baytrail machine driver */
-	{
-		.id = "10EC5640",
-		.drv_name = "bytcr_rt5640",
-		.fw_filename = "intel/fw_sst_22a8.bin",
-		.board = "bytcr_rt5640",
-		.machine_quirk = cht_quirk,
-		.pdata = &chv_platform_data
-	},
-	{},
-};
-
 static const struct acpi_device_id sst_acpi_ids[] = {
-	{ "80860F28", (unsigned long)&sst_acpi_bytcr},
-	{ "808622A8", (unsigned long) &sst_acpi_chv},
+	{ "80860F28", (unsigned long)&snd_soc_acpi_intel_baytrail_machines},
+	{ "808622A8", (unsigned long)&snd_soc_acpi_intel_cherrytrail_machines},
 	{ },
 };
 

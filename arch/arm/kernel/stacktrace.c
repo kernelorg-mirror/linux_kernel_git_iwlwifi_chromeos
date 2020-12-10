@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/export.h>
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
 #include <linux/stacktrace.h>
 
+#include <asm/sections.h>
 #include <asm/stacktrace.h>
 #include <asm/traps.h>
 
@@ -86,7 +89,6 @@ EXPORT_SYMBOL(walk_stackframe);
 #ifdef CONFIG_STACKTRACE
 struct stack_trace_data {
 	struct stack_trace *trace;
-	unsigned long last_pc;
 	unsigned int no_sched_functions;
 	unsigned int skip;
 };
@@ -110,16 +112,7 @@ static int save_trace(struct stackframe *frame, void *d)
 	if (trace->nr_entries >= trace->max_entries)
 		return 1;
 
-	/*
-	 * in_exception_text() is designed to test if the PC is one of
-	 * the functions which has an exception stack above it, but
-	 * unfortunately what is in frame->pc is the return LR value,
-	 * not the saved PC value.  So, we need to track the previous
-	 * frame PC value when doing this.
-	 */
-	addr = data->last_pc;
-	data->last_pc = frame->pc;
-	if (!in_exception_text(addr))
+	if (!in_entry_text(frame->pc))
 		return 0;
 
 	regs = (struct pt_regs *)frame->sp;
@@ -137,7 +130,6 @@ static noinline void __save_stack_trace(struct task_struct *tsk,
 	struct stackframe frame;
 
 	data.trace = trace;
-	data.last_pc = ULONG_MAX;
 	data.skip = trace->skip;
 	data.no_sched_functions = nosched;
 
@@ -148,8 +140,6 @@ static noinline void __save_stack_trace(struct task_struct *tsk,
 		 * running on another CPU?  For now, ignore it as we
 		 * can't guarantee we won't explode.
 		 */
-		if (trace->nr_entries < trace->max_entries)
-			trace->entries[trace->nr_entries++] = ULONG_MAX;
 		return;
 #else
 		frame.fp = thread_saved_fp(tsk);
@@ -167,8 +157,6 @@ static noinline void __save_stack_trace(struct task_struct *tsk,
 	}
 
 	walk_stackframe(&frame, save_trace, &data);
-	if (trace->nr_entries < trace->max_entries)
-		trace->entries[trace->nr_entries++] = ULONG_MAX;
 }
 
 void save_stack_trace_regs(struct pt_regs *regs, struct stack_trace *trace)
@@ -186,14 +174,13 @@ void save_stack_trace_regs(struct pt_regs *regs, struct stack_trace *trace)
 	frame.pc = regs->ARM_pc;
 
 	walk_stackframe(&frame, save_trace, &data);
-	if (trace->nr_entries < trace->max_entries)
-		trace->entries[trace->nr_entries++] = ULONG_MAX;
 }
 
 void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
 {
 	__save_stack_trace(tsk, trace, 1);
 }
+EXPORT_SYMBOL(save_stack_trace_tsk);
 
 void save_stack_trace(struct stack_trace *trace)
 {

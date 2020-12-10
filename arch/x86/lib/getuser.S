@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * __get_user functions.
  *
@@ -32,6 +33,7 @@
 #include <asm/thread_info.h>
 #include <asm/asm.h>
 #include <asm/smap.h>
+#include <asm/export.h>
 
 	.text
 ENTRY(__get_user_1)
@@ -46,6 +48,7 @@ ENTRY(__get_user_1)
 	ASM_CLAC
 	ret
 ENDPROC(__get_user_1)
+EXPORT_SYMBOL(__get_user_1)
 
 ENTRY(__get_user_2)
 	add $1,%_ASM_AX
@@ -61,6 +64,7 @@ ENTRY(__get_user_2)
 	ASM_CLAC
 	ret
 ENDPROC(__get_user_2)
+EXPORT_SYMBOL(__get_user_2)
 
 ENTRY(__get_user_4)
 	add $3,%_ASM_AX
@@ -76,6 +80,7 @@ ENTRY(__get_user_4)
 	ASM_CLAC
 	ret
 ENDPROC(__get_user_4)
+EXPORT_SYMBOL(__get_user_4)
 
 ENTRY(__get_user_8)
 #ifdef CONFIG_X86_64
@@ -107,31 +112,32 @@ ENTRY(__get_user_8)
 	ret
 #endif
 ENDPROC(__get_user_8)
+EXPORT_SYMBOL(__get_user_8)
 
 
+.Lbad_get_user_clac:
+	ASM_CLAC
 bad_get_user:
 	xor %edx,%edx
 	mov $(-EFAULT),%_ASM_AX
-	ASM_CLAC
 	ret
-END(bad_get_user)
 
 #ifdef CONFIG_X86_32
+.Lbad_get_user_8_clac:
+	ASM_CLAC
 bad_get_user_8:
 	xor %edx,%edx
 	xor %ecx,%ecx
 	mov $(-EFAULT),%_ASM_AX
-	ASM_CLAC
 	ret
-END(bad_get_user_8)
 #endif
 
-	_ASM_EXTABLE(1b,bad_get_user)
-	_ASM_EXTABLE(2b,bad_get_user)
-	_ASM_EXTABLE(3b,bad_get_user)
+	_ASM_EXTABLE_UA(1b, .Lbad_get_user_clac)
+	_ASM_EXTABLE_UA(2b, .Lbad_get_user_clac)
+	_ASM_EXTABLE_UA(3b, .Lbad_get_user_clac)
 #ifdef CONFIG_X86_64
-	_ASM_EXTABLE(4b,bad_get_user)
+	_ASM_EXTABLE_UA(4b, .Lbad_get_user_clac)
 #else
-	_ASM_EXTABLE(4b,bad_get_user_8)
-	_ASM_EXTABLE(5b,bad_get_user_8)
+	_ASM_EXTABLE_UA(4b, .Lbad_get_user_8_clac)
+	_ASM_EXTABLE_UA(5b, .Lbad_get_user_8_clac)
 #endif

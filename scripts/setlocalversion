@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
 #
 # This scripts adds local version information from the version
 # control systems git, mercurial (hg) and subversion (svn).
@@ -98,7 +99,7 @@ scm_version()
 	# Check for mercurial and a mercurial repo.
 	if test -d .hg && hgid=`hg id 2>/dev/null`; then
 		# Do we have an tagged version?  If so, latesttagdistance == 1
-		if [ "`hg log -r . --template '{latesttagdistance}'`" == "1" ]; then
+		if [ "`hg log -r . --template '{latesttagdistance}'`" = "1" ]; then
 			id=`hg log -r . --template '{latesttag}'`
 			printf '%s%s' -hg "$id"
 		else
@@ -131,7 +132,7 @@ scm_version()
 
 collect_files()
 {
-	local file res
+	local file res=
 
 	for file; do
 		case "$file" in

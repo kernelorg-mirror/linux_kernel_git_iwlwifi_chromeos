@@ -1,25 +1,15 @@
-/*
- * ChromeOS EC keyboard driver
- *
- * Copyright (C) 2012 Google, Inc
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * This driver uses the Chrome OS EC byte-level message-based protocol for
- * communicating the keyboard state (which keys are pressed) from a keyboard EC
- * to the AP over some bus (such as i2c, lpc, spi).  The EC does debouncing,
- * but everything else (including deghosting) is done here.  The main
- * motivation for this is to keep the EC firmware as simple as possible, since
- * it cannot be easily upgraded and EC flash/IRAM space is relatively
- * expensive.
- */
+// SPDX-License-Identifier: GPL-2.0
+// ChromeOS EC keyboard driver
+//
+// Copyright (C) 2012 Google, Inc.
+//
+// This driver uses the ChromeOS EC byte-level message-based protocol for
+// communicating the keyboard state (which keys are pressed) from a keyboard EC
+// to the AP over some bus (such as i2c, lpc, spi).  The EC does debouncing,
+// but everything else (including deghosting) is done here.  The main
+// motivation for this is to keep the EC firmware as simple as possible, since
+// it cannot be easily upgraded and EC flash/IRAM space is relatively
+// expensive.
 
 #include <linux/module.h>
 #include <linux/acpi.h>
@@ -33,8 +23,8 @@
 #include <linux/slab.h>
 #include <linux/sysrq.h>
 #include <linux/input/matrix_keypad.h>
-#include <linux/mfd/cros_ec.h>
-#include <linux/mfd/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_proto.h>
 
 #include <asm/unaligned.h>
 
@@ -82,7 +72,7 @@ struct cros_ec_keyb {
  * @code: A linux keycode
  * @bit: A #define like EC_MKBP_POWER_BUTTON or EC_MKBP_LID_OPEN
  * @inverted: If the #define and EV_SW have opposite meanings, this is true.
- *             Only applicable to switches.
+ *            Only applicable to switches.
  */
 struct cros_ec_bs_map {
 	unsigned int ev_type;
@@ -179,9 +169,6 @@ static void cros_ec_keyb_process(struct cros_ec_keyb *ckdev,
 	int col, row;
 	int new_state;
 	int old_state;
-	int num_cols;
-
-	num_cols = len;
 
 	if (ckdev->ghost_filter && cros_ec_keyb_has_ghosting(ckdev, kb_state)) {
 		/*
@@ -272,23 +259,21 @@ static int cros_ec_keyb_work(struct notifier_block *nb,
 	u32 val;
 	unsigned int ev_type;
 
+	/*
+	 * If not wake enabled, discard key state changes during
+	 * suspend. Switches will be re-checked in
+	 * cros_ec_keyb_resume() to be sure nothing is lost.
+	 */
+	if (queued_during_suspend && !device_may_wakeup(ckdev->dev))
+		return NOTIFY_OK;
+
 	switch (ckdev->ec->event_data.event_type) {
 	case EC_MKBP_EVENT_KEY_MATRIX:
-		if (device_may_wakeup(ckdev->dev)) {
-			pm_wakeup_event(ckdev->dev, 0);
-		} else {
-			/*
-			 * If keyboard is not wake enabled, discard key state
-			 * changes during suspend. Switches will be re-checked
-			 * in cros_ec_keyb_resume() to be sure nothing is lost.
-			 */
-			if (queued_during_suspend)
-				return NOTIFY_OK;
-		}
+		pm_wakeup_event(ckdev->dev, 0);
 
 		if (ckdev->ec->event_size != ckdev->cols) {
 			dev_err(ckdev->dev,
-					"Discarded incomplete key matrix event.\n");
+				"Discarded incomplete key matrix event.\n");
 			return NOTIFY_OK;
 		}
 
@@ -298,22 +283,16 @@ static int cros_ec_keyb_work(struct notifier_block *nb,
 		break;
 
 	case EC_MKBP_EVENT_SYSRQ:
-		if (device_may_wakeup(ckdev->dev))
-			pm_wakeup_event(ckdev->dev, 0);
-		else if (queued_during_suspend)
-			return NOTIFY_OK;
+		pm_wakeup_event(ckdev->dev, 0);
 
 		val = get_unaligned_le32(&ckdev->ec->event_data.data.sysrq);
-		dev_dbg(ckdev->dev, "sysrq code from EC : %#x\n", val);
+		dev_dbg(ckdev->dev, "sysrq code from EC: %#x\n", val);
 		handle_sysrq(val);
 		break;
 
 	case EC_MKBP_EVENT_BUTTON:
 	case EC_MKBP_EVENT_SWITCH:
-		if (device_may_wakeup(ckdev->dev))
-			pm_wakeup_event(ckdev->dev, 0);
-		else if (queued_during_suspend)
-			return NOTIFY_OK;
+		pm_wakeup_event(ckdev->dev, 0);
 
 		if (ckdev->ec->event_data.event_type == EC_MKBP_EVENT_BUTTON) {
 			val = get_unaligned_le32(
@@ -399,18 +378,14 @@ static int cros_ec_keyb_info(struct cros_ec_device *ec_dev,
 	params->info_type = info_type;
 	params->event_type = event_type;
 
-	ret = cros_ec_cmd_xfer(ec_dev, msg);
-	if (ret < 0) {
-		dev_warn(ec_dev->dev, "Transfer error %d/%d: %d\n",
-				(int)info_type, (int)event_type, ret);
-	} else if (msg->result == EC_RES_INVALID_VERSION) {
+	ret = cros_ec_cmd_xfer_status(ec_dev, msg);
+	if (ret == -ENOTSUPP) {
 		/* With older ECs we just return 0 for everything */
 		memset(result, 0, result_size);
 		ret = 0;
-	} else if (msg->result != EC_RES_SUCCESS) {
-		dev_warn(ec_dev->dev, "Error getting info %d/%d: %d\n",
-				(int)info_type, (int)event_type, msg->result);
-		ret = -EPROTO;
+	} else if (ret < 0) {
+		dev_warn(ec_dev->dev, "Transfer error %d/%d: %d\n",
+			 (int)info_type, (int)event_type, ret);
 	} else if (ret != result_size) {
 		dev_warn(ec_dev->dev, "Wrong size %d/%d: %d != %zu\n",
 			 (int)info_type, (int)event_type,
@@ -422,6 +397,7 @@ static int cros_ec_keyb_info(struct cros_ec_device *ec_dev,
 	}
 
 	kfree(msg);
+
 	return ret;
 }
 
@@ -463,7 +439,7 @@ static int cros_ec_keyb_query_switches(struct cros_ec_keyb *ckdev)
  *
  * We use the resume notification as a chance to query the EC for switches.
  *
- * @ckdev: The keyboard device
+ * @dev: The keyboard device
  *
  * Returns 0 if no error or -error upon error.
  */
@@ -573,7 +549,7 @@ static int cros_ec_keyb_register_matrix(struct cros_ec_keyb *ckdev)
 	const char *phys;
 	int err;
 
-	err = matrix_keypad_parse_of_params(dev, &ckdev->rows, &ckdev->cols);
+	err = matrix_keypad_parse_properties(dev, &ckdev->rows, &ckdev->cols);
 	if (err)
 		return err;
 
@@ -690,11 +666,13 @@ static int cros_ec_keyb_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_ACPI
 static const struct acpi_device_id cros_ec_keyb_acpi_match[] = {
 	{ "GOOG0007", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, cros_ec_keyb_acpi_match);
+#endif
 
 #ifdef CONFIG_OF
 static const struct of_device_id cros_ec_keyb_of_match[] = {
@@ -704,7 +682,7 @@ static const struct of_device_id cros_ec_keyb_of_match[] = {
 MODULE_DEVICE_TABLE(of, cros_ec_keyb_of_match);
 #endif
 
-static const SIMPLE_DEV_PM_OPS(cros_ec_keyb_pm_ops, NULL, cros_ec_keyb_resume);
+static SIMPLE_DEV_PM_OPS(cros_ec_keyb_pm_ops, NULL, cros_ec_keyb_resume);
 
 static struct platform_driver cros_ec_keyb_driver = {
 	.probe = cros_ec_keyb_probe,
@@ -719,6 +697,6 @@ static struct platform_driver cros_ec_keyb_driver = {
 
 module_platform_driver(cros_ec_keyb_driver);
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("ChromeOS EC keyboard driver");
 MODULE_ALIAS("platform:cros-ec-keyb");

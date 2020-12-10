@@ -59,6 +59,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgx_memallocflags.h"
 #include "rgxtimerquery.h"
 #include "rgxhwperf.h"
+#include "ospvr_gputrace.h"
 #include "htbuffer.h"
 
 #include "pdump_km.h"
@@ -66,7 +67,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "sync_server.h"
 #include "sync_internal.h"
 #include "sync.h"
-#include "rgx_bvnc_defs_km.h"
+#include "km/rgx_bvnc_defs_km.h"
 
 #if defined(SUPPORT_BUFFER_SYNC)
 #include "pvr_buffer_sync.h"
@@ -373,7 +374,7 @@ PVRSRV_ERROR PVRSRVRGXCreateTransferContextKM(CONNECTION_DATA		*psConnection,
 	}
 
 #if !defined(PVRSRV_USE_BRIDGE_LOCK)
-	eError = OSLockCreate(&psTransferContext->hLock, LOCK_TYPE_NONE);
+	eError =  OSLockCreate(&psTransferContext->hLock);
 
 	if(eError != PVRSRV_OK)
 	{
@@ -1321,10 +1322,8 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 			OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 		} END_LOOP_UNTIL_TIMEOUT();
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-		RGXHWPerfFTraceGPUEnqueueEvent(psDeviceNode->pvDevice,
-				ui32FWCtx, ui32IntJobRef, RGX_HWPERF_KICK_TYPE_TQ3D);
-#endif
+		PVRGpuTraceEnqueueEvent(psDeviceNode->pvDevice, ui32FWCtx, ui32ExtJobRef,
+		                        ui32IntJobRef, RGX_HWPERF_KICK_TYPE_TQ3D);
 	}
 
 	if ((ui322DCmdCount) && (RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
@@ -1367,10 +1366,8 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 			OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 		} END_LOOP_UNTIL_TIMEOUT();
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-		RGXHWPerfFTraceGPUEnqueueEvent(psDeviceNode->pvDevice,
-				ui32FWCtx, ui32IntJobRef, RGX_HWPERF_KICK_TYPE_TQ2D);
-#endif
+		PVRGpuTraceEnqueueEvent(psDeviceNode->pvDevice, ui32FWCtx, ui32ExtJobRef,
+		                        ui32IntJobRef, RGX_HWPERF_KICK_TYPE_TQ2D);
 	}
 
 	/*

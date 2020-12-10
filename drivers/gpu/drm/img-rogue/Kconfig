@@ -1,11 +1,10 @@
 config DRM_POWERVR_ROGUE_1_10
-	tristate "PowerVR Rogue v1.10"
-	depends on ARM64 || METAG
+	tristate "PowerVR Rogue"
+	depends on ARM64
 	depends on HAS_IOMEM
 	depends on DRM
 	depends on SYNC_FILE
 	select DRM_KMS_HELPER
-	select GPU_TRACEPOINTS
 	select PM_DEVFREQ
 	select DEVFREQ_GOV_SIMPLE_ONDEMAND
 	select PM_OPP

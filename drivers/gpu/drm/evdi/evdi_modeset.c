@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat
- * Copyright (c) 2015 - 2016 DisplayLink (UK) Ltd.
+ * Copyright (c) 2015 - 2019 DisplayLink (UK) Ltd.
  *
  * Based on parts on udlfb.c:
  * Copyright (C) 2009 its respective authors
@@ -20,12 +21,9 @@
 #include "evdi_drv.h"
 #include "evdi_cursor.h"
 
-static void evdi_crtc_dpms(struct drm_crtc *crtc, int mode)
-{
-	EVDI_CHECKPT();
-}
-
-static void evdi_crtc_disable(struct drm_crtc *crtc)
+static void evdi_crtc_dpms(
+			__always_unused struct drm_crtc *crtc,
+			__always_unused int mode)
 {
 	EVDI_CHECKPT();
 }
@@ -37,17 +35,14 @@ static void evdi_crtc_destroy(struct drm_crtc *crtc)
 	kfree(crtc);
 }
 
-static void evdi_crtc_commit(struct drm_crtc *crtc)
+static void evdi_crtc_commit(__always_unused struct drm_crtc *crtc)
 {
 	EVDI_CHECKPT();
 }
 
-static void evdi_crtc_set_nofb(struct drm_crtc *crtc)
-{
-}
-
-static void evdi_crtc_atomic_flush(struct drm_crtc *crtc,
-				   struct drm_crtc_state *old_state)
+static void evdi_crtc_atomic_flush(
+			struct drm_crtc *crtc,
+			__always_unused struct drm_crtc_state *old_state)
 {
 	struct drm_crtc_state *state = crtc->state;
 	struct evdi_device *evdi = crtc->dev->dev_private;
@@ -69,20 +64,13 @@ static void evdi_crtc_atomic_flush(struct drm_crtc *crtc,
 	evdi_painter_send_update_ready_if_needed(evdi);
 }
 
-static void evdi_crtc_mark_full_screen_dirty(struct evdi_device *evdi,
-					     struct drm_crtc *crtc)
+static void evdi_mark_full_screen_dirty(struct evdi_device *evdi)
 {
-	if (crtc && crtc->primary && crtc->primary->fb) {
-		struct drm_clip_rect rect = {
-			0,
-			0,
-			crtc->primary->fb->width,
-			crtc->primary->fb->height
-		};
+	const struct drm_clip_rect rect =
+		evdi_painter_framebuffer_size(evdi->painter);
 
-		evdi_painter_mark_dirty(evdi, &rect);
-		evdi_painter_send_update_ready_if_needed(evdi);
-	}
+	evdi_painter_mark_dirty(evdi, &rect);
+	evdi_painter_send_update_ready_if_needed(evdi);
 }
 
 static int evdi_crtc_cursor_set(struct drm_crtc *crtc,
@@ -126,10 +114,10 @@ static int evdi_crtc_cursor_set(struct drm_crtc *crtc,
 	evdi_cursor_set(evdi->cursor,
 			eobj, width, height, hot_x, hot_y,
 			format, stride);
-	drm_gem_object_unreference_unlocked(obj);
+	drm_gem_object_put_unlocked(obj);
 
 	if (evdi_enable_cursor_blending)
-		evdi_crtc_mark_full_screen_dirty(evdi, crtc);
+		evdi_mark_full_screen_dirty(evdi);
 	else
 		evdi_painter_send_cursor_set(evdi->painter, evdi->cursor);
 	return 0;
@@ -140,22 +128,22 @@ static int evdi_crtc_cursor_move(struct drm_crtc *crtc, int x, int y)
 	struct drm_device *dev = crtc->dev;
 	struct evdi_device *evdi = dev->dev_private;
 
+	EVDI_CHECKPT();
 	evdi_cursor_move(evdi->cursor, x, y);
 
 	if (evdi_enable_cursor_blending)
-		evdi_crtc_mark_full_screen_dirty(evdi, crtc);
+		evdi_mark_full_screen_dirty(evdi);
 	else
 		evdi_painter_send_cursor_move(evdi->painter, evdi->cursor);
+
 	return 0;
 }
 
 static struct drm_crtc_helper_funcs evdi_helper_funcs = {
-	.mode_set_nofb  = evdi_crtc_set_nofb,
 	.atomic_flush   = evdi_crtc_atomic_flush,
 
 	.dpms           = evdi_crtc_dpms,
 	.commit         = evdi_crtc_commit,
-	.disable        = evdi_crtc_disable
 };
 
 
@@ -164,7 +152,6 @@ static const struct drm_crtc_funcs evdi_crtc_funcs = {
 	.destroy                = evdi_crtc_destroy,
 	.set_config             = drm_atomic_helper_set_config,
 	.page_flip              = drm_atomic_helper_page_flip,
-	.set_property           = drm_atomic_helper_crtc_set_property,
 	.atomic_duplicate_state = drm_atomic_helper_crtc_duplicate_state,
 	.atomic_destroy_state   = drm_atomic_helper_crtc_destroy_state,
 
@@ -196,7 +183,7 @@ static void evdi_plane_atomic_update(struct drm_plane *plane,
 	}
 }
 
-void evdi_cursor_atomic_get_rect(struct drm_clip_rect *rect,
+static void evdi_cursor_atomic_get_rect(struct drm_clip_rect *rect,
 				 struct drm_plane_state *state)
 {
 	rect->x1 = (state->crtc_x < 0) ? 0 : state->crtc_x;
@@ -334,9 +321,9 @@ static int evdi_crtc_init(struct drm_device *dev)
 		return -ENOMEM;
 
 	primary = evdi_create_plane(dev, DRM_PLANE_TYPE_PRIMARY,
-				    &evdi_plane_helper_funcs);
+					&evdi_plane_helper_funcs);
 	status = drm_crtc_init_with_planes(dev, crtc, primary, NULL,
-					   &evdi_crtc_funcs, NULL);
+						&evdi_crtc_funcs, NULL);
 
 	EVDI_INFO("drm_crtc_init: %d p%p\n", status, primary);
 	drm_crtc_helper_add(crtc, &evdi_helper_funcs);
@@ -344,16 +331,17 @@ static int evdi_crtc_init(struct drm_device *dev)
 	return 0;
 }
 
-int evdi_atomic_check(struct drm_device *dev,
-			    struct drm_atomic_state *state) {
+static int evdi_atomic_check(struct drm_device *dev,
+				struct drm_atomic_state *state)
+{
 	struct drm_crtc *crtc;
-	struct drm_crtc_state *crtc_state;
+	struct drm_crtc_state *crtc_state = NULL;
 	int i;
 	struct evdi_device *evdi = dev->dev_private;
 
 
 	if (evdi_painter_needs_full_modeset(evdi)) {
-		for_each_crtc_in_state(state, crtc, crtc_state, i) {
+		for_each_new_crtc_in_state(state, crtc, crtc_state, i) {
 			crtc_state->active_changed = true;
 			crtc_state->mode_changed = true;
 		}
@@ -387,8 +375,6 @@ void evdi_modeset_init(struct drm_device *dev)
 	dev->mode_config.preferred_depth = 24;
 
 	dev->mode_config.funcs = &evdi_mode_funcs;
-
-	drm_mode_create_dirty_info_property(dev);
 
 	drm_dev_set_unique(dev, dev_name(dev->dev));
 	evdi_crtc_init(dev);

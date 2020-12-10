@@ -16,12 +16,13 @@ static const u32    list_limit = 1024;  /* udmabuf_create_list->count limit */
 static const size_t size_limit_mb = 64; /* total dmabuf size, in megabytes  */
 
 struct udmabuf {
-	u32 pagecount;
+	pgoff_t pagecount;
 	struct page **pages;
 };
 
-static int udmabuf_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+static vm_fault_t udmabuf_vm_fault(struct vm_fault *vmf)
 {
+	struct vm_area_struct *vma = vmf->vma;
 	struct udmabuf *ubuf = vma->vm_private_data;
 
 	vmf->page = ubuf->pages[vmf->pgoff];
@@ -106,27 +107,20 @@ static void kunmap_udmabuf(struct dma_buf *buf, unsigned long page_num,
 	kunmap(vaddr);
 }
 
-static void *kmap_atomic_udmabuf(struct dma_buf *dma_buf,
-					unsigned long page_num)
-{
-	return NULL;
-}
-
 static const struct dma_buf_ops udmabuf_ops = {
 	.map_dma_buf	  = map_udmabuf,
 	.unmap_dma_buf	  = unmap_udmabuf,
 	.release	  = release_udmabuf,
-	.kmap		  = kmap_udmabuf,
-	.kmap_atomic      = kmap_atomic_udmabuf,
-	.kunmap		  = kunmap_udmabuf,
+	.map		  = kmap_udmabuf,
+	.unmap		  = kunmap_udmabuf,
 	.mmap		  = mmap_udmabuf,
 };
 
 #define SEALS_WANTED (F_SEAL_SHRINK)
 #define SEALS_DENIED (F_SEAL_WRITE)
 
-static long udmabuf_create(struct udmabuf_create_list *head,
-			   struct udmabuf_create_item *list)
+static long udmabuf_create(const struct udmabuf_create_list *head,
+			   const struct udmabuf_create_item *list)
 {
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 	struct file *memfd = NULL;
@@ -166,7 +160,7 @@ static long udmabuf_create(struct udmabuf_create_list *head,
 			goto err;
 		if (!shmem_mapping(file_inode(memfd)->i_mapping))
 			goto err;
-		seals = shmem_fcntl(memfd, F_GET_SEALS, 0);
+		seals = memfd_fcntl(memfd, F_GET_SEALS, 0);
 		if (seals == -EINVAL)
 			goto err;
 		ret = -EINVAL;
@@ -276,6 +270,9 @@ static long udmabuf_ioctl(struct file *filp, unsigned int ioctl,
 static const struct file_operations udmabuf_fops = {
 	.owner		= THIS_MODULE,
 	.unlocked_ioctl = udmabuf_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl   = udmabuf_ioctl,
+#endif
 };
 
 static struct miscdevice udmabuf_misc = {

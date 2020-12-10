@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat
- * Copyright (c) 2015 - 2016 DisplayLink (UK) Ltd.
+ * Copyright (c) 2015 - 2018 DisplayLink (UK) Ltd.
  *
  * Based on parts on udlfb.c:
  * Copyright (C) 2009 its respective authors
@@ -12,6 +13,7 @@
 
 #include <linux/platform_device.h>
 #include <drm/drmP.h>
+#include <drm/drm_probe_helper.h>
 #include "evdi_drv.h"
 #include "evdi_cursor.h"
 
@@ -72,18 +74,22 @@ err:
 	return ret;
 }
 
-int evdi_driver_unload(struct drm_device *dev)
+void evdi_driver_setup_late(struct drm_device *dev)
+{
+	evdi_stats_init(dev->dev_private);
+}
+
+void evdi_driver_unload(struct drm_device *dev)
 {
 	struct evdi_device *evdi = dev->dev_private;
 
 	EVDI_CHECKPT();
 
-	drm_vblank_cleanup(dev);
 	drm_kms_helper_poll_fini(dev);
-	drm_connector_unregister_all(dev);
 #ifdef CONFIG_FB
 	evdi_fbdev_unplug(dev);
 #endif /* CONFIG_FB */
+
 	if (evdi->cursor)
 		evdi_cursor_free(evdi->cursor);
 	evdi_painter_cleanup(evdi);
@@ -94,30 +100,14 @@ int evdi_driver_unload(struct drm_device *dev)
 	evdi_modeset_cleanup(dev);
 
 	kfree(evdi);
-	return 0;
-}
-
-void evdi_driver_close(struct drm_device *drm_dev, struct drm_file *file)
-{
-	struct evdi_device *evdi = drm_dev->dev_private;
-
-	if (evdi)
-		evdi_painter_close(evdi, file);
 }
 
 void evdi_driver_preclose(struct drm_device *drm_dev, struct drm_file *file)
 {
-	evdi_driver_close(drm_dev, file);
-}
-
-void evdi_driver_postclose(struct drm_device *drm_dev, struct drm_file *file)
-{
 	struct evdi_device *evdi = drm_dev->dev_private;
 
-	EVDI_DEBUG("(dev=%d) Process tries to close us, postclose\n",
-		   evdi ? evdi->dev_index : -1);
-	evdi_log_process();
-
-	evdi_driver_close(drm_dev, file);
+	EVDI_CHECKPT();
+	if (evdi)
+		evdi_painter_close(evdi, file);
 }
 

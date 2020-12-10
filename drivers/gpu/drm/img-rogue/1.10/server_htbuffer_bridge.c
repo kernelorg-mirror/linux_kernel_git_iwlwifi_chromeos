@@ -405,7 +405,7 @@ PVRSRV_ERROR DeinitHTBUFFERBridge(void);
  */
 PVRSRV_ERROR InitHTBUFFERBridge(void)
 {
-	PVR_LOGR_IF_ERROR(OSLockCreate(&pHTBUFFERBridgeLock, LOCK_TYPE_PASSIVE), "OSLockCreate");
+	PVR_LOGR_IF_ERROR(OSLockCreate(&pHTBUFFERBridgeLock), "OSLockCreate");
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_HTBUFFER, PVRSRV_BRIDGE_HTBUFFER_HTBCONFIGURE, PVRSRVBridgeHTBConfigure,
 					pHTBUFFERBridgeLock, bUseLock);

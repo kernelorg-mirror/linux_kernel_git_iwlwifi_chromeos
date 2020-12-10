@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat
  *
@@ -6,15 +7,12 @@
  * Copyright (C) 2009 Jaya Kumar <jayakumar.lkml@gmail.com>
  * Copyright (C) 2009 Bernie Thompson <bernie@plugable.com>
 
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
 
-#include <drm/drmP.h>
-#include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_plane_helper.h>
+#include <drm/drm_modeset_helper_vtables.h>
+#include <drm/drm_vblank.h>
+
 #include "udl_drv.h"
 #include "udl_cursor.h"
 
@@ -236,20 +234,15 @@ static int udl_crtc_write_mode_to_hw(struct drm_crtc *crtc)
 	char *buf;
 	int retval;
 
-	mutex_lock(&udl->transfer_lock);
 	urb = udl_get_urb(dev);
-	if (!urb) {
-		mutex_unlock(&udl->transfer_lock);
+	if (!urb)
 		return -ENOMEM;
-	}
 
 	buf = (char *)urb->transfer_buffer;
 
 	memcpy(buf, udl->mode_buf, udl->mode_buf_len);
 	retval = udl_submit_urb(dev, urb, udl->mode_buf_len);
-	DRM_INFO("write mode info %d\n", udl->mode_buf_len);
-	mutex_unlock(&udl->transfer_lock);
-
+	DRM_DEBUG("write mode info %d\n", udl->mode_buf_len);
 	return retval;
 }
 
@@ -263,12 +256,9 @@ static void udl_crtc_dpms(struct drm_crtc *crtc, int mode)
 	if (mode == DRM_MODE_DPMS_OFF) {
 		char *buf;
 		struct urb *urb;
-		mutex_lock(&udl->transfer_lock);
 		urb = udl_get_urb(dev);
-		if (!urb) {
-			mutex_unlock(&udl->transfer_lock);
+		if (!urb)
 			return;
-		}
 
 		buf = (char *)urb->transfer_buffer;
 		buf = udl_vidreg_lock(buf);
@@ -278,7 +268,6 @@ static void udl_crtc_dpms(struct drm_crtc *crtc, int mode)
 		buf = udl_dummy_render(buf);
 		retval = udl_submit_urb(dev, urb, buf - (char *)
 					urb->transfer_buffer);
-		mutex_unlock(&udl->transfer_lock);
 	} else {
 		if (udl->mode_buf_len == 0) {
 			DRM_ERROR("Trying to enable DPMS with no mode\n");
@@ -287,14 +276,6 @@ static void udl_crtc_dpms(struct drm_crtc *crtc, int mode)
 		udl_crtc_write_mode_to_hw(crtc);
 	}
 
-}
-
-static bool udl_crtc_mode_fixup(struct drm_crtc *crtc,
-				  const struct drm_display_mode *mode,
-				  struct drm_display_mode *adjusted_mode)
-
-{
-	return true;
 }
 
 #if 0
@@ -415,17 +396,17 @@ static void udl_sched_page_flip(struct work_struct *work)
 	if (fb)
 		udl_handle_damage(to_udl_fb(fb), 0, 0, fb->width, fb->height);
 	if (event) {
-		unsigned long flags;
-		spin_lock_irqsave(&dev->event_lock, flags);
-		drm_send_vblank_event(dev, 0, event);
-		spin_unlock_irqrestore(&dev->event_lock, flags);
+		spin_lock_irq(&dev->event_lock);
+		drm_crtc_send_vblank_event(crtc, event);
+		spin_unlock_irq(&dev->event_lock);
 	}
 }
 
 static int udl_crtc_page_flip(struct drm_crtc *crtc,
 			      struct drm_framebuffer *fb,
 			      struct drm_pending_vblank_event *event,
-			      uint32_t page_flip_flags)
+			      uint32_t page_flip_flags,
+			      struct drm_modeset_acquire_ctx *ctx)
 {
 	struct drm_device *dev = crtc->dev;
 	struct udl_device *udl = dev->dev_private;
@@ -455,7 +436,7 @@ static int udl_crtc_page_flip(struct drm_crtc *crtc,
 		if (flip_queue->event) {
 			unsigned long flags;
 			spin_lock_irqsave(&dev->event_lock, flags);
-			drm_send_vblank_event(dev, 0, flip_queue->event);
+			drm_crtc_send_vblank_event(crtc, flip_queue->event);
 			spin_unlock_irqrestore(&dev->event_lock, flags);
 		}
 		flip_queue->event = event;
@@ -499,7 +480,7 @@ static int udl_crtc_cursor_set(struct drm_crtc *crtc, struct drm_file *file,
 		return ret;
 	}
 
-	return udl_crtc_page_flip(crtc, NULL, NULL, 0);
+	return udl_crtc_page_flip(crtc, NULL, NULL, 0, NULL);
 }
 
 static int udl_crtc_cursor_move(struct drm_crtc *crtc, int x, int y)
@@ -518,16 +499,15 @@ static int udl_crtc_cursor_move(struct drm_crtc *crtc, int x, int y)
 	}
 	mutex_unlock(&dev->struct_mutex);
 
-	return udl_crtc_page_flip(crtc, NULL, NULL, 0);
+	return udl_crtc_page_flip(crtc, NULL, NULL, 0, NULL);
 
 error:
 	mutex_unlock(&dev->struct_mutex);
 	return ret;
 }
 
-static struct drm_crtc_helper_funcs udl_helper_funcs = {
+static const struct drm_crtc_helper_funcs udl_helper_funcs = {
 	.dpms = udl_crtc_dpms,
-	.mode_fixup = udl_crtc_mode_fixup,
 	.mode_set = udl_crtc_mode_set,
 	.prepare = udl_crtc_prepare,
 	.commit = udl_crtc_commit,
@@ -606,8 +586,6 @@ int udl_modeset_init(struct drm_device *dev)
 
 	dev->mode_config.funcs = &udl_mode_funcs;
 
-	drm_mode_create_dirty_info_property(dev);
-
 	udl_crtc_init(dev);
 
 	encoder = udl_encoder_init(dev);
@@ -623,6 +601,7 @@ void udl_modeset_restore(struct drm_device *dev)
 {
 	struct udl_device *udl = dev->dev_private;
 	struct udl_framebuffer *ufb;
+
 	if (!udl->crtc || !udl->crtc->primary->fb)
 		return;
 	udl_crtc_commit(udl->crtc);

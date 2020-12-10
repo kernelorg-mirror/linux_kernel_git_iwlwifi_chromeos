@@ -2,16 +2,11 @@
 // Copyright (c) 2017 Intel Corporation.
 
 #include <linux/acpi.h>
-#include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
-
-#ifndef V4L2_CID_DIGITAL_GAIN
-#define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
-#endif
 
 #define OV5670_REG_CHIP_ID		0x300a
 #define OV5670_CHIP_ID			0x005670
@@ -50,13 +45,6 @@
 #define	ANALOG_GAIN_STEP		1
 #define	ANALOG_GAIN_DEFAULT		128
 
-/* OTP control registers */
-#define OV5670_REG_OTP_LOAD_CTRL	0x3d81
-#define OV5670_OTP_LOAD_ENABLE		BIT(0)
-#define OV5670_REG_OTP_MODE_CTRL	0x3d84
-#define OV5670_OTP_PROGRAM_DISABLE	BIT(7)
-#define OV5670_OTP_MANUAL_MODE		BIT(6)
-
 /* Digital gain controls from sensor */
 #define OV5670_REG_R_DGTL_GAIN		0x5032
 #define OV5670_REG_G_DGTL_GAIN		0x5034
@@ -77,19 +65,6 @@
 
 /* Initial number of frames to skip to avoid possible garbage */
 #define OV5670_NUM_OF_SKIP_FRAMES	2
-
-/* ISP control registers */
-#define OV5670_REG_ISP_CTRL02		0x5002
-#define OV5670_OTP_DPC_ENABLE		BIT(3)
-
-/* OTP access for vendor Id */
-#define OV5670_OTP_SRAM			0x7000
-#define OV5670_FLAG_BASIC_OFFSET	0x10
-#define OV5670_NUM_OTP_GROUP		3
-#define OV5670_OTP_GROUP_FLAG_SHIFT(i)	(6 - 2*(i))
-#define OV5670_OTP_GROUP_FLAG_MASK	0x3
-#define OV5670_OTP_GROUP_FLAG_VALID	0x1
-#define OV5670_OTP_MI_ID_OFFSET(i)	(0x11 + 5*(i))
 
 struct ov5670_reg {
 	u16 address;
@@ -1856,10 +1831,6 @@ struct ov5670 {
 
 	/* Streaming on/off */
 	bool streaming;
-
-	/* Vendor Id from OTP */
-	bool otp_read;
-	u32 vendor_id;
 };
 
 #define to_ov5670(_sd)	container_of(_sd, struct ov5670, sd)
@@ -1871,8 +1842,8 @@ static int ov5670_read_reg(struct ov5670 *ov5670, u16 reg, unsigned int len,
 	struct i2c_client *client = v4l2_get_subdevdata(&ov5670->sd);
 	struct i2c_msg msgs[2];
 	u8 *data_be_p;
-	u32 data_be = 0;
-	u16 reg_addr_be = cpu_to_be16(reg);
+	__be32 data_be = 0;
+	__be16 reg_addr_be = cpu_to_be16(reg);
 	int ret;
 
 	if (len > 4)
@@ -1909,6 +1880,7 @@ static int ov5670_write_reg(struct ov5670 *ov5670, u16 reg, unsigned int len,
 	int val_i;
 	u8 buf[6];
 	u8 *val_p;
+	__be32 tmp;
 
 	if (len > 4)
 		return -EINVAL;
@@ -1916,8 +1888,8 @@ static int ov5670_write_reg(struct ov5670 *ov5670, u16 reg, unsigned int len,
 	buf[0] = reg >> 8;
 	buf[1] = reg & 0xff;
 
-	val = cpu_to_be32(val);
-	val_p = (u8 *)&val;
+	tmp = cpu_to_be32(val);
+	val_p = (u8 *)&tmp;
 	buf_i = 2;
 	val_i = 4 - len;
 
@@ -2044,7 +2016,7 @@ static int ov5670_set_ctrl(struct v4l2_ctrl *ctrl)
 	}
 
 	/* V4L2 controls values will be applied only when power is already up */
-	if (pm_runtime_get_if_in_use(&client->dev) <= 0)
+	if (!pm_runtime_get_if_in_use(&client->dev))
 		return 0;
 
 	switch (ctrl->id) {
@@ -2198,36 +2170,6 @@ static int ov5670_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
-/* Calculate resolution distance */
-static int ov5670_get_reso_dist(const struct ov5670_mode *mode,
-				struct v4l2_mbus_framefmt *framefmt)
-{
-	return abs(mode->width - framefmt->width) +
-	       abs(mode->height - framefmt->height);
-}
-
-/* Find the closest supported resolution to the requested resolution */
-static const struct ov5670_mode *ov5670_find_best_fit(
-						struct ov5670 *ov5670,
-						struct v4l2_subdev_format *fmt)
-{
-	struct v4l2_mbus_framefmt *framefmt = &fmt->format;
-	int dist;
-	int cur_best_fit = 0;
-	int cur_best_fit_dist = -1;
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
-		dist = ov5670_get_reso_dist(&supported_modes[i], framefmt);
-		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
-			cur_best_fit_dist = dist;
-			cur_best_fit = i;
-		}
-	}
-
-	return &supported_modes[cur_best_fit];
-}
-
 static void ov5670_update_pad_format(const struct ov5670_mode *mode,
 				     struct v4l2_subdev_format *fmt)
 {
@@ -2277,7 +2219,10 @@ static int ov5670_set_pad_format(struct v4l2_subdev *sd,
 
 	fmt->format.code = MEDIA_BUS_FMT_SGRBG10_1X10;
 
-	mode = ov5670_find_best_fit(ov5670, fmt);
+	mode = v4l2_find_nearest_size(supported_modes,
+				      ARRAY_SIZE(supported_modes),
+				      width, height,
+				      fmt->format.width, fmt->format.height);
 	ov5670_update_pad_format(mode, fmt);
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 		*v4l2_subdev_get_try_format(sd, cfg, fmt->pad) = fmt->format;
@@ -2494,130 +2439,6 @@ static const struct v4l2_subdev_internal_ops ov5670_internal_ops = {
 	.open = ov5670_open,
 };
 
-static int ov5670_read_otp(struct ov5670 *ov5670)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(&ov5670->sd);
-	u32 otp_mode_ctrl, isp_ctrl02, flag_basic;
-	unsigned int mi_id_offs;
-	int ret = 0;
-	int i;
-
-	mutex_lock(&ov5670->mutex);
-	if (ov5670->otp_read)
-		goto out_unlock;
-
-	ret = pm_runtime_get_sync(&client->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(&client->dev);
-		goto out_unlock;
-	}
-
-	if (!ov5670->streaming) {
-		ret = ov5670_start_streaming(ov5670);
-		if (ret)
-			goto out_runtime_put;
-	}
-
-	ret = ov5670_read_reg(ov5670,
-			      OV5670_REG_ISP_CTRL02,
-			      OV5670_REG_VALUE_08BIT, &isp_ctrl02);
-	if (ret)
-		goto out_standby;
-
-	ret = ov5670_write_reg(ov5670,
-			       OV5670_REG_ISP_CTRL02,
-			       OV5670_REG_VALUE_08BIT,
-			       isp_ctrl02 & ~OV5670_OTP_DPC_ENABLE);
-	if (ret)
-		goto out_standby;
-
-	ret = ov5670_read_reg(ov5670,
-			      OV5670_REG_OTP_MODE_CTRL,
-			      OV5670_REG_VALUE_08BIT, &otp_mode_ctrl);
-	if (ret)
-		goto out_dpc_enable;
-
-	otp_mode_ctrl |= OV5670_OTP_PROGRAM_DISABLE;
-	otp_mode_ctrl &= ~OV5670_OTP_MANUAL_MODE;
-
-	ret = ov5670_write_reg(ov5670,
-			       OV5670_REG_OTP_MODE_CTRL,
-			       OV5670_REG_VALUE_08BIT, otp_mode_ctrl);
-	if (ret)
-		goto out_dpc_enable;
-
-	ret = ov5670_write_reg(ov5670,
-			       OV5670_REG_OTP_LOAD_CTRL,
-			       OV5670_REG_VALUE_08BIT,
-			       OV5670_OTP_LOAD_ENABLE);
-	if (ret)
-		goto out_dpc_enable;
-
-	usleep_range(5000, 5500);
-
-	ret = ov5670_read_reg(ov5670,
-			      OV5670_OTP_SRAM + OV5670_FLAG_BASIC_OFFSET,
-			      OV5670_REG_VALUE_08BIT, &flag_basic);
-
-	for (i = 0; i < OV5670_NUM_OTP_GROUP; ++i) {
-		u8 flag;
-
-		flag = (flag_basic >> OV5670_OTP_GROUP_FLAG_SHIFT(i))
-					& OV5670_OTP_GROUP_FLAG_MASK;
-		if (flag == OV5670_OTP_GROUP_FLAG_VALID) {
-			mi_id_offs = OV5670_OTP_MI_ID_OFFSET(i);
-			break;
-		}
-	}
-	if (i == OV5670_NUM_OTP_GROUP) {
-		ret = -EFAULT;
-		goto out_dpc_enable;
-	}
-
-	ret = ov5670_read_reg(ov5670,
-			      OV5670_OTP_SRAM + mi_id_offs,
-			      OV5670_REG_VALUE_08BIT, &ov5670->vendor_id);
-
-out_dpc_enable:
-	ov5670_write_reg(ov5670,
-			 OV5670_REG_ISP_CTRL02,
-			 OV5670_REG_VALUE_08BIT,
-			 isp_ctrl02);
-
-out_standby:
-	if (!ov5670->streaming)
-		ov5670_stop_streaming(ov5670);
-
-out_runtime_put:
-	pm_runtime_put(&client->dev);
-
-out_unlock:
-	if (!ret)
-		ov5670->otp_read = true;
-
-	mutex_unlock(&ov5670->mutex);
-
-	return ret;
-}
-
-static ssize_t ov5670_vendor_id_read(struct device *dev,
-				     struct device_attribute *attr,
-				     char *buf)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct ov5670 *ov5670 = to_ov5670(sd);
-	int ret;
-
-	ret = ov5670_read_otp(ov5670);
-	if (ret)
-		return ret;
-
-	return scnprintf(buf, PAGE_SIZE, "%u\n", ov5670->vendor_id);
-}
-
-static DEVICE_ATTR(vendor_id, 0444, ov5670_vendor_id_read, NULL);
-
 static int ov5670_probe(struct i2c_client *client)
 {
 	struct ov5670 *ov5670;
@@ -2660,11 +2481,11 @@ static int ov5670_probe(struct i2c_client *client)
 	ov5670->sd.internal_ops = &ov5670_internal_ops;
 	ov5670->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	ov5670->sd.entity.ops = &ov5670_subdev_entity_ops;
-	ov5670->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
+	ov5670->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 
 	/* Source pad initialization */
 	ov5670->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_init(&ov5670->sd.entity, 1, &ov5670->pad, 0);
+	ret = media_entity_pads_init(&ov5670->sd.entity, 1, &ov5670->pad);
 	if (ret) {
 		err_msg = "media_entity_pads_init() error";
 		goto error_handler_free;
@@ -2677,27 +2498,17 @@ static int ov5670_probe(struct i2c_client *client)
 		goto error_entity_cleanup;
 	}
 
-	ret = device_create_file(&client->dev, &dev_attr_vendor_id);
-	if (ret) {
-		dev_err(&client->dev, "sysfs vendor_id creation failed\n");
-		goto error_unregister;
-	}
-
 	ov5670->streaming = false;
 
 	/*
 	 * Device is already turned on by i2c-core with ACPI domain PM.
 	 * Enable runtime PM and turn off the device.
 	 */
-	pm_runtime_get_noresume(&client->dev);
 	pm_runtime_set_active(&client->dev);
 	pm_runtime_enable(&client->dev);
-	pm_runtime_put(&client->dev);
+	pm_runtime_idle(&client->dev);
 
 	return 0;
-
-error_unregister:
-	v4l2_async_unregister_subdev(&ov5670->sd);
 
 error_entity_cleanup:
 	media_entity_cleanup(&ov5670->sd.entity);
@@ -2719,20 +2530,12 @@ static int ov5670_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct ov5670 *ov5670 = to_ov5670(sd);
 
-	device_remove_file(&client->dev, &dev_attr_vendor_id);
 	v4l2_async_unregister_subdev(sd);
 	media_entity_cleanup(&sd->entity);
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
 	mutex_destroy(&ov5670->mutex);
 
-	/*
-	 * Disable runtime PM but keep the device turned on.
-	 * i2c-core with ACPI domain PM will turn off the device.
-	 */
-	pm_runtime_get_sync(&client->dev);
 	pm_runtime_disable(&client->dev);
-	pm_runtime_set_suspended(&client->dev);
-	pm_runtime_put_noidle(&client->dev);
 
 	return 0;
 }

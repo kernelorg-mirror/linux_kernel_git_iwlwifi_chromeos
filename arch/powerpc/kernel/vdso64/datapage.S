@@ -1,12 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Access to the shared data page by the vDSO & syscall map
  *
  * Copyright (C) 2004 Benjamin Herrenschmuidt (benh@kernel.crashing.org), IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <asm/processor.h>
@@ -63,7 +59,7 @@ V_FUNCTION_BEGIN(__kernel_get_syscall_map)
 	cmpldi	cr0,r4,0
 	crclr	cr0*4+so
 	beqlr
-	li	r0,__NR_syscalls
+	li	r0,NR_syscalls
 	stw	r0,0(r4)
 	blr
   .cfi_endproc

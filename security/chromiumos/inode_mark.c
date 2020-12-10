@@ -108,11 +108,11 @@ chromiumos_super_block_lookup(struct super_block *sb)
 
 static int chromiumos_handle_fsnotify_event(struct fsnotify_group *group,
 					    struct inode *inode,
-					    struct fsnotify_mark *inode_mark,
-					    struct fsnotify_mark *vfsmount_mark,
-					    u32 mask, void *data, int data_type,
-					    const unsigned char *file_name,
-					    u32 cookie)
+					    u32 mask, const void *data,
+					    int data_type,
+					    const struct qstr *file_name,
+					    u32 cookie,
+					    struct fsnotify_iter_info *iter_info)
 {
 	/*
 	 * This should never get called because a zero mask is set on the inode
@@ -134,9 +134,16 @@ static void chromiumos_freeing_mark(struct fsnotify_mark *mark,
 	chromiumos_super_block_put(group->private);
 }
 
+static void chromiumos_free_mark(struct fsnotify_mark *mark)
+{
+	iput(chromiumos_to_inode_mark(mark)->inode);
+	kfree(mark);
+}
+
 static const struct fsnotify_ops chromiumos_fsn_ops = {
 	.handle_event = chromiumos_handle_fsnotify_event,
 	.freeing_mark = chromiumos_freeing_mark,
+	.free_mark = chromiumos_free_mark,
 };
 
 static struct chromiumos_super_block_mark *
@@ -181,12 +188,6 @@ chromiumos_super_block_get(struct super_block *sb)
 	return sbm;
 }
 
-static void chromiumos_free_mark(struct fsnotify_mark *mark)
-{
-	iput(chromiumos_to_inode_mark(mark)->inode);
-	kfree(mark);
-}
-
 /*
  * This will only ever get called if the metadata does not already exist for
  * an inode, so no need to worry about freeing an existing mark.
@@ -208,11 +209,7 @@ chromiumos_inode_mark_create(
 	if (!inode_mark)
 		return -ENOMEM;
 
-	/*
-	 * Initialize chromiumos_free_mark() to be the routine that will be
-	 * called when the mark is freed.
-	 */
-	fsnotify_init_mark(&inode_mark->mark, chromiumos_free_mark);
+	fsnotify_init_mark(&inode_mark->mark, sbm->fsn_group);
 	inode_mark->inode = igrab(inode);
 	if (!inode_mark->inode) {
 		ret = -ENOENT;
@@ -224,9 +221,8 @@ chromiumos_inode_mark_create(
 		inode_mark->policies[i] = CHROMIUMOS_INODE_POLICY_INHERIT;
 
 	inode_mark->policies[type] = policy;
-
-	ret = fsnotify_add_mark_locked(&inode_mark->mark, sbm->fsn_group,
-				       inode_mark->inode, NULL, false);
+	ret = fsnotify_add_mark_locked(&inode_mark->mark, &inode->i_fsnotify_marks,
+				       type, false, NULL);
 	if (ret)
 		goto out;
 
@@ -255,7 +251,7 @@ int chromiumos_update_inode_security_policy(
 
 	mutex_lock(&sbm->fsn_group->mark_mutex);
 
-	mark = fsnotify_find_inode_mark(sbm->fsn_group, inode);
+	mark = fsnotify_find_mark(&inode->i_fsnotify_marks, sbm->fsn_group);
 	if (mark) {
 		WRITE_ONCE(chromiumos_to_inode_mark(mark)->policies[type],
 				   policy);
@@ -297,7 +293,8 @@ int chromiumos_flush_inode_security_policies(struct super_block *sb)
 
 	sbm = chromiumos_super_block_lookup(sb);
 	if (sbm) {
-		fsnotify_clear_marks_by_group(sbm->fsn_group);
+		fsnotify_clear_marks_by_group(sbm->fsn_group,
+					      FSNOTIFY_OBJ_ALL_TYPES_MASK);
 		chromiumos_super_block_put(sbm);
 	}
 
@@ -328,8 +325,8 @@ enum chromiumos_inode_security_policy chromiumos_get_inode_security_policy(
 	/* Walk the dentry path and look for a traversal policy. */
 	rcu_read_lock();
 	while (1) {
-		struct fsnotify_mark *mark = fsnotify_find_inode_mark(
-			sbm->fsn_group, inode);
+		struct fsnotify_mark *mark = fsnotify_find_mark(
+			&inode->i_fsnotify_marks, sbm->fsn_group);
 		if (mark) {
 			struct chromiumos_inode_mark *inode_mark =
 				chromiumos_to_inode_mark(mark);

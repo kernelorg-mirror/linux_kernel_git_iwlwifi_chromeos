@@ -1,16 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
 * Copyright (c) 2016 MediaTek Inc.
 * Author: PC Chen <pc.chen@mediatek.com>
 *	Tiffany Lin <tiffany.lin@mediatek.com>
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License version 2 as
-* published by the Free Software Foundation.
-*
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-* GNU General Public License for more details.
 */
 
 #ifndef _MTK_VCODEC_UTIL_H_
@@ -25,11 +17,25 @@ struct mtk_vcodec_mem {
 	dma_addr_t dma_addr;
 };
 
+struct mtk_vcodec_fb {
+	size_t size;
+	dma_addr_t dma_addr;
+};
+
 struct mtk_vcodec_ctx;
 struct mtk_vcodec_dev;
 
 extern int mtk_v4l2_dbg_level;
 extern bool mtk_vcodec_dbg;
+
+
+#define mtk_v4l2_err(fmt, args...)                \
+	pr_err("[MTK_V4L2][ERROR] %s:%d: " fmt "\n", __func__, __LINE__, \
+	       ##args)
+
+#define mtk_vcodec_err(h, fmt, args...)					\
+	pr_err("[MTK_VCODEC][ERROR][%d]: %s() " fmt "\n",		\
+	       ((struct mtk_vcodec_ctx *)h->ctx)->id, __func__, ##args)
 
 
 #if defined(DEBUG)
@@ -57,23 +63,15 @@ extern bool mtk_vcodec_dbg;
 
 #else
 
-#define mtk_v4l2_debug(level, fmt, args...)
-#define mtk_v4l2_debug_enter()
-#define mtk_v4l2_debug_leave()
+#define mtk_v4l2_debug(level, fmt, args...) {}
+#define mtk_v4l2_debug_enter() {}
+#define mtk_v4l2_debug_leave() {}
 
-#define mtk_vcodec_debug(h, fmt, args...)
-#define mtk_vcodec_debug_enter(h)
-#define mtk_vcodec_debug_leave(h)
+#define mtk_vcodec_debug(h, fmt, args...) {}
+#define mtk_vcodec_debug_enter(h) {}
+#define mtk_vcodec_debug_leave(h) {}
 
 #endif
-
-#define mtk_v4l2_err(fmt, args...)                \
-	pr_err("[MTK_V4L2][ERROR] %s:%d: " fmt "\n", __func__, __LINE__, \
-	       ##args)
-
-#define mtk_vcodec_err(h, fmt, args...)					\
-	pr_err("[MTK_VCODEC][ERROR][%d]: %s() " fmt "\n",		\
-	       ((struct mtk_vcodec_ctx *)h->ctx)->id, __func__, ##args)
 
 void __iomem *mtk_vcodec_get_reg_addr(struct mtk_vcodec_ctx *data,
 				unsigned int reg_idx);

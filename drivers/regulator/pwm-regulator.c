@@ -1,16 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Regulator driver for PWM Regulators
  *
  * Copyright (C) 2014 - STMicroelectronics Inc.
  *
  * Author: Lee Jones <lee.jones@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
-#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/err.h>
@@ -41,17 +37,10 @@ struct pwm_regulator_data {
 	/* regulator descriptor */
 	struct regulator_desc desc;
 
-	/* Regulator ops */
-	struct regulator_ops ops;
-
 	int state;
 
 	/* Enable GPIO */
 	struct gpio_desc *enb_gpio;
-
-	u32 settle_time_up_us;
-	u32 slowest_decay_rate;
-	u32 safe_fall_percent;
 };
 
 struct pwm_voltages {
@@ -97,7 +86,7 @@ static int pwm_regulator_set_voltage_sel(struct regulator_dev *rdev,
 	struct pwm_state pstate;
 	int ret;
 
-	pwm_prepare_new_state(drvdata->pwm, &pstate);
+	pwm_init_state(drvdata->pwm, &pstate);
 	pwm_set_relative_duty_cycle(&pstate,
 			drvdata->duty_cycle_table[selector].dutycycle, 100);
 
@@ -127,8 +116,7 @@ static int pwm_regulator_enable(struct regulator_dev *dev)
 {
 	struct pwm_regulator_data *drvdata = rdev_get_drvdata(dev);
 
-	if (drvdata->enb_gpio)
-		gpiod_set_value_cansleep(drvdata->enb_gpio, 1);
+	gpiod_set_value_cansleep(drvdata->enb_gpio, 1);
 
 	return pwm_enable(drvdata->pwm);
 }
@@ -139,8 +127,7 @@ static int pwm_regulator_disable(struct regulator_dev *dev)
 
 	pwm_disable(drvdata->pwm);
 
-	if (drvdata->enb_gpio)
-		gpiod_set_value_cansleep(drvdata->enb_gpio, 0);
+	gpiod_set_value_cansleep(drvdata->enb_gpio, 0);
 
 	return 0;
 }
@@ -190,15 +177,14 @@ static int pwm_regulator_get_voltage(struct regulator_dev *rdev)
 	return voltage + min_uV;
 }
 
-static int _pwm_regulator_set_voltage(struct regulator_dev *rdev,
-				      int old_uV, int req_uV)
+static int pwm_regulator_set_voltage(struct regulator_dev *rdev,
+				     int req_min_uV, int req_max_uV,
+				     unsigned int *selector)
 {
 	struct pwm_regulator_data *drvdata = rdev_get_drvdata(rdev);
 	unsigned int min_uV_duty = drvdata->continuous.min_uV_dutycycle;
 	unsigned int max_uV_duty = drvdata->continuous.max_uV_dutycycle;
 	unsigned int duty_unit = drvdata->continuous.dutycycle_unit;
-	unsigned int ramp_delay = rdev->constraints->ramp_delay;
-	unsigned int delay = 0;
 	int min_uV = rdev->constraints->min_uV;
 	int max_uV = rdev->constraints->max_uV;
 	int diff_uV = max_uV - min_uV;
@@ -207,7 +193,7 @@ static int _pwm_regulator_set_voltage(struct regulator_dev *rdev,
 	unsigned int dutycycle;
 	int ret;
 
-	pwm_prepare_new_state(drvdata->pwm, &pstate);
+	pwm_init_state(drvdata->pwm, &pstate);
 
 	/*
 	 * The dutycycle for min_uV might be greater than the one for max_uV.
@@ -219,7 +205,8 @@ static int _pwm_regulator_set_voltage(struct regulator_dev *rdev,
 	else
 		diff_duty = max_uV_duty - min_uV_duty;
 
-	dutycycle = DIV_ROUND_CLOSEST_ULL((u64)(req_uV - min_uV) * diff_duty,
+	dutycycle = DIV_ROUND_CLOSEST_ULL((u64)(req_min_uV - min_uV) *
+					  diff_duty,
 					  diff_uV);
 
 	if (max_uV_duty < min_uV_duty)
@@ -235,63 +222,10 @@ static int _pwm_regulator_set_voltage(struct regulator_dev *rdev,
 		return ret;
 	}
 
-	if (req_uV > old_uV)
-		delay = drvdata->settle_time_up_us;
-
-	if (ramp_delay != 0)
-		/* Adjust ramp delay to uS and add to settle time. */
-		delay += DIV_ROUND_UP(abs(req_uV - old_uV), ramp_delay);
-
-	if ((delay == 0) || !pwm_regulator_is_enabled(rdev))
-		return 0;
-
-	usleep_range(delay, delay + DIV_ROUND_UP(delay, 10));
-
 	return 0;
 }
 
-static int pwm_regulator_set_voltage(struct regulator_dev *rdev,
-				     int req_min_uV, int req_max_uV,
-				     unsigned int *selector)
-{
-	struct pwm_regulator_data *drvdata = rdev_get_drvdata(rdev);
-	int safe_fall_percent = drvdata->safe_fall_percent;
-	int slowest_decay_rate = drvdata->slowest_decay_rate;
-	int orig_uV = pwm_regulator_get_voltage(rdev);
-	int uV = orig_uV;
-	int ret;
-
-	/* If we're rising or we're falling but don't need to slow; easy */
-	if (req_min_uV >= uV || !safe_fall_percent)
-		return _pwm_regulator_set_voltage(rdev, uV, req_min_uV);
-
-	while (uV > req_min_uV) {
-		int max_drop_uV = (uV * safe_fall_percent) / 100;
-		int next_uV;
-		int delay;
-
-		/* Make sure no infinite loop even in crazy cases */
-		if (max_drop_uV == 0)
-			max_drop_uV = 1;
-
-		next_uV = max_t(int, req_min_uV, uV - max_drop_uV);
-		delay = DIV_ROUND_UP(uV - next_uV, slowest_decay_rate);
-
-		ret = _pwm_regulator_set_voltage(rdev, uV, next_uV);
-		if (ret) {
-			/* Try to go back to original */
-			_pwm_regulator_set_voltage(rdev, uV, orig_uV);
-			return ret;
-		}
-
-		usleep_range(delay, delay + DIV_ROUND_UP(delay, 10));
-		uV = next_uV;
-	}
-
-	return 0;
-}
-
-static struct regulator_ops pwm_regulator_voltage_table_ops = {
+static const struct regulator_ops pwm_regulator_voltage_table_ops = {
 	.set_voltage_sel = pwm_regulator_set_voltage_sel,
 	.get_voltage_sel = pwm_regulator_get_voltage_sel,
 	.list_voltage    = pwm_regulator_list_voltage,
@@ -301,7 +235,7 @@ static struct regulator_ops pwm_regulator_voltage_table_ops = {
 	.is_enabled      = pwm_regulator_is_enabled,
 };
 
-static struct regulator_ops pwm_regulator_voltage_continuous_ops = {
+static const struct regulator_ops pwm_regulator_voltage_continuous_ops = {
 	.get_voltage = pwm_regulator_get_voltage,
 	.set_voltage = pwm_regulator_set_voltage,
 	.enable          = pwm_regulator_enable,
@@ -309,7 +243,7 @@ static struct regulator_ops pwm_regulator_voltage_continuous_ops = {
 	.is_enabled      = pwm_regulator_is_enabled,
 };
 
-static struct regulator_desc pwm_regulator_desc = {
+static const struct regulator_desc pwm_regulator_desc = {
 	.name		= "pwm-regulator",
 	.type		= REGULATOR_VOLTAGE,
 	.owner		= THIS_MODULE,
@@ -345,11 +279,9 @@ static int pwm_regulator_init_table(struct platform_device *pdev,
 		return ret;
 	}
 
-	drvdata->state			= -EINVAL;
+	drvdata->state			= -ENOTRECOVERABLE;
 	drvdata->duty_cycle_table	= duty_cycle_table;
-	memcpy(&drvdata->ops, &pwm_regulator_voltage_table_ops,
-	       sizeof(drvdata->ops));
-	drvdata->desc.ops = &drvdata->ops;
+	drvdata->desc.ops = &pwm_regulator_voltage_table_ops;
 	drvdata->desc.n_voltages	= length / sizeof(*duty_cycle_table);
 
 	return 0;
@@ -361,9 +293,7 @@ static int pwm_regulator_init_continuous(struct platform_device *pdev,
 	u32 dutycycle_range[2] = { 0, 100 };
 	u32 dutycycle_unit = 100;
 
-	memcpy(&drvdata->ops, &pwm_regulator_voltage_continuous_ops,
-	       sizeof(drvdata->ops));
-	drvdata->desc.ops = &drvdata->ops;
+	drvdata->desc.ops = &pwm_regulator_voltage_continuous_ops;
 	drvdata->desc.continuous_voltage_range = true;
 
 	of_property_read_u32_array(pdev->dev.of_node,
@@ -415,32 +345,6 @@ static int pwm_regulator_probe(struct platform_device *pdev)
 					       &drvdata->desc);
 	if (!init_data)
 		return -ENOMEM;
-
-	of_property_read_u32(np, "settle-time-up-us",
-			&drvdata->settle_time_up_us);
-	of_property_read_u32(np, "slowest-decay-rate",
-			&drvdata->slowest_decay_rate);
-	of_property_read_u32(np, "safe-fall-percent",
-			&drvdata->safe_fall_percent);
-
-	/* We treat as int above; sanity check */
-	if (drvdata->slowest_decay_rate > INT_MAX) {
-		dev_err(&pdev->dev, "slowest-decay-rate (%u) too big\n",
-			(unsigned int)drvdata->slowest_decay_rate);
-		return -EINVAL;
-	}
-
-	if (drvdata->safe_fall_percent > 100) {
-		dev_err(&pdev->dev, "safe-fall-percent (%u) > 100\n",
-			(unsigned int)drvdata->safe_fall_percent);
-		return -EINVAL;
-	}
-
-	if (drvdata->safe_fall_percent && !drvdata->slowest_decay_rate) {
-		dev_err(&pdev->dev,
-			"slowest-decay-rate required safe-fall-percent\n");
-		return -EINVAL;
-	}
 
 	config.of_node = np;
 	config.dev = &pdev->dev;

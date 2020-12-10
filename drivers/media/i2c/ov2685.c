@@ -504,7 +504,7 @@ static int ov2685_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 }
 #endif
 
-static int ov2685_runtime_resume(struct device *dev)
+static int __maybe_unused ov2685_runtime_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
@@ -513,7 +513,7 @@ static int ov2685_runtime_resume(struct device *dev)
 	return __ov2685_power_on(ov2685);
 }
 
-static int ov2685_runtime_suspend(struct device *dev)
+static int __maybe_unused ov2685_runtime_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
@@ -549,7 +549,7 @@ static int ov2685_set_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-	if (pm_runtime_get_if_in_use(&client->dev) <= 0)
+	if (!pm_runtime_get_if_in_use(&client->dev))
 		return 0;
 
 	switch (ctrl->id) {
@@ -574,8 +574,9 @@ static int ov2685_set_ctrl(struct v4l2_ctrl *ctrl)
 	default:
 		dev_warn(&client->dev, "%s Unhandled id:0x%x, val:0x%x\n",
 			 __func__, ctrl->id, ctrl->val);
+		ret = -EINVAL;
 		break;
-	};
+	}
 
 	pm_runtime_put(&client->dev);
 
@@ -768,8 +769,8 @@ static int ov2685_probe(struct i2c_client *client,
 #endif
 #if defined(CONFIG_MEDIA_CONTROLLER)
 	ov2685->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ov2685->subdev.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
-	ret = media_entity_init(&ov2685->subdev.entity, 1, &ov2685->pad, 0);
+	ov2685->subdev.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&ov2685->subdev.entity, 1, &ov2685->pad);
 	if (ret < 0)
 		goto err_power_off;
 #endif
@@ -828,22 +829,14 @@ static const struct of_device_id ov2685_of_match[] = {
 MODULE_DEVICE_TABLE(of, ov2685_of_match);
 #endif
 
-static const struct i2c_device_id ov2685_id[] = {
-	{ "ov2685", 0 },
-	{ },
-};
-MODULE_DEVICE_TABLE(i2c, ov2685_id);
-
 static struct i2c_driver ov2685_i2c_driver = {
 	.driver = {
 		.name = "ov2685",
-		.owner = THIS_MODULE,
 		.pm = &ov2685_pm_ops,
 		.of_match_table = of_match_ptr(ov2685_of_match),
 	},
 	.probe		= &ov2685_probe,
 	.remove		= &ov2685_remove,
-	.id_table	= ov2685_id,
 };
 
 module_i2c_driver(ov2685_i2c_driver);

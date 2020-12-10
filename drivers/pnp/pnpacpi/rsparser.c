@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * pnpacpi -- PnP ACPI driver
  *
@@ -5,20 +6,6 @@
  * Copyright (c) 2004 Li Shaohua <shaohua.li@intel.com>
  * Copyright (C) 2008 Hewlett-Packard Development Company, L.P.
  *	Bjorn Helgaas <bjorn.helgaas@hp.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #include <linux/kernel.h>
 #include <linux/acpi.h>
@@ -149,8 +136,8 @@ static int vendor_resource_matches(struct pnp_dev *dev,
 	    uuid_len == sizeof(match->data) &&
 	    memcmp(uuid, match->data, uuid_len) == 0) {
 		if (expected_len && expected_len != actual_len) {
-			dev_err(&dev->dev, "wrong vendor descriptor size; "
-				"expected %d, found %d bytes\n",
+			dev_err(&dev->dev,
+				"wrong vendor descriptor size; expected %d, found %d bytes\n",
 				expected_len, actual_len);
 			return 0;
 		}
@@ -204,9 +191,8 @@ static acpi_status pnpacpi_allocated_resource(struct acpi_resource *res,
 			 * one interrupt, we won't be able to re-encode it.
 			 */
 			if (pnp_can_write(dev)) {
-				dev_warn(&dev->dev, "multiple interrupts in "
-					 "_CRS descriptor; configuration can't "
-					 "be changed\n");
+				dev_warn(&dev->dev,
+					 "multiple interrupts in _CRS descriptor; configuration can't be changed\n");
 				dev->capabilities &= ~PNP_WRITE;
 			}
 		}
@@ -220,7 +206,7 @@ static acpi_status pnpacpi_allocated_resource(struct acpi_resource *res,
 		if (i >= 0) {
 			flags = acpi_dev_irq_flags(gpio->triggering,
 						   gpio->polarity,
-						   gpio->sharable);
+						   gpio->shareable);
 		} else {
 			flags = IORESOURCE_DISABLED;
 		}
@@ -266,6 +252,10 @@ static acpi_status pnpacpi_allocated_resource(struct acpi_resource *res,
 		break;
 
 	case ACPI_RESOURCE_TYPE_GENERIC_REGISTER:
+		break;
+
+	case ACPI_RESOURCE_TYPE_SERIAL_BUS:
+		/* serial bus connections (I2C/SPI/UART) are not pnp */
 		break;
 
 	default:
@@ -325,7 +315,7 @@ static __init void pnpacpi_parse_irq_option(struct pnp_dev *dev,
 		if (p->interrupts[i])
 			__set_bit(p->interrupts[i], map.bits);
 
-	flags = acpi_dev_irq_flags(p->triggering, p->polarity, p->sharable);
+	flags = acpi_dev_irq_flags(p->triggering, p->polarity, p->shareable);
 	pnp_register_irq_resource(dev, option_flags, &map, flags);
 }
 
@@ -343,13 +333,13 @@ static __init void pnpacpi_parse_ext_irq_option(struct pnp_dev *dev,
 			if (p->interrupts[i] < PNP_IRQ_NR)
 				__set_bit(p->interrupts[i], map.bits);
 			else
-				dev_err(&dev->dev, "ignoring IRQ %d option "
-					"(too large for %d entry bitmap)\n",
+				dev_err(&dev->dev,
+					"ignoring IRQ %d option (too large for %d entry bitmap)\n",
 					p->interrupts[i], PNP_IRQ_NR);
 		}
 	}
 
-	flags = acpi_dev_irq_flags(p->triggering, p->polarity, p->sharable);
+	flags = acpi_dev_irq_flags(p->triggering, p->polarity, p->shareable);
 	pnp_register_irq_resource(dev, option_flags, &map, flags);
 }
 
@@ -682,7 +672,7 @@ static void pnpacpi_encode_irq(struct pnp_dev *dev,
 	decode_irq_flags(dev, p->flags, &triggering, &polarity, &shareable);
 	irq->triggering = triggering;
 	irq->polarity = polarity;
-	irq->sharable = shareable;
+	irq->shareable = shareable;
 	irq->interrupt_count = 1;
 	irq->interrupts[0] = p->start;
 
@@ -690,7 +680,7 @@ static void pnpacpi_encode_irq(struct pnp_dev *dev,
 		(int) p->start,
 		triggering == ACPI_LEVEL_SENSITIVE ? "level" : "edge",
 		polarity == ACPI_ACTIVE_LOW ? "low" : "high",
-		irq->sharable == ACPI_SHARED ? "shared" : "exclusive",
+		irq->shareable == ACPI_SHARED ? "shared" : "exclusive",
 		irq->descriptor_length);
 }
 
@@ -712,14 +702,14 @@ static void pnpacpi_encode_ext_irq(struct pnp_dev *dev,
 	extended_irq->producer_consumer = ACPI_CONSUMER;
 	extended_irq->triggering = triggering;
 	extended_irq->polarity = polarity;
-	extended_irq->sharable = shareable;
+	extended_irq->shareable = shareable;
 	extended_irq->interrupt_count = 1;
 	extended_irq->interrupts[0] = p->start;
 
 	pnp_dbg(&dev->dev, "  encode irq %d %s %s %s\n", (int) p->start,
 		triggering == ACPI_LEVEL_SENSITIVE ? "level" : "edge",
 		polarity == ACPI_ACTIVE_LOW ? "low" : "high",
-		extended_irq->sharable == ACPI_SHARED ? "shared" : "exclusive");
+		extended_irq->shareable == ACPI_SHARED ? "shared" : "exclusive");
 }
 
 static void pnpacpi_encode_dma(struct pnp_dev *dev,
@@ -945,8 +935,9 @@ int pnpacpi_encode_resources(struct pnp_dev *dev, struct acpi_buffer *buffer)
 		case ACPI_RESOURCE_TYPE_EXTENDED_ADDRESS64:
 		case ACPI_RESOURCE_TYPE_GENERIC_REGISTER:
 		default:	/* other type */
-			dev_warn(&dev->dev, "can't encode unknown resource "
-				 "type %d\n", resource->type);
+			dev_warn(&dev->dev,
+				 "can't encode unknown resource type %d\n",
+				 resource->type);
 			return -EINVAL;
 		}
 		resource++;

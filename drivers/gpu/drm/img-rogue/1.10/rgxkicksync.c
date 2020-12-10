@@ -50,6 +50,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "allocmem.h"
 #include "sync.h"
 #include "rgxhwperf.h"
+#include "ospvr_gputrace.h"
 
 #include "sync_checkpoint.h"
 #include "sync_checkpoint_internal.h"
@@ -100,7 +101,7 @@ PVRSRV_ERROR PVRSRVRGXCreateKickSyncContextKM(CONNECTION_DATA             * psCo
 	}
 
 #if !defined(PVRSRV_USE_BRIDGE_LOCK)
-	eError = OSLockCreate(&psKickSyncContext->hLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psKickSyncContext->hLock);
 
 	if(eError != PVRSRV_OK)
 	{
@@ -636,10 +637,9 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 	} END_LOOP_UNTIL_TIMEOUT();
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-		RGXHWPerfFTraceGPUEnqueueEvent(psKickSyncContext->psDeviceNode->pvDevice,
-					ui32FWCtx, ui32IntJobRef, RGX_HWPERF_KICK_TYPE_SYNC);
-#endif
+	PVRGpuTraceEnqueueEvent(psKickSyncContext->psDeviceNode->pvDevice,
+	                        ui32FWCtx, ui32ExtJobRef, ui32IntJobRef,
+	                        RGX_HWPERF_KICK_TYPE_SYNC);
 
 	if (eError2 != PVRSRV_OK)
 	{

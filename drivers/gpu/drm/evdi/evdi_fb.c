@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat
- * Copyright (c) 2015 - 2016 DisplayLink (UK) Ltd.
+ * Copyright (c) 2015 - 2018 DisplayLink (UK) Ltd.
  *
  * Based on parts on udlfb.c:
  * Copyright (C) 2009 its respective authors
@@ -269,44 +270,16 @@ static void evdi_user_framebuffer_destroy(struct drm_framebuffer *fb)
 	EVDI_CHECKPT();
 
 	if (ufb->obj)
-		drm_gem_object_unreference_unlocked(&ufb->obj->base);
+		drm_gem_object_put_unlocked(&ufb->obj->base);
 
 	drm_framebuffer_cleanup(fb);
 	kfree(ufb);
 }
 
-static int evdi_drm_get_reservations(struct drm_framebuffer *fb,
-				  struct reservation_object **resvs,
-				  unsigned int *num_resvs)
-{
-	int r;
-	struct evdi_framebuffer *efb = to_evdi_fb(fb);
-	struct evdi_gem_object *obj = NULL;
-
-	if (!efb) {
-		EVDI_ERROR("Failed to get framebuffer.\n");
-		return -EINVAL;
-	}
-	obj = efb->obj;
-	if (!obj) {
-		EVDI_ERROR("Failed to get gem object from framebuffer.\n");
-		return -EINVAL;
-	}
-
-	for (r = 0; r < *num_resvs; r++)
-		if (resvs[r] == obj->resv)
-			break;
-	if (r == *num_resvs)
-		resvs[(*num_resvs)++] = obj->resv;
-	return 0;
-}
-
-
 static const struct drm_framebuffer_funcs evdifb_funcs = {
 	.create_handle = evdi_user_framebuffer_create_handle,
 	.destroy = evdi_user_framebuffer_destroy,
 	.dirty = evdi_user_framebuffer_dirty,
-	.get_reservations = evdi_drm_get_reservations,
 };
 
 static int
@@ -367,7 +340,6 @@ static int evdifb_create(struct drm_fb_helper *helper,
 		ret = -ENOMEM;
 		goto out_gfree;
 	}
-	info->par = ufbdev;
 
 	ret = evdi_framebuffer_init(dev, &ufbdev->ufb, &mode_cmd, obj);
 	if (ret)
@@ -378,17 +350,14 @@ static int evdifb_create(struct drm_fb_helper *helper,
 	ufbdev->helper.fb = fb;
 	ufbdev->helper.fbdev = info;
 
-	strcpy(info->fix.id, "evdidrmfb");
-
 	info->screen_base = ufbdev->ufb.obj->vmapping;
 	info->fix.smem_len = size;
 	info->fix.smem_start = (unsigned long)ufbdev->ufb.obj->vmapping;
 
-	info->flags = FBINFO_DEFAULT | FBINFO_CAN_FORCE_OUTPUT;
+	info->flags = FBINFO_DEFAULT;
 	info->fbops = &evdifb_ops;
-	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->format->depth);
-	drm_fb_helper_fill_var(info, &ufbdev->helper, sizes->fb_width,
-			       sizes->fb_height);
+
+	drm_fb_helper_fill_info(info, helper, sizes);
 
 	ret = fb_alloc_cmap(&info->cmap, 256, 0);
 	if (ret) {
@@ -401,7 +370,7 @@ static int evdifb_create(struct drm_fb_helper *helper,
 
 	return ret;
  out_gfree:
-	drm_gem_object_unreference_unlocked(&ufbdev->ufb.obj->base);
+	drm_gem_object_put_unlocked(&ufbdev->ufb.obj->base);
  out:
 	return ret;
 }
@@ -426,7 +395,7 @@ static void evdi_fbdev_destroy(__always_unused struct drm_device *dev,
 	drm_fb_helper_fini(&ufbdev->helper);
 	drm_framebuffer_unregister_private(&ufbdev->ufb.base);
 	drm_framebuffer_cleanup(&ufbdev->ufb.base);
-	drm_gem_object_unreference_unlocked(&ufbdev->ufb.obj->base);
+	drm_gem_object_put_unlocked(&ufbdev->ufb.obj->base);
 }
 
 int evdi_fbdev_init(struct drm_device *dev)
@@ -443,7 +412,7 @@ int evdi_fbdev_init(struct drm_device *dev)
 	evdi->fbdev = ufbdev;
 	drm_fb_helper_prepare(dev, &ufbdev->helper, &evdi_fb_helper_funcs);
 
-	ret = drm_fb_helper_init(dev, &ufbdev->helper, 1, 1);
+	ret = drm_fb_helper_init(dev, &ufbdev->helper, 1);
 	if (ret) {
 		kfree(ufbdev);
 		return ret;
@@ -510,6 +479,7 @@ struct drm_framebuffer *evdi_fb_user_fb_create(
 	uint32_t size;
 
 	int bpp = evdi_fb_get_bpp(mode_cmd->pixel_format);
+
 	if (bpp != 32) {
 		EVDI_ERROR("Unsupported bpp (%d)\n", bpp);
 		return ERR_PTR(-EINVAL);
@@ -539,10 +509,10 @@ struct drm_framebuffer *evdi_fb_user_fb_create(
 	return &ufb->base;
 
  err_no_mem:
-	drm_gem_object_unreference(obj);
+	drm_gem_object_put(obj);
 	return ERR_PTR(-ENOMEM);
  err_inval:
 	kfree(ufb);
-	drm_gem_object_unreference(obj);
+	drm_gem_object_put(obj);
 	return ERR_PTR(-EINVAL);
 }

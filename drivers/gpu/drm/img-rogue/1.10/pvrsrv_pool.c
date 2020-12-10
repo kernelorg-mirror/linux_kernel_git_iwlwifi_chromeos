@@ -93,7 +93,7 @@ PVRSRV_ERROR PVRSRVPoolCreate(PVRSRV_POOL_ALLOC_FUNC *pfnAlloc,
 		goto err_alloc;
 	}
 
-	eError = OSLockCreate(&psPool->hLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psPool->hLock);
 
 	if (eError != PVRSRV_OK)
 	{

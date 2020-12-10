@@ -948,7 +948,7 @@ CopyBytesLocalMem(PMR_IMPL_PRIVDATA pvPriv,
 			pcKernelPointer = pvMapping;
 			pfnCopyBytes(&pcBuffer[uiBufferOffset], &pcKernelPointer[uiInAllocOffset], uiBytesCopyableFromAlloc);
 
-			_UnMapAlloc(psLMAllocArrayData->psDevNode, 
+			_UnMapAlloc(psLMAllocArrayData->psDevNode,
 						psLMAllocArrayData->uiContigAllocSize,
 						psLMAllocArrayData->bFwLocalAlloc,
 						0,
@@ -977,12 +977,12 @@ CopyBytesLocalMem(PMR_IMPL_PRIVDATA pvPriv,
 			pcKernelPointer = pvMapping;
 			pfnCopyBytes(pcBuffer, &pcKernelPointer[uiOffset], uiBufSz);
 
-			_UnMapAlloc(psLMAllocArrayData->psDevNode, 
+			_UnMapAlloc(psLMAllocArrayData->psDevNode,
 						psLMAllocArrayData->uiContigAllocSize,
 						psLMAllocArrayData->bFwLocalAlloc, 
 						0,
 						pvMapping);
-			
+
 			uiBytesCopied = uiBufSz;
 	}
 	*puiNumBytes = uiBytesCopied;
@@ -1364,37 +1364,25 @@ PVRSRV_ERROR PMRChangeSparseMemCPUMapLocalMem(PMR_IMPL_PRIVDATA pPriv,
 
 static PMR_IMPL_FUNCTAB _sPMRLMAFuncTab = {
 	/* pfnLockPhysAddresses */
-	&PMRLockSysPhysAddressesLocalMem,
+	.pfnLockPhysAddresses = &PMRLockSysPhysAddressesLocalMem,
 	/* pfnUnlockPhysAddresses */
-	&PMRUnlockSysPhysAddressesLocalMem,
+	.pfnUnlockPhysAddresses = &PMRUnlockSysPhysAddressesLocalMem,
 	/* pfnDevPhysAddr */
-	&PMRSysPhysAddrLocalMem,
+	.pfnDevPhysAddr = &PMRSysPhysAddrLocalMem,
 	/* pfnAcquireKernelMappingData */
-	&PMRAcquireKernelMappingDataLocalMem,
+	.pfnAcquireKernelMappingData = &PMRAcquireKernelMappingDataLocalMem,
 	/* pfnReleaseKernelMappingData */
-	&PMRReleaseKernelMappingDataLocalMem,
-#if defined(INTEGRITY_OS)
-	/* pfnMapMemoryObject */
-	NULL,
-	/* pfnUnmapMemoryObject */
-	NULL,
-#endif
+	.pfnReleaseKernelMappingData = &PMRReleaseKernelMappingDataLocalMem,
 	/* pfnReadBytes */
-	&PMRReadBytesLocalMem,
+	.pfnReadBytes = &PMRReadBytesLocalMem,
 	/* pfnWriteBytes */
-	&PMRWriteBytesLocalMem,
-	/* .pfnUnpinMem */
-	NULL,
-	/* .pfnPinMem */
-	NULL,
+	.pfnWriteBytes = &PMRWriteBytesLocalMem,
 	/* pfnChangeSparseMem*/
-	&PMRChangeSparseMemLocalMem,
+	.pfnChangeSparseMem = &PMRChangeSparseMemLocalMem,
 	/* pfnChangeSparseMemCPUMap */
-	&PMRChangeSparseMemCPUMapLocalMem,
-	/* pfnMMap */
-	NULL,
+	.pfnChangeSparseMemCPUMap = &PMRChangeSparseMemCPUMapLocalMem,
 	/* pfnFinalize */
-	&PMRFinalizeLocalMem
+	.pfnFinalize = &PMRFinalizeLocalMem
 };
 
 PVRSRV_ERROR

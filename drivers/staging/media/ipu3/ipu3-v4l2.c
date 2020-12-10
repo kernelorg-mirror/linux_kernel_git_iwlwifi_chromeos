@@ -152,7 +152,6 @@ static int imgu_subdev_set_fmt(struct v4l2_subdev *sd,
 	struct imgu_v4l2_subdev *imgu_sd = container_of(sd,
 							struct imgu_v4l2_subdev,
 							subdev);
-
 	struct v4l2_mbus_framefmt *mf;
 	u32 pad = fmt->pad;
 	unsigned int pipe = imgu_sd->pipe;
@@ -367,18 +366,20 @@ static void imgu_vb2_buf_queue(struct vb2_buffer *vb)
 
 	vb2_set_plane_payload(vb, 0, need_bytes);
 
+	mutex_lock(&imgu->streaming_lock);
 	if (imgu->streaming)
 		imgu_queue_buffers(imgu, false, node->pipe);
+	mutex_unlock(&imgu->streaming_lock);
 
 	dev_dbg(&imgu->pci_dev->dev, "%s for pipe %u node %u", __func__,
 		node->pipe, node->id);
 }
 
-static int imgu_vb2_queue_setup(struct vb2_queue *vq, const void *parg,
+static int imgu_vb2_queue_setup(struct vb2_queue *vq,
 				unsigned int *num_buffers,
 				unsigned int *num_planes,
 				unsigned int sizes[],
-				void *alloc_ctxs[])
+				struct device *alloc_devs[])
 {
 	struct imgu_device *imgu = vb2_get_drv_priv(vq);
 	struct imgu_video_device *node =
@@ -387,7 +388,7 @@ static int imgu_vb2_queue_setup(struct vb2_queue *vq, const void *parg,
 	unsigned int size;
 
 	*num_buffers = clamp_val(*num_buffers, 1, VB2_MAX_FRAME);
-	alloc_ctxs[0] = imgu->vb2_alloc_ctx;
+	alloc_devs[0] = &imgu->pci_dev->dev;
 
 	if (vq->type == V4L2_BUF_TYPE_META_CAPTURE ||
 	    vq->type == V4L2_BUF_TYPE_META_OUTPUT)
@@ -468,10 +469,13 @@ static int imgu_vb2_start_streaming(struct vb2_queue *vq, unsigned int count)
 	dev_dbg(dev, "%s node name %s pipe %u id %u", __func__,
 		node->name, node->pipe, node->id);
 
+	mutex_lock(&imgu->streaming_lock);
 	if (imgu->streaming) {
 		r = -EBUSY;
+		mutex_unlock(&imgu->streaming_lock);
 		goto fail_return_bufs;
 	}
+	mutex_unlock(&imgu->streaming_lock);
 
 	if (!node->enabled) {
 		dev_err(dev, "IMGU node is not enabled");
@@ -481,11 +485,9 @@ static int imgu_vb2_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	pipe = node->pipe;
 	imgu_pipe = &imgu->imgu_pipe[pipe];
-	r = media_entity_pipeline_start(&node->vdev.entity,
-					&imgu_pipe->pipeline);
+	r = media_pipeline_start(&node->vdev.entity, &imgu_pipe->pipeline);
 	if (r < 0)
 		goto fail_return_bufs;
-
 
 	if (!imgu_all_nodes_streaming(imgu, node))
 		return 0;
@@ -499,14 +501,16 @@ static int imgu_vb2_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	/* Start streaming of the whole pipeline now */
 	dev_dbg(dev, "IMGU streaming is ready to start");
+	mutex_lock(&imgu->streaming_lock);
 	r = imgu_s_stream(imgu, true);
 	if (!r)
 		imgu->streaming = true;
+	mutex_unlock(&imgu->streaming_lock);
 
 	return 0;
 
 fail_stop_pipeline:
-	media_entity_pipeline_stop(&node->vdev.entity);
+	media_pipeline_stop(&node->vdev.entity);
 fail_return_bufs:
 	imgu_return_all_buffers(imgu, node, VB2_BUF_STATE_QUEUED);
 
@@ -533,6 +537,7 @@ static void imgu_vb2_stop_streaming(struct vb2_queue *vq)
 		dev_err(&imgu->pci_dev->dev,
 			"failed to stop subdev streaming\n");
 
+	mutex_lock(&imgu->streaming_lock);
 	/* Was this the first node with streaming disabled? */
 	if (imgu->streaming && imgu_all_nodes_streaming(imgu, node)) {
 		/* Yes, really stop streaming now */
@@ -543,7 +548,9 @@ static void imgu_vb2_stop_streaming(struct vb2_queue *vq)
 	}
 
 	imgu_return_all_buffers(imgu, node, VB2_BUF_STATE_ERROR);
-	media_entity_pipeline_stop(&node->vdev.entity);
+	mutex_unlock(&imgu->streaming_lock);
+
+	media_pipeline_stop(&node->vdev.entity);
 }
 
 /******************** v4l2_ioctl_ops ********************/
@@ -956,12 +963,12 @@ static const struct v4l2_file_operations imgu_v4l2_fops = {
 static const struct v4l2_ioctl_ops imgu_v4l2_ioctl_ops = {
 	.vidioc_querycap = imgu_vidioc_querycap,
 
-	.vidioc_enum_fmt_vid_cap_mplane = vidioc_enum_fmt_vid_cap,
+	.vidioc_enum_fmt_vid_cap = vidioc_enum_fmt_vid_cap,
 	.vidioc_g_fmt_vid_cap_mplane = imgu_vidioc_g_fmt,
 	.vidioc_s_fmt_vid_cap_mplane = imgu_vidioc_s_fmt,
 	.vidioc_try_fmt_vid_cap_mplane = imgu_vidioc_try_fmt,
 
-	.vidioc_enum_fmt_vid_out_mplane = vidioc_enum_fmt_vid_out,
+	.vidioc_enum_fmt_vid_out = vidioc_enum_fmt_vid_out,
 	.vidioc_g_fmt_vid_out_mplane = imgu_vidioc_g_fmt,
 	.vidioc_s_fmt_vid_out_mplane = imgu_vidioc_s_fmt,
 	.vidioc_try_fmt_vid_out_mplane = imgu_vidioc_try_fmt,
@@ -1099,8 +1106,8 @@ static int imgu_v4l2_subdev_register(struct imgu_device *imgu,
 	struct imgu_media_pipe *imgu_pipe = &imgu->imgu_pipe[pipe];
 
 	/* Initialize subdev media entity */
-	r = media_entity_init(&imgu_sd->subdev.entity, IMGU_NODE_NUM,
-			      imgu_sd->subdev_pads, 0);
+	r = media_entity_pads_init(&imgu_sd->subdev.entity, IMGU_NODE_NUM,
+				   imgu_sd->subdev_pads);
 	if (r) {
 		dev_err(&imgu->pci_dev->dev,
 			"failed initialize subdev media entity (%d)\n", r);
@@ -1114,6 +1121,7 @@ static int imgu_v4l2_subdev_register(struct imgu_device *imgu,
 
 	/* Initialize subdev */
 	v4l2_subdev_init(&imgu_sd->subdev, &imgu_subdev_ops);
+	imgu_sd->subdev.entity.function = MEDIA_ENT_F_PROC_VIDEO_STATISTICS;
 	imgu_sd->subdev.internal_ops = &imgu_subdev_internal_ops;
 	imgu_sd->subdev.flags = V4L2_SUBDEV_FL_HAS_DEVNODE |
 				V4L2_SUBDEV_FL_HAS_EVENTS;
@@ -1204,7 +1212,7 @@ static int imgu_v4l2_node_setup(struct imgu_device *imgu, unsigned int pipe,
 	}
 
 	/* Initialize media entities */
-	r = media_entity_init(&vdev->entity, 1, &node->vdev_pad, 0);
+	r = media_entity_pads_init(&vdev->entity, 1, &node->vdev_pad);
 	if (r) {
 		dev_err(dev, "failed initialize media entity (%d)\n", r);
 		mutex_destroy(&node->lock);
@@ -1257,11 +1265,11 @@ static int imgu_v4l2_node_setup(struct imgu_device *imgu, unsigned int pipe,
 	if (node->enabled)
 		flags |= MEDIA_LNK_FL_ENABLED;
 	if (node->output) {
-		r = media_entity_create_link(&vdev->entity, 0, &sd->entity,
-					     node_num, flags);
+		r = media_create_pad_link(&vdev->entity, 0, &sd->entity,
+					  node_num, flags);
 	} else {
-		r = media_entity_create_link(&sd->entity, node_num, &vdev->entity,
-					     0, flags);
+		r = media_create_pad_link(&sd->entity, node_num, &vdev->entity,
+					  0, flags);
 	}
 	if (r) {
 		dev_err(dev, "failed to create pad link (%d)", r);
@@ -1287,19 +1295,17 @@ static void imgu_v4l2_nodes_cleanup_pipe(struct imgu_device *imgu,
 
 static int imgu_v4l2_nodes_setup_pipe(struct imgu_device *imgu, int pipe)
 {
-	int i, r;
+	int i;
 
 	for (i = 0; i < IMGU_NODE_NUM; i++) {
-		r = imgu_v4l2_node_setup(imgu, pipe, i);
-		if (r)
-			goto cleanup;
+		int r = imgu_v4l2_node_setup(imgu, pipe, i);
+
+		if (r) {
+			imgu_v4l2_nodes_cleanup_pipe(imgu, pipe, i);
+			return r;
+		}
 	}
-
 	return 0;
-
-cleanup:
-	imgu_v4l2_nodes_cleanup_pipe(imgu, pipe, i);
-	return r;
 }
 
 static void imgu_v4l2_subdev_cleanup(struct imgu_device *imgu, unsigned int i)
@@ -1356,20 +1362,7 @@ int imgu_v4l2_register(struct imgu_device *imgu)
 	imgu->streaming = false;
 
 	/* Set up media device */
-	imgu->media_dev.dev = &imgu->pci_dev->dev;
-	strscpy(imgu->media_dev.model, IMGU_NAME,
-		sizeof(imgu->media_dev.model));
-	snprintf(imgu->media_dev.bus_info, sizeof(imgu->media_dev.bus_info),
-		 "%s", dev_name(&imgu->pci_dev->dev));
-	imgu->media_dev.driver_version = LINUX_VERSION_CODE;
-	imgu->media_dev.hw_revision = 0;
-
-	r = media_device_register(&imgu->media_dev);
-	if (r) {
-		dev_err(&imgu->pci_dev->dev,
-			"failed to register media device (%d)\n", r);
-		goto fail_subdevs;
-	}
+	media_device_pci_init(&imgu->media_dev, imgu->pci_dev, IMGU_NAME);
 
 	/* Set up v4l2 device */
 	imgu->v4l2_dev.mdev = &imgu->media_dev;
@@ -1395,6 +1388,13 @@ int imgu_v4l2_register(struct imgu_device *imgu)
 		goto fail_subdevs;
 	}
 
+	r = media_device_register(&imgu->media_dev);
+	if (r) {
+		dev_err(&imgu->pci_dev->dev,
+			"failed to register media device (%d)\n", r);
+		goto fail_subdevs;
+	}
+
 	return 0;
 
 fail_subdevs:
@@ -1402,7 +1402,7 @@ fail_subdevs:
 fail_v4l2_pipes:
 	v4l2_device_unregister(&imgu->v4l2_dev);
 fail_v4l2_dev:
-	media_device_unregister(&imgu->media_dev);
+	media_device_cleanup(&imgu->media_dev);
 
 	return r;
 }
@@ -1412,6 +1412,7 @@ int imgu_v4l2_unregister(struct imgu_device *imgu)
 	media_device_unregister(&imgu->media_dev);
 	imgu_v4l2_cleanup_pipes(imgu, IMGU_MAX_PIPE_NUM);
 	v4l2_device_unregister(&imgu->v4l2_dev);
+	media_device_cleanup(&imgu->media_dev);
 
 	return 0;
 }

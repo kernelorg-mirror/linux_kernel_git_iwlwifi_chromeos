@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/ext4/resize.c
  *
@@ -69,11 +70,12 @@ int ext4_resize_begin(struct super_block *sb)
 	 */
 	if (EXT4_SB(sb)->s_mount_state & EXT4_ERROR_FS) {
 		ext4_warning(sb, "There are errors in the filesystem, "
-			     "so online resizing is not allowed\n");
+			     "so online resizing is not allowed");
 		return -EPERM;
 	}
 
-	if (test_and_set_bit_lock(EXT4_RESIZING, &EXT4_SB(sb)->s_resize_flags))
+	if (test_and_set_bit_lock(EXT4_FLAGS_RESIZING,
+				  &EXT4_SB(sb)->s_ext4_flags))
 		ret = -EBUSY;
 
 	return ret;
@@ -81,7 +83,7 @@ int ext4_resize_begin(struct super_block *sb)
 
 void ext4_resize_end(struct super_block *sb)
 {
-	clear_bit_unlock(EXT4_RESIZING, &EXT4_SB(sb)->s_resize_flags);
+	clear_bit_unlock(EXT4_FLAGS_RESIZING, &EXT4_SB(sb)->s_ext4_flags);
 	smp_mb__after_atomic();
 }
 
@@ -152,10 +154,12 @@ static int verify_group_input(struct super_block *sb,
 	else if (free_blocks_count < 0)
 		ext4_warning(sb, "Bad blocks count %u",
 			     input->blocks_count);
-	else if (!(bh = sb_bread(sb, end - 1)))
+	else if (IS_ERR(bh = ext4_sb_bread(sb, end - 1, 0))) {
+		err = PTR_ERR(bh);
+		bh = NULL;
 		ext4_warning(sb, "Cannot read last block (%llu)",
 			     end - 1);
-	else if (outside(input->block_bitmap, start, end))
+	} else if (outside(input->block_bitmap, start, end))
 		ext4_warning(sb, "Block bitmap not in group (block %llu)",
 			     (unsigned long long)input->block_bitmap);
 	else if (outside(input->inode_bitmap, start, end))
@@ -230,12 +234,14 @@ static struct ext4_new_flex_group_data *alloc_flex_gd(unsigned long flexbg_size)
 		goto out2;
 	flex_gd->count = flexbg_size;
 
-	flex_gd->groups = kmalloc(sizeof(struct ext4_new_group_data) *
-				  flexbg_size, GFP_NOFS);
+	flex_gd->groups = kmalloc_array(flexbg_size,
+					sizeof(struct ext4_new_group_data),
+					GFP_NOFS);
 	if (flex_gd->groups == NULL)
 		goto out2;
 
-	flex_gd->bg_flags = kmalloc(flexbg_size * sizeof(__u16), GFP_NOFS);
+	flex_gd->bg_flags = kmalloc_array(flexbg_size, sizeof(__u16),
+					  GFP_NOFS);
 	if (flex_gd->bg_flags == NULL)
 		goto out1;
 
@@ -804,11 +810,11 @@ static int add_new_gdb(handle_t *handle, struct inode *inode,
 	struct ext4_super_block *es = EXT4_SB(sb)->s_es;
 	unsigned long gdb_num = group / EXT4_DESC_PER_BLOCK(sb);
 	ext4_fsblk_t gdblock = EXT4_SB(sb)->s_sbh->b_blocknr + 1 + gdb_num;
-	struct buffer_head **o_group_desc, **n_group_desc;
-	struct buffer_head *dind;
-	struct buffer_head *gdb_bh;
+	struct buffer_head **o_group_desc, **n_group_desc = NULL;
+	struct buffer_head *dind = NULL;
+	struct buffer_head *gdb_bh = NULL;
 	int gdbackups;
-	struct ext4_iloc iloc;
+	struct ext4_iloc iloc = { .bh = NULL };
 	__le32 *data;
 	int err;
 
@@ -817,21 +823,22 @@ static int add_new_gdb(handle_t *handle, struct inode *inode,
 		       "EXT4-fs: ext4_add_new_gdb: adding group block %lu\n",
 		       gdb_num);
 
-	gdb_bh = sb_bread(sb, gdblock);
-	if (!gdb_bh)
-		return -EIO;
+	gdb_bh = ext4_sb_bread(sb, gdblock, 0);
+	if (IS_ERR(gdb_bh))
+		return PTR_ERR(gdb_bh);
 
 	gdbackups = verify_reserved_gdb(sb, group, gdb_bh);
 	if (gdbackups < 0) {
 		err = gdbackups;
-		goto exit_bh;
+		goto errout;
 	}
 
 	data = EXT4_I(inode)->i_data + EXT4_DIND_BLOCK;
-	dind = sb_bread(sb, le32_to_cpu(*data));
-	if (!dind) {
-		err = -EIO;
-		goto exit_bh;
+	dind = ext4_sb_bread(sb, le32_to_cpu(*data), 0);
+	if (IS_ERR(dind)) {
+		err = PTR_ERR(dind);
+		dind = NULL;
+		goto errout;
 	}
 
 	data = (__le32 *)dind->b_data;
@@ -839,18 +846,18 @@ static int add_new_gdb(handle_t *handle, struct inode *inode,
 		ext4_warning(sb, "new group %u GDT block %llu not reserved",
 			     group, gdblock);
 		err = -EINVAL;
-		goto exit_dind;
+		goto errout;
 	}
 
 	BUFFER_TRACE(EXT4_SB(sb)->s_sbh, "get_write_access");
 	err = ext4_journal_get_write_access(handle, EXT4_SB(sb)->s_sbh);
 	if (unlikely(err))
-		goto exit_dind;
+		goto errout;
 
 	BUFFER_TRACE(gdb_bh, "get_write_access");
 	err = ext4_journal_get_write_access(handle, gdb_bh);
 	if (unlikely(err))
-		goto exit_dind;
+		goto errout;
 
 	BUFFER_TRACE(dind, "get_write_access");
 	err = ext4_journal_get_write_access(handle, dind);
@@ -860,7 +867,7 @@ static int add_new_gdb(handle_t *handle, struct inode *inode,
 	/* ext4_reserve_inode_write() gets a reference on the iloc */
 	err = ext4_reserve_inode_write(handle, inode, &iloc);
 	if (unlikely(err))
-		goto exit_dind;
+		goto errout;
 
 	n_group_desc = ext4_kvmalloc((gdb_num + 1) *
 				     sizeof(struct buffer_head *),
@@ -869,7 +876,7 @@ static int add_new_gdb(handle_t *handle, struct inode *inode,
 		err = -ENOMEM;
 		ext4_warning(sb, "not enough memory for %lu groups",
 			     gdb_num + 1);
-		goto exit_inode;
+		goto errout;
 	}
 
 	/*
@@ -885,7 +892,7 @@ static int add_new_gdb(handle_t *handle, struct inode *inode,
 	err = ext4_handle_dirty_metadata(handle, NULL, dind);
 	if (unlikely(err)) {
 		ext4_std_error(sb, err);
-		goto exit_inode;
+		goto errout;
 	}
 	inode->i_blocks -= (gdbackups + 1) * sb->s_blocksize >>
 			   (9 - EXT4_SB(sb)->s_cluster_bits);
@@ -895,7 +902,7 @@ static int add_new_gdb(handle_t *handle, struct inode *inode,
 	if (unlikely(err)) {
 		ext4_std_error(sb, err);
 		iloc.bh = NULL;
-		goto exit_inode;
+		goto errout;
 	}
 	brelse(dind);
 
@@ -913,15 +920,11 @@ static int add_new_gdb(handle_t *handle, struct inode *inode,
 	err = ext4_handle_dirty_super(handle, sb);
 	if (err)
 		ext4_std_error(sb, err);
-
 	return err;
-
-exit_inode:
+errout:
 	kvfree(n_group_desc);
 	brelse(iloc.bh);
-exit_dind:
 	brelse(dind);
-exit_bh:
 	brelse(gdb_bh);
 
 	ext4_debug("leaving with error %d\n", err);
@@ -941,9 +944,9 @@ static int add_new_gdb_meta_bg(struct super_block *sb,
 
 	gdblock = ext4_meta_bg_first_block_no(sb, group) +
 		   ext4_bg_has_super(sb, group);
-	gdb_bh = sb_bread(sb, gdblock);
-	if (!gdb_bh)
-		return -EIO;
+	gdb_bh = ext4_sb_bread(sb, gdblock, 0);
+	if (IS_ERR(gdb_bh))
+		return PTR_ERR(gdb_bh);
 	n_group_desc = ext4_kvmalloc((gdb_num + 1) *
 				     sizeof(struct buffer_head *),
 				     GFP_NOFS);
@@ -1004,14 +1007,15 @@ static int reserve_backup_gdb(handle_t *handle, struct inode *inode,
 	int res, i;
 	int err;
 
-	primary = kmalloc(reserved_gdb * sizeof(*primary), GFP_NOFS);
+	primary = kmalloc_array(reserved_gdb, sizeof(*primary), GFP_NOFS);
 	if (!primary)
 		return -ENOMEM;
 
 	data = EXT4_I(inode)->i_data + EXT4_DIND_BLOCK;
-	dind = sb_bread(sb, le32_to_cpu(*data));
-	if (!dind) {
-		err = -EIO;
+	dind = ext4_sb_bread(sb, le32_to_cpu(*data), 0);
+	if (IS_ERR(dind)) {
+		err = PTR_ERR(dind);
+		dind = NULL;
 		goto exit_free;
 	}
 
@@ -1030,9 +1034,10 @@ static int reserve_backup_gdb(handle_t *handle, struct inode *inode,
 			err = -EINVAL;
 			goto exit_bh;
 		}
-		primary[res] = sb_bread(sb, blk);
-		if (!primary[res]) {
-			err = -EIO;
+		primary[res] = ext4_sb_bread(sb, blk, 0);
+		if (IS_ERR(primary[res])) {
+			err = PTR_ERR(primary[res]);
+			primary[res] = NULL;
 			goto exit_bh;
 		}
 		gdbackups = verify_reserved_gdb(sb, group, primary[res]);
@@ -1518,7 +1523,7 @@ static int ext4_flex_group_add(struct super_block *sb,
 		goto exit_journal;
 
 	group = flex_gd->groups[0].group;
-	BUG_ON(group != EXT4_SB(sb)->s_groups_count);
+	BUG_ON(group != sbi->s_groups_count);
 	err = ext4_add_new_descs(handle, sb, group,
 				resize_inode, flex_gd->count);
 	if (err)
@@ -1792,8 +1797,6 @@ int ext4_group_extend(struct super_block *sb, struct ext4_super_block *es,
 		ext4_msg(sb, KERN_ERR,
 			 "filesystem too large to resize to %llu blocks safely",
 			 n_blocks_count);
-		if (sizeof(sector_t) < 8)
-			ext4_warning(sb, "CONFIG_LBDAF not enabled");
 		return -EINVAL;
 	}
 

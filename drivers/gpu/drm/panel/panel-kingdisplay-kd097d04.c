@@ -1,24 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (c) 2017, Fuzhou Rockchip Electronics Co., Ltd
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/backlight.h>
+#include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/regulator/consumer.h>
 
-#include <drm/drmP.h>
-#include <drm/drm_crtc.h>
-#include <drm/drm_mipi_dsi.h>
-#include <drm/drm_panel.h>
-
 #include <video/mipi_display.h>
+
+#include <drm/drm_crtc.h>
+#include <drm/drm_device.h>
+#include <drm/drm_mipi_dsi.h>
+#include <drm/drm_modes.h>
+#include <drm/drm_panel.h>
+#include <drm/drm_print.h>
 
 struct kingdisplay_panel {
 	struct drm_panel base;
@@ -32,12 +31,18 @@ struct kingdisplay_panel {
 	bool enabled;
 };
 
-struct kingdisplay_pannel_cmd {
+struct kingdisplay_panel_cmd {
 	char cmd;
 	char data;
 };
 
-static const struct kingdisplay_pannel_cmd init_code[] = {
+/*
+ * According to the discussion on
+ * https://review.coreboot.org/#/c/coreboot/+/22472/
+ * the panel init array is not part of the panels datasheet but instead
+ * just came in this form from the panel vendor.
+ */
+static const struct kingdisplay_panel_cmd init_code[] = {
 	/* voltage setting */
 	{ 0xB0, 0x00 },
 	{ 0xB2, 0x02 },
@@ -172,7 +177,8 @@ static const struct kingdisplay_pannel_cmd init_code[] = {
 	{ 0xD5, 0x3F },
 };
 
-static inline struct kingdisplay_panel *to_kingdisplay_panel(struct drm_panel *panel)
+static inline
+struct kingdisplay_panel *to_kingdisplay_panel(struct drm_panel *panel)
 {
 	return container_of(panel, struct kingdisplay_panel, base);
 }
@@ -230,7 +236,7 @@ static int kingdisplay_panel_prepare(struct drm_panel *panel)
 {
 	struct kingdisplay_panel *kingdisplay = to_kingdisplay_panel(panel);
 	int err, regulator_err;
-	int i;
+	unsigned int i;
 
 	if (kingdisplay->prepared)
 		return 0;
@@ -241,17 +247,23 @@ static int kingdisplay_panel_prepare(struct drm_panel *panel)
 	if (err < 0)
 		return err;
 
-	/* T2: 15ms - 1000ms */
+	/* T2: 15ms */
 	usleep_range(15000, 16000);
 
 	gpiod_set_value_cansleep(kingdisplay->enable_gpio, 1);
 
-	/* T4: 15ms - 1000ms */
+	/* T4: 15ms */
 	usleep_range(15000, 16000);
 
-	for (i = 0; i < ARRAY_SIZE(init_code); i++)
-		mipi_dsi_generic_write(kingdisplay->link, &init_code[i],
-				       sizeof(struct kingdisplay_pannel_cmd));
+	for (i = 0; i < ARRAY_SIZE(init_code); i++) {
+		err = mipi_dsi_generic_write(kingdisplay->link, &init_code[i],
+					sizeof(struct kingdisplay_panel_cmd));
+		if (err < 0) {
+			DRM_DEV_ERROR(panel->dev, "failed write init cmds: %d\n",
+				      err);
+			goto poweroff;
+		}
+	}
 
 	err = mipi_dsi_dcs_exit_sleep_mode(kingdisplay->link);
 	if (err < 0) {
@@ -260,7 +272,7 @@ static int kingdisplay_panel_prepare(struct drm_panel *panel)
 		goto poweroff;
 	}
 
-	/* T6: 120ms - 1000ms*/
+	/* T6: 120ms */
 	msleep(120);
 
 	err = mipi_dsi_dcs_set_display_on(kingdisplay->link);
@@ -271,19 +283,20 @@ static int kingdisplay_panel_prepare(struct drm_panel *panel)
 	}
 
 	/* T7: 10ms */
-	usleep_range(10000, 10000);
+	usleep_range(10000, 11000);
 
 	kingdisplay->prepared = true;
 
 	return 0;
 
 poweroff:
+	gpiod_set_value_cansleep(kingdisplay->enable_gpio, 0);
+
 	regulator_err = regulator_disable(kingdisplay->supply);
 	if (regulator_err)
 		DRM_DEV_ERROR(panel->dev, "failed to disable regulator: %d\n",
 			      regulator_err);
 
-	gpiod_set_value_cansleep(kingdisplay->enable_gpio, 0);
 	return err;
 }
 
@@ -320,7 +333,8 @@ static const struct drm_display_mode default_mode = {
 	.vrefresh = 60,
 };
 
-static int kingdisplay_panel_get_modes(struct drm_panel *panel)
+static int kingdisplay_panel_get_modes(struct drm_panel *panel,
+				       struct drm_connector *connector)
 {
 	struct drm_display_mode *mode;
 
@@ -334,11 +348,11 @@ static int kingdisplay_panel_get_modes(struct drm_panel *panel)
 
 	drm_mode_set_name(mode);
 
-	drm_mode_probed_add(panel->connector, mode);
+	drm_mode_probed_add(connector, mode);
 
-	panel->connector->display_info.width_mm = 147;
-	panel->connector->display_info.height_mm = 196;
-	panel->connector->display_info.bpc = 8;
+	connector->display_info.width_mm = 147;
+	connector->display_info.height_mm = 196;
+	connector->display_info.bpc = 8;
 
 	return 1;
 }
@@ -360,7 +374,6 @@ MODULE_DEVICE_TABLE(of, kingdisplay_of_match);
 static int kingdisplay_panel_add(struct kingdisplay_panel *kingdisplay)
 {
 	struct device *dev = &kingdisplay->link->dev;
-	struct device_node *np;
 	int err;
 
 	kingdisplay->supply = devm_regulator_get(dev, "power");
@@ -368,44 +381,26 @@ static int kingdisplay_panel_add(struct kingdisplay_panel *kingdisplay)
 		return PTR_ERR(kingdisplay->supply);
 
 	kingdisplay->enable_gpio = devm_gpiod_get_optional(dev, "enable",
-						       GPIOD_OUT_HIGH);
+							   GPIOD_OUT_HIGH);
 	if (IS_ERR(kingdisplay->enable_gpio)) {
 		err = PTR_ERR(kingdisplay->enable_gpio);
 		dev_dbg(dev, "failed to get enable gpio: %d\n", err);
 		kingdisplay->enable_gpio = NULL;
 	}
 
-	np = of_parse_phandle(dev->of_node, "backlight", 0);
-	if (np) {
-		kingdisplay->backlight = of_find_backlight_by_node(np);
-		of_node_put(np);
+	kingdisplay->backlight = devm_of_find_backlight(dev);
+	if (IS_ERR(kingdisplay->backlight))
+		return PTR_ERR(kingdisplay->backlight);
 
-		if (!kingdisplay->backlight)
-			return -EPROBE_DEFER;
-	}
+	drm_panel_init(&kingdisplay->base, &kingdisplay->link->dev,
+		       &kingdisplay_panel_funcs, DRM_MODE_CONNECTOR_DSI);
 
-	drm_panel_init(&kingdisplay->base);
-	kingdisplay->base.funcs = &kingdisplay_panel_funcs;
-	kingdisplay->base.dev = &kingdisplay->link->dev;
-
-	err = drm_panel_add(&kingdisplay->base);
-	if (err < 0)
-		goto put_backlight;
-
-	return 0;
-
-put_backlight:
-	put_device(&kingdisplay->backlight->dev);
-
-	return err;
+	return drm_panel_add(&kingdisplay->base);
 }
 
 static void kingdisplay_panel_del(struct kingdisplay_panel *kingdisplay)
 {
-	if (kingdisplay->base.dev)
-		drm_panel_remove(&kingdisplay->base);
-
-	put_device(&kingdisplay->backlight->dev);
+	drm_panel_remove(&kingdisplay->base);
 }
 
 static int kingdisplay_panel_probe(struct mipi_dsi_device *dsi)
@@ -413,7 +408,7 @@ static int kingdisplay_panel_probe(struct mipi_dsi_device *dsi)
 	struct kingdisplay_panel *kingdisplay;
 	int err;
 
-	dsi->lanes = 8;
+	dsi->lanes = 4;
 	dsi->format = MIPI_DSI_FMT_RGB888;
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
 			  MIPI_DSI_MODE_LPM;
@@ -423,15 +418,13 @@ static int kingdisplay_panel_probe(struct mipi_dsi_device *dsi)
 		return -ENOMEM;
 
 	mipi_dsi_set_drvdata(dsi, kingdisplay);
-
 	kingdisplay->link = dsi;
 
 	err = kingdisplay_panel_add(kingdisplay);
 	if (err < 0)
 		return err;
 
-	err = mipi_dsi_attach(dsi);
-	return err;
+	return mipi_dsi_attach(dsi);
 }
 
 static int kingdisplay_panel_remove(struct mipi_dsi_device *dsi)
@@ -453,7 +446,6 @@ static int kingdisplay_panel_remove(struct mipi_dsi_device *dsi)
 		DRM_DEV_ERROR(&dsi->dev, "failed to detach from DSI host: %d\n",
 			      err);
 
-	drm_panel_detach(&kingdisplay->base);
 	kingdisplay_panel_del(kingdisplay);
 
 	return 0;

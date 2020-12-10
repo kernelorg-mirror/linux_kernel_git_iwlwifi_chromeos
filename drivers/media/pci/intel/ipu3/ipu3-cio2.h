@@ -160,7 +160,7 @@
 #define CIO2_PBM_WMCTRL1_MID1_2CK	(16 << CIO2_PBM_WMCTRL1_MID1_2CK_SHIFT)
 #define CIO2_PBM_WMCTRL1_MID2_2CK	(21 << CIO2_PBM_WMCTRL1_MID2_2CK_SHIFT)
 #define CIO2_REG_PBM_WMCTRL2				0x1468
-#define CIO2_PBM_WMCTRL2_HWM_2CK			20
+#define CIO2_PBM_WMCTRL2_HWM_2CK			40
 #define CIO2_PBM_WMCTRL2_HWM_2CK_SHIFT			0
 #define CIO2_PBM_WMCTRL2_LWM_2CK			22
 #define CIO2_PBM_WMCTRL2_LWM_2CK_SHIFT			8
@@ -177,7 +177,7 @@
 /* below n = 0..3 */
 #define CIO2_PBM_FOPN_ABORT(n)				(0x1 << 8 * (n))
 #define CIO2_PBM_FOPN_FORCE_ABORT(n)			(0x2 << 8 * (n))
-#define CIO2_PBM_FOPN_FRAMEOPEN(n)			(0x10 << 8 * (n))
+#define CIO2_PBM_FOPN_FRAMEOPEN(n)			(0x8 << 8 * (n))
 #define CIO2_REG_LTRCTRL				0x1480
 #define CIO2_LTRCTRL_LTRDYNEN				BIT(16)
 #define CIO2_LTRCTRL_LTRSTABLETIME_SHIFT		8
@@ -359,7 +359,6 @@ struct cio2_device {
 	struct cio2_queue *cur_queue;
 	/* mutex to be used by video_device */
 	struct mutex lock;
-	void *vb2_alloc_ctx;
 
 	bool streaming;
 	struct v4l2_async_notifier notifier;

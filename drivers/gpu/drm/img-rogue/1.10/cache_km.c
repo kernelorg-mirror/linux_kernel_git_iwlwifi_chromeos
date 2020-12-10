@@ -1453,7 +1453,7 @@ static INLINE PVRSRV_ERROR CacheOpValidateVAOffset(PMR *psPMR,
 #else
 	/* Validate VA, assume most basic address limit access_ok() check */
 	pvAddress = (void*)(uintptr_t)((uintptr_t)pvAddress + uiOffset);
-	if (! access_ok(VERIFY_READ, pvAddress, uiSize))
+	if (! access_ok(pvAddress, uiSize))
 	{
 		pvAddress = NULL;
 		if (! mm)
@@ -3251,11 +3251,11 @@ PVRSRV_ERROR CacheOpInit2 (void)
 	PVR_LOGG_IF_ERROR(eError, "OSEventObjectCreate", e0);
 
 	/* Appending work-items is not concurrent, lock protects against this */
-	eError = OSLockCreate((POS_LOCK*)&gsCwq.hDeferredLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate((POS_LOCK*)&gsCwq.hDeferredLock);
 	PVR_LOGG_IF_ERROR(eError, "OSLockCreate", e0);
 
 	/* Apphint read/write is not concurrent, so lock protects against this */
-	eError = OSLockCreate((POS_LOCK*)&gsCwq.hConfigLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate((POS_LOCK*)&gsCwq.hConfigLock);
 	PVR_LOGG_IF_ERROR(eError, "OSLockCreate", e0);
 
 	/* Determine CPU cache ISA maintenance mechanism available, GF and UMF */
@@ -3475,12 +3475,12 @@ PVRSRV_ERROR CacheOpInit (void)
 	}
 
 	/* Lock prevents multiple threads from issuing surplus to requirement GF */
-	eError = OSLockCreate((POS_LOCK*)&gsCwq.hGlobalFlushLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate((POS_LOCK*)&gsCwq.hGlobalFlushLock);
 	PVR_LOGG_IF_ERROR(eError, "OSLockCreate", e0);
 
 #if defined(CACHEOP_DEBUG)
 	/* debugfs file read-out is not concurrent, so lock protects against this */
-	eError = OSLockCreate((POS_LOCK*)&gsCwq.hStatsExecLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate((POS_LOCK*)&gsCwq.hStatsExecLock);
 	PVR_LOGG_IF_ERROR(eError, "OSLockCreate", e0);
 
 	gsCwq.i32StatsExecWriteIdx = 0;

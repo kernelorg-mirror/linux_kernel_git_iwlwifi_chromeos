@@ -409,6 +409,7 @@ static kuid_t esdfs_get_derived_lower_uid(struct esdfs_sb_info *sbi,
 		if (test_opt(sbi, SPECIAL_DOWNLOAD))
 			return make_kuid(sbi->dl_ns,
 					 sbi->lower_dl_perms.raw_uid);
+		/* fall through */
 	case ESDFS_TREE_ROOT:
 	case ESDFS_TREE_MEDIA:
 	case ESDFS_TREE_ANDROID:
@@ -445,6 +446,7 @@ static kgid_t esdfs_get_derived_lower_gid(struct esdfs_sb_info *sbi,
 		if (test_opt(sbi, SPECIAL_DOWNLOAD))
 			return make_kgid(sbi->dl_ns,
 					 sbi->lower_dl_perms.raw_gid);
+		/* fall through */
 	case ESDFS_TREE_ROOT:
 	case ESDFS_TREE_MEDIA:
 	case ESDFS_TREE_ANDROID:
@@ -505,13 +507,13 @@ retry_deleg:
 		if (!S_ISDIR(inode->i_mode))
 			newattrs.ia_valid |= ATTR_KILL_SUID | ATTR_KILL_SGID
 						| ATTR_KILL_PRIV;
-		mutex_lock(&inode->i_mutex);
+		inode_lock(inode);
 		error = security_path_chown(&path, newattrs.ia_uid,
 						newattrs.ia_gid);
 		if (!error)
 			error = notify_change(path.dentry, &newattrs,
 						&delegated_inode);
-		mutex_unlock(&inode->i_mutex);
+		inode_unlock(inode);
 		if (delegated_inode) {
 			error = break_deleg_wait(&delegated_inode);
 			if (!error)
@@ -555,11 +557,12 @@ int esdfs_derive_mkdir_contents(struct dentry *dir_dentry)
 	     !ESDFS_DENTRY_IS_LINKED(dir_dentry)))
 		return 0;
 
+	esdfs_get_lower_path(dir_dentry, &lower_dir_path);
+
 	nomedia.name = ".nomedia";
 	nomedia.len = strlen(nomedia.name);
-	nomedia.hash = full_name_hash(nomedia.name, nomedia.len);
-
-	esdfs_get_lower_path(dir_dentry, &lower_dir_path);
+	nomedia.hash = full_name_hash(lower_dir_path.dentry, nomedia.name,
+				      nomedia.len);
 
 	/* check if lower has its own hash */
 	if (lower_dir_path.dentry->d_flags & DCACHE_OP_HASH)

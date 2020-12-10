@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright © 2006-2007 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  *
  * Authors:
  *	Eric Anholt <eric@anholt.net>
@@ -21,14 +9,13 @@
  */
 
 #include <linux/i2c.h>
-#include <drm/drmP.h>
+#include <linux/pm_runtime.h>
 
 #include "intel_bios.h"
+#include "power.h"
 #include "psb_drv.h"
 #include "psb_intel_drv.h"
 #include "psb_intel_reg.h"
-#include "power.h"
-#include <linux/pm_runtime.h>
 
 /*
  * LVDS I2C backlight control macros
@@ -388,11 +375,11 @@ bool psb_intel_lvds_mode_fixup(struct drm_encoder *encoder,
 
 	/* PSB requires the LVDS is on pipe B, MRST has only one pipe anyway */
 	if (!IS_MRST(dev) && gma_crtc->pipe == 0) {
-		printk(KERN_ERR "Can't support LVDS on pipe A\n");
+		pr_err("Can't support LVDS on pipe A\n");
 		return false;
 	}
 	if (IS_MRST(dev) && gma_crtc->pipe != 0) {
-		printk(KERN_ERR "Must use PIPE A\n");
+		pr_err("Must use PIPE A\n");
 		return false;
 	}
 	/* Should never happen!! */
@@ -400,8 +387,7 @@ bool psb_intel_lvds_mode_fixup(struct drm_encoder *encoder,
 			    head) {
 		if (tmp_encoder != encoder
 		    && tmp_encoder->crtc == encoder->crtc) {
-			printk(KERN_ERR "Can't enable LVDS and another "
-			       "encoder on the same pipe\n");
+			pr_err("Can't enable LVDS and another encoder on the same pipe\n");
 			return false;
 		}
 	}
@@ -539,8 +525,7 @@ void psb_intel_lvds_destroy(struct drm_connector *connector)
 	struct gma_encoder *gma_encoder = gma_attached_encoder(connector);
 	struct psb_intel_lvds_priv *lvds_priv = gma_encoder->dev_priv;
 
-	if (lvds_priv->ddc_bus)
-		psb_intel_i2c_destroy(lvds_priv->ddc_bus);
+	psb_intel_i2c_destroy(lvds_priv->ddc_bus);
 	drm_connector_unregister(connector);
 	drm_connector_cleanup(connector);
 	kfree(connector);
@@ -816,11 +801,9 @@ out:
 
 failed_find:
 	mutex_unlock(&dev->mode_config.mutex);
-	if (lvds_priv->ddc_bus)
-		psb_intel_i2c_destroy(lvds_priv->ddc_bus);
+	psb_intel_i2c_destroy(lvds_priv->ddc_bus);
 failed_ddc:
-	if (lvds_priv->i2c_bus)
-		psb_intel_i2c_destroy(lvds_priv->i2c_bus);
+	psb_intel_i2c_destroy(lvds_priv->i2c_bus);
 failed_blc_i2c:
 	drm_encoder_cleanup(encoder);
 	drm_connector_cleanup(connector);

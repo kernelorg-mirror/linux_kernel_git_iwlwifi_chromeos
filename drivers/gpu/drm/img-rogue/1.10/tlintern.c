@@ -110,7 +110,7 @@ TLInit(void)
 
 	/* Allocate a lock for TL global data, to be used while updating the TL data.
 	 * This is for making TL global data muti-thread safe */
-	eError = OSLockCreate (&sTLGlobalData.hTLGDLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate (&sTLGlobalData.hTLGDLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto e0;

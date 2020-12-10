@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright © 2006-2011 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  *
  * Authors:
  *	Eric Anholt <eric@anholt.net>
@@ -20,17 +8,16 @@
  *	Jesse Barnes <jesse.barnes@intel.com>
  */
 
-#include <linux/i2c.h>
 #include <linux/dmi.h>
-#include <drm/drmP.h>
+#include <linux/i2c.h>
+#include <linux/pm_runtime.h>
 
+#include "cdv_device.h"
 #include "intel_bios.h"
+#include "power.h"
 #include "psb_drv.h"
 #include "psb_intel_drv.h"
 #include "psb_intel_reg.h"
-#include "power.h"
-#include <linux/pm_runtime.h>
-#include "cdv_device.h"
 
 /**
  * LVDS I2C backlight control macros
@@ -244,7 +231,7 @@ static void cdv_intel_lvds_restore(struct drm_connector *connector)
 {
 }
 
-static int cdv_intel_lvds_mode_valid(struct drm_connector *connector,
+static enum drm_mode_status cdv_intel_lvds_mode_valid(struct drm_connector *connector,
 			      struct drm_display_mode *mode)
 {
 	struct drm_device *dev = connector->dev;
@@ -284,8 +271,7 @@ static bool cdv_intel_lvds_mode_fixup(struct drm_encoder *encoder,
 			    head) {
 		if (tmp_encoder != encoder
 		    && tmp_encoder->crtc == encoder->crtc) {
-			printk(KERN_ERR "Can't enable LVDS and another "
-			       "encoder on the same pipe\n");
+			pr_err("Can't enable LVDS and another encoder on the same pipe\n");
 			return false;
 		}
 	}
@@ -423,8 +409,7 @@ static void cdv_intel_lvds_destroy(struct drm_connector *connector)
 {
 	struct gma_encoder *gma_encoder = gma_attached_encoder(connector);
 
-	if (gma_encoder->i2c_bus)
-		psb_intel_i2c_destroy(gma_encoder->i2c_bus);
+	psb_intel_i2c_destroy(gma_encoder->i2c_bus);
 	drm_connector_unregister(connector);
 	drm_connector_cleanup(connector);
 	kfree(connector);
@@ -760,15 +745,13 @@ out:
 
 failed_find:
 	mutex_unlock(&dev->mode_config.mutex);
-	printk(KERN_ERR "Failed find\n");
-	if (gma_encoder->ddc_bus)
-		psb_intel_i2c_destroy(gma_encoder->ddc_bus);
+	pr_err("Failed find\n");
+	psb_intel_i2c_destroy(gma_encoder->ddc_bus);
 failed_ddc:
-	printk(KERN_ERR "Failed DDC\n");
-	if (gma_encoder->i2c_bus)
-		psb_intel_i2c_destroy(gma_encoder->i2c_bus);
+	pr_err("Failed DDC\n");
+	psb_intel_i2c_destroy(gma_encoder->i2c_bus);
 failed_blc_i2c:
-	printk(KERN_ERR "Failed BLC\n");
+	pr_err("Failed BLC\n");
 	drm_encoder_cleanup(encoder);
 	drm_connector_cleanup(connector);
 	kfree(lvds_priv);

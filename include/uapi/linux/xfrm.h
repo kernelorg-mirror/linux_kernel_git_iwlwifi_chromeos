@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _LINUX_XFRM_H
 #define _LINUX_XFRM_H
 
@@ -7,18 +8,6 @@
 /* All of the structures in this file may not change size as they are
  * passed into the kernel from userspace via netlink sockets.
  */
-
-#if defined(CONFIG_ARM64)
-/* FIXME: Force the kernel structs to be compatible with arm32 user structs.
- * This breaks compatibility with arm64 user programs.  See
- * crosbug.com/p/57324
- */
-#define __maybe_packed __attribute__((packed))
-#define PACK_RESERVED(x) __u8 reserved[x]
-#else
-#define __maybe_packed
-#define PACK_RESERVED(x)
-#endif
 
 /* Structure to encapsulate addresses. I do not want to use
  * "standard" structure. My apologies.
@@ -310,15 +299,18 @@ enum xfrm_attr_type_t {
 	XFRMA_ALG_AUTH_TRUNC,	/* struct xfrm_algo_auth */
 	XFRMA_MARK,		/* struct xfrm_mark */
 	XFRMA_TFCPAD,		/* __u32 */
-	XFRMA_REPLAY_ESN_VAL,	/* struct xfrm_replay_esn */
+	XFRMA_REPLAY_ESN_VAL,	/* struct xfrm_replay_state_esn */
 	XFRMA_SA_EXTRA_FLAGS,	/* __u32 */
 	XFRMA_PROTO,		/* __u8 */
 	XFRMA_ADDRESS_FILTER,	/* struct xfrm_address_filter */
 	XFRMA_PAD,
-	XFRMA_OFFLOAD_DEV,	/* struct xfrm_state_offload */
-	XFRMA_OUTPUT_MARK,	/* __u32 */
+	XFRMA_OFFLOAD_DEV,	/* struct xfrm_user_offload */
+	XFRMA_SET_MARK,		/* __u32 */
+	XFRMA_SET_MARK_MASK,	/* __u32 */
+	XFRMA_IF_ID,		/* __u32 */
 	__XFRMA_MAX
 
+#define XFRMA_OUTPUT_MARK XFRMA_SET_MARK	/* Compatibility */
 #define XFRMA_MAX (__XFRMA_MAX - 1)
 };
 
@@ -392,11 +384,7 @@ struct xfrm_usersa_info {
 #define XFRM_STATE_AF_UNSPEC	32
 #define XFRM_STATE_ALIGN4	64
 #define XFRM_STATE_ESN		128
-	/* This makes the struct length 64-bit aligned, which is required on
-	 * 32-bit ARM.
-	 */
-	PACK_RESERVED(7);
-} __maybe_packed;
+};
 
 #define XFRM_SA_XFLAG_DONT_ENCAP_DSCP	1
 
@@ -418,7 +406,7 @@ struct xfrm_userspi_info {
 	struct xfrm_usersa_info		info;
 	__u32				min;
 	__u32				max;
-} __maybe_packed;
+};
 
 struct xfrm_userpolicy_info {
 	struct xfrm_selector		sel;
@@ -435,8 +423,7 @@ struct xfrm_userpolicy_info {
 	/* Automatically expand selector to include matching ICMP payloads. */
 #define XFRM_POLICY_ICMP	2
 	__u8				share;
-	PACK_RESERVED(4);
-} __maybe_packed;
+};
 
 struct xfrm_userpolicy_id {
 	struct xfrm_selector		sel;
@@ -453,19 +440,17 @@ struct xfrm_user_acquire {
 	__u32				ealgos;
 	__u32				calgos;
 	__u32				seq;
-} __maybe_packed;
+};
 
 struct xfrm_user_expire {
 	struct xfrm_usersa_info		state;
 	__u8				hard;
-	PACK_RESERVED(7);
-} __maybe_packed;
+};
 
 struct xfrm_user_polexpire {
 	struct xfrm_userpolicy_info	pol;
 	__u8				hard;
-	PACK_RESERVED(7);
-} __maybe_packed;
+};
 
 struct xfrm_usersa_flush {
 	__u8				proto;
@@ -514,6 +499,13 @@ struct xfrm_address_filter {
 	__u8				splen;
 	__u8				dplen;
 };
+
+struct xfrm_user_offload {
+	int				ifindex;
+	__u8				flags;
+};
+#define XFRM_OFFLOAD_IPV6	1
+#define XFRM_OFFLOAD_INBOUND	2
 
 #ifndef __KERNEL__
 /* backwards compatibility for userspace */

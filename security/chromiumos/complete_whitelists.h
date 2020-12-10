@@ -48,6 +48,7 @@ static struct syscall_whitelist_entry complete_whitelist[] = {
 	SYSCALL_ENTRY(clone),
 	SYSCALL_ENTRY(close),
 	SYSCALL_ENTRY(connect),
+	SYSCALL_ENTRY(copy_file_range),
 	SYSCALL_ENTRY(delete_module),
 	SYSCALL_ENTRY(dup),
 	SYSCALL_ENTRY(dup3),
@@ -56,7 +57,6 @@ static struct syscall_whitelist_entry complete_whitelist[] = {
 	SYSCALL_ENTRY(epoll_pwait),
 	SYSCALL_ENTRY(eventfd2),
 	SYSCALL_ENTRY(execve),
-	SYSCALL_ENTRY(execveat),
 	SYSCALL_ENTRY(exit),
 	SYSCALL_ENTRY(exit_group),
 	SYSCALL_ENTRY(faccessat),
@@ -139,7 +139,6 @@ static struct syscall_whitelist_entry complete_whitelist[] = {
 	SYSCALL_ENTRY(mkdirat),
 	SYSCALL_ENTRY(mknodat),
 	SYSCALL_ENTRY(mlock),
-	SYSCALL_ENTRY(mlock2),
 	SYSCALL_ENTRY(mlockall),
 	SYSCALL_ENTRY(mount),
 	SYSCALL_ENTRY(move_pages),
@@ -167,10 +166,15 @@ static struct syscall_whitelist_entry complete_whitelist[] = {
 	SYSCALL_ENTRY(personality),
 	SYSCALL_ENTRY(pipe2),
 	SYSCALL_ENTRY(pivot_root),
+	SYSCALL_ENTRY(pkey_alloc),
+	SYSCALL_ENTRY(pkey_free),
+	SYSCALL_ENTRY(pkey_mprotect),
 	SYSCALL_ENTRY(ppoll),
 	SYSCALL_ENTRY_ALT(prctl, alt_sys_prctl),
 	SYSCALL_ENTRY(pread64),
 	SYSCALL_ENTRY(preadv),
+	SYSCALL_ENTRY(preadv2),
+	SYSCALL_ENTRY(pwritev2),
 	SYSCALL_ENTRY(prlimit64),
 	SYSCALL_ENTRY(process_vm_readv),
 	SYSCALL_ENTRY(process_vm_writev),
@@ -254,6 +258,7 @@ static struct syscall_whitelist_entry complete_whitelist[] = {
 	SYSCALL_ENTRY(socketpair),
 	SYSCALL_ENTRY(splice),
 	SYSCALL_ENTRY(statfs),
+	SYSCALL_ENTRY(statx),
 	SYSCALL_ENTRY(swapoff),
 	SYSCALL_ENTRY(swapon),
 	SYSCALL_ENTRY(symlinkat),
@@ -277,7 +282,6 @@ static struct syscall_whitelist_entry complete_whitelist[] = {
 	SYSCALL_ENTRY(umask),
 	SYSCALL_ENTRY(unlinkat),
 	SYSCALL_ENTRY(unshare),
-	SYSCALL_ENTRY(userfaultfd),
 	SYSCALL_ENTRY(utimensat),
 	SYSCALL_ENTRY(vhangup),
 	SYSCALL_ENTRY(vmsplice),
@@ -325,8 +329,7 @@ static struct syscall_whitelist_entry complete_whitelist[] = {
 	SYSCALL_ENTRY(vfork),
 #endif
 
-	/* Exist for x86_64 and ARM64 but not ARM32 */
-#if !defined(CONFIG_ARM) && (defined(CONFIG_ARM64) || defined(CONFIG_X86_64))
+	/* Exist for x86_64 and ARM64 */
 	SYSCALL_ENTRY(fadvise64),
 	SYSCALL_ENTRY(fstat),
 	SYSCALL_ENTRY(migrate_pages),
@@ -335,38 +338,6 @@ static struct syscall_whitelist_entry complete_whitelist[] = {
 	SYSCALL_ENTRY(sync_file_range),
 	SYSCALL_ENTRY(umount2),
 	SYSCALL_ENTRY(uname),
-#endif
-
-	/* Unique to ARM32. */
-#if defined(CONFIG_ARM) && !defined(CONFIG_ARM64)
-	SYSCALL_ENTRY(arm_fadvise64_64),
-	SYSCALL_ENTRY(bdflush),
-	SYSCALL_ENTRY(fcntl64),
-	SYSCALL_ENTRY(fstat64),
-	SYSCALL_ENTRY(fstatat64),
-	SYSCALL_ENTRY(ftruncate64),
-	SYSCALL_ENTRY(ipc),
-	SYSCALL_ENTRY(lstat64),
-	SYSCALL_ENTRY(mmap2),
-	SYSCALL_ENTRY(nice),
-	SYSCALL_ENTRY(pciconfig_iobase),
-	SYSCALL_ENTRY(pciconfig_read),
-	SYSCALL_ENTRY(pciconfig_write),
-	SYSCALL_ENTRY(recv),
-	SYSCALL_ENTRY(send),
-	SYSCALL_ENTRY(sendfile64),
-	SYSCALL_ENTRY(sigaction),
-	SYSCALL_ENTRY(sigpending),
-	SYSCALL_ENTRY(sigprocmask),
-	SYSCALL_ENTRY(sigsuspend),
-	SYSCALL_ENTRY(socketcall),
-	SYSCALL_ENTRY(stat64),
-	SYSCALL_ENTRY(stime),
-	SYSCALL_ENTRY(syscall),
-	SYSCALL_ENTRY(truncate64),
-	SYSCALL_ENTRY(umount),
-	SYSCALL_ENTRY(uselib),
-#endif
 
 	/* Unique to x86_64. */
 #ifdef CONFIG_X86_64
@@ -382,7 +353,7 @@ static struct syscall_whitelist_entry complete_whitelist[] = {
 #endif
 
 	/* Unique to ARM64. */
-#if defined(CONFIG_ARM64) && !defined(CONFIG_ARM)
+#ifdef CONFIG_ARM64
 	SYSCALL_ENTRY(nfsservctl),
 	SYSCALL_ENTRY(renameat2),
 #endif

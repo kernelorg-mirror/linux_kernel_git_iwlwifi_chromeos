@@ -1862,7 +1862,7 @@ PVRSRV_ERROR DevicememHistoryInitKM(void)
 {
 	PVRSRV_ERROR eError;
 
-	eError = OSLockCreate(&gsDevicememHistoryData.hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&gsDevicememHistoryData.hLock);
 
 	if(eError != PVRSRV_OK)
 	{

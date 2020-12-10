@@ -62,11 +62,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgx_memallocflags.h"
 #include "rgxccb.h"
 #include "rgxhwperf.h"
+#include "ospvr_gputrace.h"
 #include "rgxtimerquery.h"
 #include "rgxsyncutils.h"
 #include "htbuffer.h"
 
-#include "rgxdefs_km.h"
+#include "km/rgxdefs_km.h"
 #include "rgx_fwif_km.h"
 #include "physmem.h"
 #include "sync_server.h"
@@ -2638,7 +2639,7 @@ PVRSRV_ERROR PVRSRVRGXCreateRenderContextKM(CONNECTION_DATA				*psConnection,
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 #if !defined(PVRSRV_USE_BRIDGE_LOCK)
-	eError = OSLockCreate(&psRenderContext->hLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psRenderContext->hLock);
 
 
 	if (eError != PVRSRV_OK)
@@ -4646,10 +4647,9 @@ PVRSRV_ERROR PVRSRVRGXKickTA3DKM(RGX_SERVER_RENDER_CONTEXT	*psRenderContext,
 			OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 		} END_LOOP_UNTIL_TIMEOUT();
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-		RGXHWPerfFTraceGPUEnqueueEvent(psRenderContext->psDeviceNode->pvDevice,
-				ui32FWCtx, ui32IntJobRef, RGX_HWPERF_KICK_TYPE_TA3D);
-#endif
+		PVRGpuTraceEnqueueEvent(psRenderContext->psDeviceNode->pvDevice,
+		                        ui32FWCtx, ui32ExtJobRef, ui32IntJobRef,
+		                        RGX_HWPERF_KICK_TYPE_TA3D);
 	}
 
 	if (ui323DCmdCount)

@@ -59,6 +59,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgx_memallocflags.h"
 #include "rgxtimerquery.h"
 #include "rgxhwperf.h"
+#include "ospvr_gputrace.h"
 #include "htbuffer.h"
 
 #include "pdump_km.h"
@@ -228,7 +229,7 @@ PVRSRV_ERROR PVRSRVRGXTDMCreateTransferContextKM(
 	}
 
 #if !defined(PVRSRV_USE_BRIDGE_LOCK)
-	eError = OSLockCreate(&psTransferContext->hLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psTransferContext->hLock);
 
 	if(eError != PVRSRV_OK)
 	{
@@ -863,6 +864,8 @@ PVRSRV_ERROR PVRSRVRGXTDMSubmitTransferKM(
 	 */
 	{
 		RGXFWIF_KCCB_CMD sTDMKCCBCmd;
+		IMG_UINT32 ui32FWAddr = FWCommonContextGetFWAddress(
+		        psTransferContext->sTDMData.psServerCommonContext).ui32Addr;
 
 		/* Construct the kernel 3D CCB command. */
 		sTDMKCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_KICK;
@@ -899,12 +902,8 @@ PVRSRV_ERROR PVRSRVRGXTDMSubmitTransferKM(
 			OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 		} END_LOOP_UNTIL_TIMEOUT();
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-		RGXHWPerfFTraceGPUEnqueueEvent(psDeviceNode->pvDevice,
- 			FWCommonContextGetFWAddress(psTransferContext->
- 				sTDMData.psServerCommonContext).ui32Addr,
-			ui32IntJobRef, RGX_HWPERF_KICK_TYPE_TQTDM);
-#endif
+		PVRGpuTraceEnqueueEvent(psDeviceNode->pvDevice, ui32FWAddr, ui32ExtJobRef,
+		                        ui32IntJobRef, RGX_HWPERF_KICK_TYPE_TQTDM);
 	}
 
 	/*

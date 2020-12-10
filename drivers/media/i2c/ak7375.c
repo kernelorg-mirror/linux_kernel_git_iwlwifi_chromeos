@@ -150,13 +150,13 @@ static int ak7375_probe(struct i2c_client *client)
 	v4l2_i2c_subdev_init(&ak7375_dev->sd, client, &ak7375_ops);
 	ak7375_dev->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	ak7375_dev->sd.internal_ops = &ak7375_int_ops;
-	ak7375_dev->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_LENS;
+	ak7375_dev->sd.entity.function = MEDIA_ENT_F_LENS;
 
 	ret = ak7375_init_controls(ak7375_dev);
 	if (ret)
 		goto err_cleanup;
 
-	ret = media_entity_init(&ak7375_dev->sd.entity, 0, NULL, 0);
+	ret = media_entity_pads_init(&ak7375_dev->sd.entity, 0, NULL);
 	if (ret < 0)
 		goto err_cleanup;
 

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * WSM host interface (HI) implementation for
  * ST-Ericsson CW1200 mac80211 drivers.
  *
  * Copyright (c) 2010, ST-Ericsson
  * Author: Dmitry Tarnyagin <dmitry.tarnyagin@lockless.no>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/skbuff.h>
@@ -847,9 +844,9 @@ static int wsm_startup_indication(struct cw1200_common *priv,
 
 	/* Disable unsupported frequency bands */
 	if (!(priv->wsm_caps.fw_cap & 0x1))
-		priv->hw->wiphy->bands[IEEE80211_BAND_2GHZ] = NULL;
+		priv->hw->wiphy->bands[NL80211_BAND_2GHZ] = NULL;
 	if (!(priv->wsm_caps.fw_cap & 0x2))
-		priv->hw->wiphy->bands[IEEE80211_BAND_5GHZ] = NULL;
+		priv->hw->wiphy->bands[NL80211_BAND_5GHZ] = NULL;
 
 	priv->firmware_ready = 1;
 	wake_up(&priv->wsm_startup_done);

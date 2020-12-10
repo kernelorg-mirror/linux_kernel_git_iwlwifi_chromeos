@@ -1,29 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  Bluetooth support for Intel devices
  *
  *  Copyright (C) 2015  Intel Corporation
- *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  */
 
 #include <linux/module.h>
 #include <linux/firmware.h>
 #include <linux/regmap.h>
+#include <asm/unaligned.h>
 
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
@@ -43,13 +29,13 @@ int btintel_check_bdaddr(struct hci_dev *hdev)
 			     HCI_INIT_TIMEOUT);
 	if (IS_ERR(skb)) {
 		int err = PTR_ERR(skb);
-		BT_ERR("%s: Reading Intel device address failed (%d)",
-		       hdev->name, err);
+		bt_dev_err(hdev, "Reading Intel device address failed (%d)",
+			   err);
 		return err;
 	}
 
 	if (skb->len != sizeof(*bda)) {
-		BT_ERR("%s: Intel device address length mismatch", hdev->name);
+		bt_dev_err(hdev, "Intel device address length mismatch");
 		kfree_skb(skb);
 		return -EIO;
 	}
@@ -62,8 +48,8 @@ int btintel_check_bdaddr(struct hci_dev *hdev)
 	 * and that in turn can cause problems with Bluetooth operation.
 	 */
 	if (!bacmp(&bda->bdaddr, BDADDR_INTEL)) {
-		BT_ERR("%s: Found Intel default device address (%pMR)",
-		       hdev->name, &bda->bdaddr);
+		bt_dev_err(hdev, "Found Intel default device address (%pMR)",
+			   &bda->bdaddr);
 		set_bit(HCI_QUIRK_INVALID_BDADDR, &hdev->quirks);
 	}
 
@@ -75,7 +61,7 @@ EXPORT_SYMBOL_GPL(btintel_check_bdaddr);
 
 int btintel_enter_mfg(struct hci_dev *hdev)
 {
-	const u8 param[] = { 0x01, 0x00 };
+	static const u8 param[] = { 0x01, 0x00 };
 	struct sk_buff *skb;
 
 	skb = __hci_cmd_sync(hdev, 0xfc11, 2, param, HCI_CMD_TIMEOUT);
@@ -123,8 +109,8 @@ int btintel_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
 	skb = __hci_cmd_sync(hdev, 0xfc31, 6, bdaddr, HCI_INIT_TIMEOUT);
 	if (IS_ERR(skb)) {
 		err = PTR_ERR(skb);
-		BT_ERR("%s: Changing Intel device address failed (%d)",
-		       hdev->name, err);
+		bt_dev_err(hdev, "Changing Intel device address failed (%d)",
+			   err);
 		return err;
 	}
 	kfree_skb(skb);
@@ -154,8 +140,8 @@ int btintel_set_diag(struct hci_dev *hdev, bool enable)
 		err = PTR_ERR(skb);
 		if (err == -ENODATA)
 			goto done;
-		BT_ERR("%s: Changing Intel diagnostic mode failed (%d)",
-		       hdev->name, err);
+		bt_dev_err(hdev, "Changing Intel diagnostic mode failed (%d)",
+			   err);
 		return err;
 	}
 	kfree_skb(skb);
@@ -189,30 +175,30 @@ void btintel_hw_error(struct hci_dev *hdev, u8 code)
 	struct sk_buff *skb;
 	u8 type = 0x00;
 
-	BT_ERR("%s: Hardware error 0x%2.2x", hdev->name, code);
+	bt_dev_err(hdev, "Hardware error 0x%2.2x", code);
 
 	skb = __hci_cmd_sync(hdev, HCI_OP_RESET, 0, NULL, HCI_INIT_TIMEOUT);
 	if (IS_ERR(skb)) {
-		BT_ERR("%s: Reset after hardware error failed (%ld)",
-		       hdev->name, PTR_ERR(skb));
+		bt_dev_err(hdev, "Reset after hardware error failed (%ld)",
+			   PTR_ERR(skb));
 		return;
 	}
 	kfree_skb(skb);
 
 	skb = __hci_cmd_sync(hdev, 0xfc22, 1, &type, HCI_INIT_TIMEOUT);
 	if (IS_ERR(skb)) {
-		BT_ERR("%s: Retrieving Intel exception info failed (%ld)",
-		       hdev->name, PTR_ERR(skb));
+		bt_dev_err(hdev, "Retrieving Intel exception info failed (%ld)",
+			   PTR_ERR(skb));
 		return;
 	}
 
 	if (skb->len != 13) {
-		BT_ERR("%s: Exception info size mismatch", hdev->name);
+		bt_dev_err(hdev, "Exception info size mismatch");
 		kfree_skb(skb);
 		return;
 	}
 
-	BT_ERR("%s: Exception info %s", hdev->name, (char *)(skb->data + 1));
+	bt_dev_err(hdev, "Exception info %s", (char *)(skb->data + 1));
 
 	kfree_skb(skb);
 }
@@ -233,9 +219,10 @@ void btintel_version_info(struct hci_dev *hdev, struct intel_version *ver)
 		return;
 	}
 
-	BT_INFO("%s: %s revision %u.%u build %u week %u %u", hdev->name,
-		variant, ver->fw_revision >> 4, ver->fw_revision & 0x0f,
-		ver->fw_build_num, ver->fw_build_ww, 2000 + ver->fw_build_yy);
+	bt_dev_info(hdev, "%s revision %u.%u build %u week %u %u",
+		    variant, ver->fw_revision >> 4, ver->fw_revision & 0x0f,
+		    ver->fw_build_num, ver->fw_build_ww,
+		    2000 + ver->fw_build_yy);
 }
 EXPORT_SYMBOL_GPL(btintel_version_info);
 
@@ -311,15 +298,7 @@ EXPORT_SYMBOL_GPL(btintel_load_ddc_config);
 
 int btintel_set_event_mask(struct hci_dev *hdev, bool debug)
 {
-	/* Three events are enabled by default in the event mask as they are
-	 * used during the startup sequence of the device and debugging purpose.
-	 * The remaining events are thereby disabled by default but can be
-	 * enabled as desired. Enabled events are
-	 * 0000000000000001H HCI_Intel_Bootup ,
-	 * 0000000000000400H HCI_Intel_Fatal_Exception Event and
-	 * 0000000000000800H HCI_Intel_System_Exception Event
-	 */
-	u8 mask[8] = { 0x01, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+	u8 mask[8] = { 0x87, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 	struct sk_buff *skb;
 	int err;
 
@@ -329,8 +308,7 @@ int btintel_set_event_mask(struct hci_dev *hdev, bool debug)
 	skb = __hci_cmd_sync(hdev, 0xfc52, 8, mask, HCI_INIT_TIMEOUT);
 	if (IS_ERR(skb)) {
 		err = PTR_ERR(skb);
-		BT_ERR("%s: Setting Intel event mask failed (%d)",
-		       hdev->name, err);
+		bt_dev_err(hdev, "Setting Intel event mask failed (%d)", err);
 		return err;
 	}
 	kfree_skb(skb);
@@ -381,33 +359,6 @@ int btintel_read_version(struct hci_dev *hdev, struct intel_version *ver)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(btintel_read_version);
-
-void btintel_retry_fw_download(struct hci_dev *hdev)
-{
-	/* Send Intel Reset command. This will result in
-	 * re-enumeration of BT controller.
-	 */
-	static const u8 reset_param[] = { 0x00, 0x01, 0x00, 0x00,
-					0x00, 0x00, 0x00, 0x00 };
-	struct sk_buff *skb;
-
-	skb = __hci_cmd_sync(hdev, 0xfc01, sizeof(reset_param),
-				reset_param, HCI_INIT_TIMEOUT);
-	if (IS_ERR(skb)) {
-		bt_dev_err(hdev, "Sending Intel Reset failed (%ld)",
-				PTR_ERR(skb));
-		return;
-	}
-	bt_dev_info(hdev, "Intel reset sent to retry FW download");
-	kfree_skb(skb);
-	/* Current Intel BT controllers(ThP/JfP) hold the USB reset
-	 * lines for 2ms when it receives Intel Reset in bootloader mode.
-	 * Whereas, the upcoming Intel BT controllers will hold USB reset
-	 * for 150ms. To keep the delay generic, 150ms is chosen here.
-	 */
-	msleep(150);
-}
-EXPORT_SYMBOL_GPL(btintel_retry_fw_download);
 
 /* ------- REGMAP IBT SUPPORT ------- */
 
@@ -724,8 +675,7 @@ int btintel_download_firmware(struct hci_dev *hdev, const struct firmware *fw,
 			/* The boot parameter is the first 32-bit value
 			 * and rest of 3 octets are reserved.
 			 */
-			*boot_param = __get_unaligned_cpu32(fw_ptr + sizeof(*cmd));
-
+			*boot_param = get_unaligned_le32(fw_ptr + sizeof(*cmd));
 
 			bt_dev_dbg(hdev, "boot_param=0x%x", *boot_param);
 		}
@@ -804,68 +754,11 @@ void btintel_reset_to_bootloader(struct hci_dev *hdev)
 }
 EXPORT_SYMBOL_GPL(btintel_reset_to_bootloader);
 
-int btintel_read_debug_features(struct hci_dev *hdev,
-				struct intel_debug_features *features)
-{
-	struct sk_buff *skb;
-	u8 page_no = 1;
-
-	/* Intel controller supports two pages, each page is of 128-bit
-	 * feature bit mask. And each bit defines specific feature support
-	 */
-	skb = __hci_cmd_sync(hdev, 0xfca6, sizeof(page_no), &page_no,
-			     HCI_INIT_TIMEOUT);
-	if (IS_ERR(skb)) {
-		bt_dev_err(hdev, "Reading supported features failed (%ld)",
-			   PTR_ERR(skb));
-		return PTR_ERR(skb);
-	}
-
-	if (skb->len != (sizeof(features->page1) + 3)) {
-		bt_dev_err(hdev, "Supported features event size mismatch");
-		kfree_skb(skb);
-		return -EILSEQ;
-	}
-
-	memcpy(features->page1, skb->data + 3, sizeof(features->page1));
-
-	/* Read the supported features page2 if required in future.
-	 */
-	kfree_skb(skb);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(btintel_read_debug_features);
-
-int btintel_set_debug_features(struct hci_dev *hdev,
-			       const struct intel_debug_features *features)
-{
-	u8 mask[11] = { 0x0a, 0x92, 0x02, 0x07, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, 0x00 };
-	struct sk_buff *skb;
-
-	if (!features)
-		return -EINVAL;
-
-	if (!(features->page1[0] & 0x3f)) {
-		bt_dev_info(hdev, "Telemetry exception format not supported");
-		return 0;
-	}
-
-	skb = __hci_cmd_sync(hdev, 0xfc8b, 11, mask, HCI_INIT_TIMEOUT);
-	if (IS_ERR(skb)) {
-		bt_dev_err(hdev, "Setting Intel telemetry ddc write event mask failed (%ld)",
-			   PTR_ERR(skb));
-		return PTR_ERR(skb);
-	}
-
-	kfree_skb(skb);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(btintel_set_debug_features);
-
 MODULE_AUTHOR("Marcel Holtmann <marcel@holtmann.org>");
 MODULE_DESCRIPTION("Bluetooth support for Intel devices ver " VERSION);
 MODULE_VERSION(VERSION);
 MODULE_LICENSE("GPL");
 MODULE_FIRMWARE("intel/ibt-11-5.sfi");
 MODULE_FIRMWARE("intel/ibt-11-5.ddc");
+MODULE_FIRMWARE("intel/ibt-12-16.sfi");
+MODULE_FIRMWARE("intel/ibt-12-16.ddc");

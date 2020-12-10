@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/dma-buf/sync_file.c
  *
  * Copyright (C) 2012 Google, Inc.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/export.h>
@@ -65,9 +56,10 @@ static void fence_check_cb_func(struct dma_fence *f, struct dma_fence_cb *cb)
  * sync_file_create() - creates a sync file
  * @fence:	fence to add to the sync_fence
  *
- * Creates a sync_file containg @fence. Once this is called, the sync_file
- * takes ownership of @fence. The sync_file can be released with
- * fput(sync_file->file). Returns the sync_file or NULL in case of error.
+ * Creates a sync_file containg @fence. This function acquires and additional
+ * reference of @fence for the newly-created &sync_file, if it succeeds. The
+ * sync_file can be released with fput(sync_file->file). Returns the
+ * sync_file or NULL in case of error.
  */
 struct sync_file *sync_file_create(struct dma_fence *fence)
 {
@@ -83,13 +75,6 @@ struct sync_file *sync_file_create(struct dma_fence *fence)
 }
 EXPORT_SYMBOL(sync_file_create);
 
-/**
- * sync_file_fdget() - get a sync_file from an fd
- * @fd:		fd referencing a fence
- *
- * Ensures @fd references a valid sync_file, increments the refcount of the
- * backing file. Returns the sync_file or NULL in case of error.
- */
 static struct sync_file *sync_file_fdget(int fd)
 {
 	struct file *file = fget(fd);
@@ -150,7 +135,7 @@ char *sync_file_get_name(struct sync_file *sync_file, char *buf, int len)
 	} else {
 		struct dma_fence *fence = sync_file->fence;
 
-		snprintf(buf, len, "%s-%s%llu-%d",
+		snprintf(buf, len, "%s-%s%llu-%lld",
 			 fence->ops->get_driver_name(fence),
 			 fence->ops->get_timeline_name(fence),
 			 fence->context,
@@ -264,7 +249,8 @@ static struct sync_file *sync_file_merge(const char *name, struct sync_file *a,
 
 			i_b++;
 		} else {
-			if (pt_a->seqno - pt_b->seqno <= INT_MAX)
+			if (__dma_fence_is_later(pt_a->seqno, pt_b->seqno,
+						 pt_a->ops))
 				add_fence(fences, &i, pt_a);
 			else
 				add_fence(fences, &i, pt_b);
@@ -318,7 +304,7 @@ static int sync_file_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static unsigned int sync_file_poll(struct file *file, poll_table *wait)
+static __poll_t sync_file_poll(struct file *file, poll_table *wait)
 {
 	struct sync_file *sync_file = file->private_data;
 
@@ -331,7 +317,7 @@ static unsigned int sync_file_poll(struct file *file, poll_table *wait)
 			wake_up_all(&sync_file->wq);
 	}
 
-	return dma_fence_is_signaled(sync_file->fence) ? POLLIN : 0;
+	return dma_fence_is_signaled(sync_file->fence) ? EPOLLIN : 0;
 }
 
 static long sync_file_ioctl_merge(struct sync_file *sync_file,
@@ -402,8 +388,9 @@ static int sync_fill_fence_info(struct dma_fence *fence,
 	       !test_bit(DMA_FENCE_FLAG_TIMESTAMP_BIT, &fence->flags))
 		cpu_relax();
 	info->timestamp_ns =
-		ktime_to_ns(test_bit(DMA_FENCE_FLAG_TIMESTAMP_BIT, &fence->flags) ?
-			fence->timestamp : ktime_set(0, 0));
+		test_bit(DMA_FENCE_FLAG_TIMESTAMP_BIT, &fence->flags) ?
+		ktime_to_ns(fence->timestamp) :
+		ktime_set(0, 0);
 
 	return info->status;
 }
@@ -432,7 +419,7 @@ static long sync_file_ioctl_fence_info(struct sync_file *sync_file,
 	 * info->num_fences.
 	 */
 	if (!info.num_fences) {
-		info.status = dma_fence_is_signaled(sync_file->fence);
+		info.status = dma_fence_get_status(sync_file->fence);
 		goto no_fences;
 	} else {
 		info.status = 1;

@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat
- * Copyright (c) 2015 - 2017 DisplayLink (UK) Ltd.
+ * Copyright (c) 2015 - 2020 DisplayLink (UK) Ltd.
  *
  * Based on parts on udlfb.c:
  * Copyright (C) 2009 its respective authors
@@ -14,6 +15,7 @@
 #include <drm/drm_crtc.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_crtc_helper.h>
+#include <drm/drm_probe_helper.h>
 #include <drm/drm_atomic_helper.h>
 #include "evdi_drv.h"
 
@@ -31,11 +33,11 @@ static int evdi_get_modes(struct drm_connector *connector)
 	edid = (struct edid *)evdi_painter_get_edid_copy(evdi);
 
 	if (!edid) {
-		drm_mode_connector_update_edid_property(connector, NULL);
+		drm_connector_update_edid_property(connector, NULL);
 		return 0;
 	}
 
-	ret = drm_mode_connector_update_edid_property(connector, edid);
+	ret = drm_connector_update_edid_property(connector, edid);
 	if (!ret)
 		ret = drm_add_edid_modes(connector, edid);
 	else
@@ -73,12 +75,10 @@ evdi_detect(struct drm_connector *connector, __always_unused bool force)
 
 	EVDI_CHECKPT();
 	if (evdi_painter_is_connected(evdi)) {
-		EVDI_DEBUG("(dev=%d) poll connector state: connected\n",
-			   evdi->dev_index);
+		EVDI_DEBUG("(dev=%d) Painter is connected\n", evdi->dev_index);
 		return connector_status_connected;
 	}
-	EVDI_DEBUG("(dev=%d) poll connector state: disconnected\n",
-		   evdi->dev_index);
+	EVDI_DEBUG("(dev=%d) Painter is disconnected\n", evdi->dev_index);
 	return connector_status_disconnected;
 }
 
@@ -89,23 +89,15 @@ static void evdi_connector_destroy(struct drm_connector *connector)
 	kfree(connector);
 }
 
-static struct drm_encoder *evdi_best_encoder(struct drm_connector *connector)
-{
-	return drm_encoder_find(connector->dev, connector->encoder_ids[0]);
-}
-
 static struct drm_connector_helper_funcs evdi_connector_helper_funcs = {
 	.get_modes = evdi_get_modes,
 	.mode_valid = evdi_mode_valid,
-	.best_encoder = evdi_best_encoder
 };
 
 static const struct drm_connector_funcs evdi_connector_funcs = {
-	.dpms = drm_atomic_helper_connector_dpms,
 	.detect = evdi_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.destroy = evdi_connector_destroy,
-	.set_property = drm_atomic_helper_connector_set_property,
 	.reset = drm_atomic_helper_connector_reset,
 	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state
@@ -114,6 +106,7 @@ static const struct drm_connector_funcs evdi_connector_funcs = {
 int evdi_connector_init(struct drm_device *dev, struct drm_encoder *encoder)
 {
 	struct drm_connector *connector;
+	struct evdi_device *evdi = dev->dev_private;
 
 	connector = kzalloc(sizeof(struct drm_connector), GFP_KERNEL);
 	if (!connector)
@@ -126,10 +119,10 @@ int evdi_connector_init(struct drm_device *dev, struct drm_encoder *encoder)
 	connector->polled = DRM_CONNECTOR_POLL_HPD;
 
 	drm_connector_register(connector);
-	drm_mode_connector_attach_encoder(connector, encoder);
 
-	drm_object_attach_property(&connector->base,
-				   dev->mode_config.dirty_info_property, 1);
+	evdi->conn = connector;
+
+	drm_connector_attach_encoder(connector, encoder);
 
 	return 0;
 }

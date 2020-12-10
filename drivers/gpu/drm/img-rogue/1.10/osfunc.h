@@ -1505,7 +1505,7 @@ void OSWRLockReleaseWrite(POSWR_LOCK psLock);
 /* For now, spin-locks are required on Linux only, so other platforms fake
  * spinlocks with normal mutex locks */
 #define POS_SPINLOCK POS_LOCK
-#define OSSpinLockCreate(ppLock) OSLockCreate(ppLock, LOCK_TYPE_PASSIVE)
+#define OSSpinLockCreate(ppLock) OSLockCreate(ppLock)
 #define OSSpinLockDestroy(pLock) OSLockDestroy(pLock)
 #define OSSpinLockAcquire(pLock, pFlags) {PVR_UNREFERENCED_PARAMETER(pFlags); OSLockAcquire(pLock);}
 #define OSSpinLockRelease(pLock, flags) {PVR_UNREFERENCED_PARAMETER(flags); OSLockRelease(pLock);}

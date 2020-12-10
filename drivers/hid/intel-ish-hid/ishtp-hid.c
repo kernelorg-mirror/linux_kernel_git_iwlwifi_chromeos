@@ -1,21 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ISHTP-HID glue driver.
  *
  * Copyright (c) 2012-2016, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  */
 
 #include <linux/hid.h>
+#include <linux/intel-ish-client-if.h>
 #include <uapi/linux/input.h>
-#include "ishtp/client.h"
 #include "ishtp-hid.h"
 
 /**
@@ -153,7 +145,6 @@ static void ishtp_hid_request(struct hid_device *hid, struct hid_report *rep,
 static int ishtp_wait_for_response(struct hid_device *hid)
 {
 	struct ishtp_hid_data *hid_data =  hid->driver_data;
-	struct ishtp_cl_data *client_data = hid_data->client_data;
 	int rv;
 
 	hid_ishtp_trace(client_data,  "%s hid %p\n", __func__, hid);
@@ -241,7 +232,8 @@ int ishtp_hid_probe(unsigned int cur_hid_dev,
 
 	hid->ll_driver = &ishtp_hid_ll_driver;
 	hid->bus = BUS_INTEL_ISHTP;
-	hid->dev.parent = &client_data->cl_device->dev;
+	hid->dev.parent = ishtp_device(client_data->cl_device);
+
 	hid->version = le16_to_cpu(ISH_HID_VERSION);
 	hid->vendor = le16_to_cpu(client_data->hid_devices[cur_hid_dev].vid);
 	hid->product = le16_to_cpu(client_data->hid_devices[cur_hid_dev].pid);

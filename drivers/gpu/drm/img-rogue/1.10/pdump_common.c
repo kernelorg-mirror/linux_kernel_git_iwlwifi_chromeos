@@ -195,7 +195,7 @@ static PVRSRV_ERROR PDumpCtrlInit(IMG_UINT32 ui32InitCapMode)
 	/* Create lock for PDUMP_CTRL_STATE struct, which is shared between pdump client
 	   and PDumping app. This lock will help us serialize calls from pdump client
 	   and PDumping app */
-	PVR_LOGR_IF_ERROR(OSLockCreate(&g_PDumpCtrl.hLock, LOCK_TYPE_PASSIVE), "OSLockCreate");
+	PVR_LOGR_IF_ERROR(OSLockCreate(&g_PDumpCtrl.hLock), "OSLockCreate");
 
 	return PVRSRV_OK;
 }
@@ -4037,7 +4037,7 @@ PVRSRV_ERROR PDumpRegisterConnection(SYNC_CONNECTION_DATA *psSyncConnectionData,
 		goto fail_alloc;
 	}
 
-	eError = OSLockCreate(&psPDumpConnectionData->hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psPDumpConnectionData->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto fail_lockcreate;

@@ -355,33 +355,4 @@ IMG_BOOL RGXHWPerfHostIsEventEnabled(PVRSRV_RGXDEV_INFO *psRgxDevInfo, RGX_HWPER
 
 #endif
 
-
-/******************************************************************************
- * RGX HW Performance To FTrace Profiling API(s)
- *****************************************************************************/
-
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-
-PVRSRV_ERROR RGXHWPerfFTraceGPUInitSupport(void);
-void RGXHWPerfFTraceGPUDeInitSupport(void);
-
-PVRSRV_ERROR RGXHWPerfFTraceGPUInitDevice(PVRSRV_DEVICE_NODE *psDeviceNode);
-void RGXHWPerfFTraceGPUDeInitDevice(PVRSRV_DEVICE_NODE *psDeviceNode);
-
-void RGXHWPerfFTraceGPUEnqueueEvent(PVRSRV_RGXDEV_INFO *psDevInfo,
-		IMG_UINT32 ui32ExternalJobRef, IMG_UINT32 ui32InternalJobRef,
-		RGX_HWPERF_KICK_TYPE eKickType);
-
-PVRSRV_ERROR RGXHWPerfFTraceGPUEventsEnabledSet(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_BOOL bNewValue);
-
-void RGXHWPerfFTraceGPUThread(void *pvData);
-
-#endif
-
-/******************************************************************************
- * RGX HW utils functions
- *****************************************************************************/
-
-const IMG_CHAR *RGXHWPerfKickTypeToStr(RGX_HWPERF_KICK_TYPE eKickType);
-
 #endif /* RGXHWPERF_H_ */

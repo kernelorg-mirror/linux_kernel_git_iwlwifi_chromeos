@@ -10,8 +10,8 @@
 #include <linux/iio/iio.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/mfd/cros_ec.h>
-#include <linux/mfd/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_proto.h>
 #include <linux/platform_data/cros_ec_sensorhub.h>
 #include <linux/platform_device.h>
 #include <linux/sort.h>
@@ -431,8 +431,8 @@ static bool
 cros_ec_sensor_ring_process_event(struct cros_ec_sensorhub *sensorhub,
 				const struct ec_response_motion_sense_fifo_info
 				*fifo_info,
-				const s64 fifo_timestamp,
-				s64 *current_timestamp,
+				const ktime_t fifo_timestamp,
+				ktime_t *current_timestamp,
 				struct ec_response_motion_sensor_data *in,
 				struct cros_ec_sensors_ring_sample *out)
 {
@@ -826,7 +826,7 @@ static void cros_ec_sensorhub_ring_handler(struct cros_ec_sensorhub *sensorhub)
 	struct ec_response_motion_sense_fifo_info *fifo_info =
 		sensorhub->fifo_info;
 	struct cros_ec_dev *ec = sensorhub->ec;
-	s64 fifo_timestamp, current_timestamp;
+	ktime_t fifo_timestamp, current_timestamp;
 	int i, j, number_data, ret;
 	unsigned long sensor_mask = 0;
 	struct ec_response_motion_sensor_data *in;

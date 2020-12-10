@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Persistent Storage - pstore.h
  *
@@ -5,19 +6,6 @@
  *
  * This code is the generic layer to export data records from platform
  * level persistent storage via a file system.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #ifndef _LINUX_PSTORE_H
 #define _LINUX_PSTORE_H
@@ -26,26 +14,37 @@
 #include <linux/errno.h>
 #include <linux/kmsg_dump.h>
 #include <linux/mutex.h>
-#include <linux/spinlock.h>
+#include <linux/semaphore.h>
 #include <linux/time.h>
 #include <linux/types.h>
 
 struct module;
 
-/* pstore record types (see fs/pstore/inode.c for filename templates) */
+/*
+ * pstore record types (see fs/pstore/platform.c for pstore_type_names[])
+ * These values may be written to storage (see EFI vars backend), so
+ * they are kind of an ABI. Be careful changing the mappings.
+ */
 enum pstore_type_id {
+	/* Frontend storage types */
 	PSTORE_TYPE_DMESG	= 0,
 	PSTORE_TYPE_MCE		= 1,
 	PSTORE_TYPE_CONSOLE	= 2,
 	PSTORE_TYPE_FTRACE	= 3,
-	/* PPC64 partition types */
+
+	/* PPC64-specific partition types */
 	PSTORE_TYPE_PPC_RTAS	= 4,
 	PSTORE_TYPE_PPC_OF	= 5,
 	PSTORE_TYPE_PPC_COMMON	= 6,
 	PSTORE_TYPE_PMSG	= 7,
 	PSTORE_TYPE_PPC_OPAL	= 8,
-	PSTORE_TYPE_UNKNOWN	= 255
+
+	/* End of the list */
+	PSTORE_TYPE_MAX
 };
+
+const char *pstore_type_to_name(enum pstore_type_id type);
+enum pstore_type_id pstore_name_to_type(const char *name);
 
 struct pstore_info;
 /**
@@ -54,34 +53,46 @@ struct pstore_info;
  * @type:	pstore record type
  * @id:		per-type unique identifier for record
  * @time:	timestamp of the record
- * @count:	for PSTORE_TYPE_DMESG, the Oops count.
- * @compressed:	for PSTORE_TYPE_DMESG, whether the buffer is compressed
  * @buf:	pointer to record contents
  * @size:	size of @buf
  * @ecc_notice_size:
  *		ECC information for @buf
+ *
+ * Valid for PSTORE_TYPE_DMESG @type:
+ *
+ * @count:	Oops count since boot
+ * @reason:	kdump reason for notification
+ * @part:	position in a multipart record
+ * @compressed:	whether the buffer is compressed
+ *
  */
 struct pstore_record {
 	struct pstore_info	*psi;
 	enum pstore_type_id	type;
 	u64			id;
-	struct timespec		time;
-	int			count;
-	bool			compressed;
+	struct timespec64	time;
 	char			*buf;
 	ssize_t			size;
 	ssize_t			ecc_notice_size;
+
+	int			count;
+	enum kmsg_dump_reason	reason;
+	unsigned int		part;
+	bool			compressed;
 };
 
 /**
  * struct pstore_info - backend pstore driver structure
  *
- * @owner:	module which is repsonsible for this backend driver
+ * @owner:	module which is responsible for this backend driver
  * @name:	name of the backend driver
  *
- * @buf_lock:	spinlock to serialize access to @buf
+ * @buf_lock:	semaphore to serialize access to @buf
  * @buf:	preallocated crash dump buffer
- * @bufsize:	size of @buf available for crash dump writes
+ * @bufsize:	size of @buf available for crash dump bytes (must match
+ *		smallest number of bytes available for writing to a
+ *		backend entry, since compressed bytes don't take kindly
+ *		to being truncated)
  *
  * @read_mutex:	serializes @open, @read, @close, and @erase callbacks
  * @flags:	bitfield of frontends the backend can accept writes for
@@ -121,68 +132,38 @@ struct pstore_record {
  *	available, or negative on error.
  *
  * @write:
- *	Perform a frontend notification of a write to a backend record. The
- *	data to be stored has already been written to the registered @buf
- *	of the @psi structure.
+ *	A newly generated record needs to be written to backend storage.
  *
- *	@type:	in: pstore record type to write
- *	@reason:
- *		in: pstore write reason
- *	@id:	out: unique identifier for the record
- *	@part:	in: position in a multipart write
- *	@count:	in: increasing from 0 since boot, the number of this Oops
- *	@compressed:
- *		in: if the record is compressed
- *	@size:	in: size of the write
- *	@psi:	in: pointer to the struct pstore_info for the backend
+ *	@record:
+ *		pointer to record metadata. When @type is PSTORE_TYPE_DMESG,
+ *		@buf will be pointing to the preallocated @psi.buf, since
+ *		memory allocation may be broken during an Oops. Regardless,
+ *		@buf must be proccesed or copied before returning. The
+ *		backend is also expected to write @id with something that
+ *		can help identify this record to a future @erase callback.
+ *		The @time field will be prepopulated with the current time,
+ *		when available. The @size field will have the size of data
+ *		in @buf.
  *
  *	Returns 0 on success, and non-zero on error.
  *
- * @write_buf:
+ * @write_user:
  *	Perform a frontend write to a backend record, using a specified
- *	buffer. Unlike @write, this does not use the @psi @buf.
+ *	buffer that is coming directly from userspace, instead of the
+ *	@record @buf.
  *
- *	@type:	in: pstore record type to write
- *	@reason:
- *		in: pstore write reason
- *	@id:	out: unique identifier for the record
- *	@part:	in: position in a multipart write
- *	@buf:	in: pointer to contents to write to backend record
- *	@compressed:
- *		in: if the record is compressed
- *	@size:	in: size of the write
- *	@psi:	in: pointer to the struct pstore_info for the backend
- *
- *	Returns 0 on success, and non-zero on error.
- *
- * @write_buf_user:
- *	Perform a frontend write to a backend record, using a specified
- *	buffer that is coming directly from userspace.
- *
- *	@type:	in: pstore record type to write
- *	@reason:
- *		in: pstore write reason
- *	@id:	out: unique identifier for the record
- *	@part:	in: position in a multipart write
- *	@buf:	in: pointer to userspace contents to write to backend record
- *	@compressed:
- *		in: if the record is compressed
- *	@size:	in: size of the write
- *	@psi:	in: pointer to the struct pstore_info for the backend
+ *	@record:	pointer to record metadata.
+ *	@buf:		pointer to userspace contents to write to backend
  *
  *	Returns 0 on success, and non-zero on error.
  *
  * @erase:
  *	Delete a record from backend storage.  Different backends
- *	identify records differently, so all possible methods of
- *	identification are included to help the backend locate the
- *	record to remove.
+ *	identify records differently, so entire original record is
+ *	passed back to assist in identification of what the backend
+ *	should remove from storage.
  *
- *	@type:	in: pstore record type to write
- *	@id:	in: per-type unique identifier for the record
- *	@count:	in: Oops count
- *	@time:	in: timestamp for the record
- *	@psi:	in: pointer to the struct pstore_info for the backend
+ *	@record:	pointer to record metadata.
  *
  *	Returns 0 on success, and non-zero on error.
  *
@@ -191,7 +172,7 @@ struct pstore_info {
 	struct module	*owner;
 	char		*name;
 
-	spinlock_t	buf_lock;
+	struct semaphore buf_lock;
 	char		*buf;
 	size_t		bufsize;
 
@@ -203,32 +184,20 @@ struct pstore_info {
 	int		(*open)(struct pstore_info *psi);
 	int		(*close)(struct pstore_info *psi);
 	ssize_t		(*read)(struct pstore_record *record);
-	int		(*write)(enum pstore_type_id type,
-			enum kmsg_dump_reason reason, u64 *id,
-			unsigned int part, int count, bool compressed,
-			size_t size, struct pstore_info *psi);
-	int		(*write_buf)(enum pstore_type_id type,
-			enum kmsg_dump_reason reason, u64 *id,
-			unsigned int part, const char *buf, bool compressed,
-			size_t size, struct pstore_info *psi);
-	int		(*write_buf_user)(enum pstore_type_id type,
-			enum kmsg_dump_reason reason, u64 *id,
-			unsigned int part, const char __user *buf,
-			bool compressed, size_t size, struct pstore_info *psi);
-	int		(*erase)(enum pstore_type_id type, u64 id,
-			int count, struct timespec time,
-			struct pstore_info *psi);
+	int		(*write)(struct pstore_record *record);
+	int		(*write_user)(struct pstore_record *record,
+				      const char __user *buf);
+	int		(*erase)(struct pstore_record *record);
 };
 
 /* Supported frontends */
-#define PSTORE_FLAGS_DMESG	(1 << 0)
-#define PSTORE_FLAGS_CONSOLE	(1 << 1)
-#define PSTORE_FLAGS_FTRACE	(1 << 2)
-#define PSTORE_FLAGS_PMSG	(1 << 3)
+#define PSTORE_FLAGS_DMESG	BIT(0)
+#define PSTORE_FLAGS_CONSOLE	BIT(1)
+#define PSTORE_FLAGS_FTRACE	BIT(2)
+#define PSTORE_FLAGS_PMSG	BIT(3)
 
 extern int pstore_register(struct pstore_info *);
 extern void pstore_unregister(struct pstore_info *);
-extern bool pstore_cannot_block_path(enum kmsg_dump_reason reason);
 
 struct pstore_ftrace_record {
 	unsigned long ip;

@@ -133,7 +133,6 @@ struct imgu_device {
 	struct v4l2_device v4l2_dev;
 	struct media_device media_dev;
 	struct v4l2_file_operations v4l2_file_ops;
-	void *vb2_alloc_ctx;
 
 	/* MMU driver for css */
 	struct imgu_mmu_info *mmu;
@@ -147,6 +146,10 @@ struct imgu_device {
 	 * vid_buf.list and css->queue
 	 */
 	struct mutex lock;
+
+	/* Lock to protect writes to streaming flag in this struct */
+	struct mutex streaming_lock;
+
 	/* Forbid streaming and buffer queuing during system suspend. */
 	atomic_t qbuf_barrier;
 	/* Indicate if system suspend take place while imgu is streaming. */

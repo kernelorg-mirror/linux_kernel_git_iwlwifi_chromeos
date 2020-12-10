@@ -24,7 +24,6 @@
 #include <linux/init.h>
 #include <linux/of.h>
 #include <linux/pid_namespace.h>
-#include <linux/platform_device.h>
 #include <linux/printk.h>
 #include <linux/sched.h>
 
@@ -215,7 +214,6 @@ static int gasket_alloc_dev(struct gasket_internal_desc *internal_desc,
 	gasket_dev->dev_idx = dev_idx;
 	snprintf(gasket_dev->kobj_name, GASKET_NAME_MAX, "%s", parent_name);
 	gasket_dev->dev = get_device(parent);
-	gasket_dev->dma_dev = get_device(parent);
 	/* gasket_bar_data is uninitialized. */
 	gasket_dev->num_page_tables = driver_desc->num_page_tables;
 	/* max_page_table_size and *page table are uninit'ed */
@@ -248,7 +246,6 @@ static void gasket_free_dev(struct gasket_dev *gasket_dev)
 	internal_desc->devs[gasket_dev->dev_idx] = NULL;
 	mutex_unlock(&internal_desc->mutex);
 	put_device(gasket_dev->dev);
-	put_device(gasket_dev->dma_dev);
 	kfree(gasket_dev);
 }
 
@@ -631,7 +628,6 @@ void gasket_disable_device(struct gasket_dev *gasket_dev)
 		gasket_dev->internal_desc->driver_desc;
 	int i;
 
-	dev_dbg(gasket_dev->dev, "disabling device\n");
 	/* Only delete the device if it has been successfully added. */
 	if (gasket_dev->dev_info.cdev_added)
 		cdev_del(&gasket_dev->dev_info.cdev);
@@ -665,25 +661,6 @@ lookup_pci_internal_desc(struct pci_dev *pci_dev)
 		if (g_descs[i].driver_desc &&
 		    g_descs[i].driver_desc->pci_id_table &&
 		    pci_match_id(g_descs[i].driver_desc->pci_id_table, pci_dev))
-			return &g_descs[i];
-	}
-
-	return NULL;
-}
-
-/*
- * Registered driver descriptor lookup for platform devices.
- * Caller must hold g_mutex.
- */
-static struct gasket_internal_desc *
-lookup_platform_internal_desc(struct platform_device *pdev)
-{
-	int i;
-
-	__must_hold(&g_mutex);
-	for (i = 0; i < GASKET_FRAMEWORK_DESC_MAX; i++) {
-		if (g_descs[i].driver_desc &&
-		    strcmp(g_descs[i].driver_desc->name, pdev->name) == 0)
 			return &g_descs[i];
 	}
 
@@ -725,8 +702,7 @@ static bool gasket_mmap_has_permissions(struct gasket_dev *gasket_dev,
 	if ((vma->vm_flags & VM_WRITE) &&
 	    !gasket_owned_by_current_tgid(&gasket_dev->dev_info)) {
 		dev_dbg(gasket_dev->dev,
-			"Attempting to mmap a region for write without owning "
-			"device.\n");
+			"Attempting to mmap a region for write without owning device.\n");
 		return false;
 	}
 
@@ -950,6 +926,10 @@ do_map_region(const struct gasket_dev *gasket_dev, struct vm_area_struct *vma,
 		gasket_get_bar_index(gasket_dev,
 				     (vma->vm_pgoff << PAGE_SHIFT) +
 				     driver_desc->legacy_mmap_address_offset);
+
+	if (bar_index < 0)
+		return DO_MAP_REGION_INVALID;
+
 	phys_base = gasket_dev->bar_data[bar_index].phys_base + phys_offset;
 	while (mapped_bytes < map_length) {
 		/*
@@ -1009,14 +989,13 @@ static int gasket_mmap_coherent(struct gasket_dev *gasket_dev,
 	}
 
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	vma->vm_pgoff = 0;
-	ret = dma_mmap_coherent(gasket_dev->dma_dev, vma,
-				gasket_dev->coherent_buffer.virt_base,
-				gasket_dev->coherent_buffer.phys_base,
-				requested_length);
+
+	ret = remap_pfn_range(vma, vma->vm_start,
+			      (gasket_dev->coherent_buffer.phys_base) >>
+			      PAGE_SHIFT, requested_length, vma->vm_page_prot);
 	if (ret) {
-		dev_err(gasket_dev->dev,
-			"Error mmapping coherent buffer err=%d.\n", ret);
+		dev_err(gasket_dev->dev, "Error remapping PFN range err=%d.\n",
+			ret);
 		trace_gasket_mmap_exit(ret);
 		return ret;
 	}
@@ -1078,8 +1057,7 @@ static int gasket_mmap(struct file *filp, struct vm_area_struct *vma)
 	}
 	if (bar_index > 0 && is_coherent_region) {
 		dev_err(gasket_dev->dev,
-			"double matching bar and coherent buffers for address "
-			"0x%lx\n",
+			"double matching bar and coherent buffers for address 0x%lx\n",
 			raw_offset);
 		trace_gasket_mmap_exit(bar_index);
 		return -EINVAL;
@@ -1376,7 +1354,6 @@ int gasket_enable_device(struct gasket_dev *gasket_dev)
 	const struct gasket_driver_desc *driver_desc =
 		gasket_dev->internal_desc->driver_desc;
 
-	dev_dbg(gasket_dev->dev, "enabling device\n");
 	ret = gasket_interrupt_init(gasket_dev);
 	if (ret) {
 		dev_err(gasket_dev->dev,
@@ -1578,80 +1555,6 @@ void gasket_pci_remove_device(struct pci_dev *pci_dev)
 	__gasket_remove_device(internal_desc, gasket_dev);
 }
 EXPORT_SYMBOL(gasket_pci_remove_device);
-
-/* Add platform gasket device. Called by Gasket device probe function. */
-int gasket_platform_add_device(struct platform_device *pdev,
-			       struct gasket_dev **gasket_devp)
-{
-	int ret;
-	struct gasket_internal_desc *internal_desc;
-	struct gasket_dev *gasket_dev;
-	struct device *parent;
-
-	dev_dbg(&pdev->dev, "add platform gasket device\n");
-
-	mutex_lock(&g_mutex);
-	internal_desc = lookup_platform_internal_desc(pdev);
-	mutex_unlock(&g_mutex);
-	if (!internal_desc) {
-		dev_err(&pdev->dev,
-			"%s called for unknown driver type\n", __func__);
-		return -ENODEV;
-	}
-
-	parent = &pdev->dev;
-	ret = __gasket_add_device(parent, internal_desc, &gasket_dev);
-	if (ret)
-		return ret;
-
-	gasket_dev->platform_dev = pdev;
-	*gasket_devp = gasket_dev;
-	return 0;
-}
-EXPORT_SYMBOL(gasket_platform_add_device);
-
-/* Remove a platform gasket device. */
-void gasket_platform_remove_device(struct platform_device *pdev)
-{
-	int i;
-	struct gasket_internal_desc *internal_desc;
-	struct gasket_dev *gasket_dev = NULL;
-
-	/* Find the device desc. */
-	mutex_lock(&g_mutex);
-	internal_desc = lookup_platform_internal_desc(pdev);
-	mutex_unlock(&g_mutex);
-	if (!internal_desc)
-		return;
-
-	/* Now find the specific device */
-	mutex_lock(&internal_desc->mutex);
-	for (i = 0; i < GASKET_DEV_MAX; i++) {
-		if (internal_desc->devs[i] &&
-		    internal_desc->devs[i]->platform_dev == pdev) {
-			gasket_dev = internal_desc->devs[i];
-			break;
-		}
-	}
-	mutex_unlock(&internal_desc->mutex);
-
-	if (!gasket_dev)
-		return;
-
-	dev_dbg(gasket_dev->dev, "remove %s platform gasket device\n",
-		internal_desc->driver_desc->name);
-
-	__gasket_remove_device(internal_desc, gasket_dev);
-}
-EXPORT_SYMBOL(gasket_platform_remove_device);
-
-void gasket_set_dma_device(struct gasket_dev *gasket_dev,
-			   struct device *dma_dev)
-{
-	put_device(gasket_dev->dma_dev);
-	gasket_dev->dma_dev = get_device(dma_dev);
-}
-EXPORT_SYMBOL(gasket_set_dma_device);
 
 /**
  * Lookup a name by number in a num_name table.
@@ -1909,12 +1812,8 @@ static int __init gasket_init(void)
 	return 0;
 }
 
-static void __exit gasket_exit(void)
-{
-}
 MODULE_DESCRIPTION("Google Gasket driver framework");
 MODULE_VERSION(GASKET_FRAMEWORK_VERSION);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Rob Springer <rspringer@google.com>");
 module_init(gasket_init);
-module_exit(gasket_exit);

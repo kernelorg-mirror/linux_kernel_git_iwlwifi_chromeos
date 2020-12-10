@@ -39,36 +39,37 @@
 
 static void chromeos_invalidate_kernel_endio(struct bio *bio)
 {
-	if (bio->bi_error) {
-		DMERR("%s: bio operation failed (error=0x%x)", __func__,
-		      bio->bi_error);
+	if (bio->bi_status) {
+		DMERR("%s: bio operation failed (status=0x%x)", __func__,
+		      bio->bi_status);
 		chromeos_set_need_recovery();
 	}
-
 	complete(bio->bi_private);
 }
 
 static int chromeos_invalidate_kernel_submit(struct bio *bio,
 					     struct block_device *bdev,
-					     int rw, struct page *page)
+					     unsigned int op,
+					     unsigned int op_flags,
+					     struct page *page)
 {
 	DECLARE_COMPLETION_ONSTACK(wait);
 
 	bio->bi_private = &wait;
 	bio->bi_end_io = chromeos_invalidate_kernel_endio;
-	bio->bi_bdev = bdev;
+	bio_set_dev(bio, bdev);
 
 	bio->bi_iter.bi_sector = 0;
 	bio->bi_vcnt = 1;
 	bio->bi_iter.bi_idx = 0;
 	bio->bi_iter.bi_size = 512;
 	bio->bi_iter.bi_bvec_done = 0;
-	bio->bi_rw = rw;
+	bio_set_op_attrs(bio, op, op_flags);
 	bio->bi_io_vec[0].bv_page = page;
 	bio->bi_io_vec[0].bv_len = 512;
 	bio->bi_io_vec[0].bv_offset = 0;
 
-	submit_bio(rw, bio);
+	submit_bio(bio);
 	/* Wait up to 2 seconds for completion or fail. */
 	if (!wait_for_completion_timeout(&wait, msecs_to_jiffies(2000)))
 		return -1;
@@ -128,10 +129,6 @@ static int chromeos_invalidate_kernel_bio(struct block_device *root_bdev)
 	struct page *page;
 	dev_t devt;
 	fmode_t dev_mode;
-	/* Ensure we do synchronous unblocked I/O. We may also need
-	 * sync_bdev() on completion, but it really shouldn't.
-	 */
-	int rw;
 
 	devt = get_boot_dev();
 	if (!devt) {
@@ -164,12 +161,14 @@ static int chromeos_invalidate_kernel_bio(struct block_device *root_bdev)
 	}
 
 	/*
-	 * Request read operation with REQ_FLUSH flag to ensure that the
+	 * Request read operation with REQ_PREFLUSH flag to ensure that the
 	 * cache of non-volatile storage device has been flushed before read is
 	 * started.
 	 */
-	rw = REQ_SYNC | REQ_NOIDLE | REQ_FLUSH;
-	if (chromeos_invalidate_kernel_submit(bio, bdev, rw, page)) {
+	if (chromeos_invalidate_kernel_submit(bio, bdev,
+					      REQ_OP_READ,
+					      REQ_SYNC | REQ_PREFLUSH,
+					      page)) {
 		ret = -1;
 		goto failed_to_submit_read;
 	}
@@ -208,8 +207,8 @@ static int chromeos_invalidate_kernel_bio(struct block_device *root_bdev)
 	 * completion for the write is signaled only after the data has been
 	 * committed to non-volatile storage.
 	 */
-	rw = REQ_WRITE | REQ_SYNC | REQ_NOIDLE | REQ_FUA;
-	if (chromeos_invalidate_kernel_submit(bio, bdev, rw, page)) {
+	if (chromeos_invalidate_kernel_submit(bio, bdev, REQ_OP_WRITE,
+					      REQ_SYNC | REQ_FUA, page)) {
 		ret = -1;
 		goto failed_to_submit_write;
 	}
@@ -233,26 +232,14 @@ failed_to_read:
 	return ret;
 }
 
-#ifdef CONFIG_MTD
-
-struct erase_info_completion {
-	struct erase_info instr;
-	struct completion completion;
-};
-
-static void complete_erase(struct erase_info *instr)
-{
-	struct erase_info_completion *erase = container_of(
-		instr, struct erase_info_completion, instr);
-	complete(&erase->completion);
-}
+#if IS_REACHABLE(CONFIG_MTD)
 
 /* The maximum number of volumes per one UBI device, from ubi-media.h */
 #define UBI_MAX_VOLUMES 128
 
 static int chromeos_invalidate_kernel_nand(struct block_device *root_bdev)
 {
-	struct erase_info_completion erase;
+	struct erase_info instr;
 	int ret;
 	int partnum;
 	struct mtd_info *dev;
@@ -279,20 +266,12 @@ static int chromeos_invalidate_kernel_nand(struct block_device *root_bdev)
 good:
 	/* Erase the first good block of the kernel. This will prevent
 	 * that kernel from booting. */
-	memset(&erase, 0, sizeof(erase));
-	erase.instr.mtd = dev;
-	erase.instr.addr = offset;
-	erase.instr.len = dev->erasesize;
-	erase.instr.callback = complete_erase;
-	init_completion(&erase.completion);
-	ret = mtd_erase(dev, &erase.instr);
+	memset(&instr, 0, sizeof(instr));
+	instr.addr = offset;
+	instr.len = dev->erasesize;
+	ret = mtd_erase(dev, &instr);
 	if (ret)
 		goto out;
-	wait_for_completion(&erase.completion);
-	if (erase.instr.state == MTD_ERASE_FAILED) {
-		ret = -EIO;
-		goto out;
-	}
 	/* Write DMVERROR on the first page. If this fails, still return
 	 * success since we will still be causing the kernel to not be
 	 * selected, so no need to put the device in recovery mode. */
@@ -334,11 +313,10 @@ out:
  */
 static int chromeos_invalidate_kernel(struct block_device *root_bdev)
 {
-#ifdef CONFIG_MTD
+#if IS_REACHABLE(CONFIG_MTD)
 	if (root_bdev && root_bdev->bd_disk) {
-		char name[BDEVNAME_SIZE];
-		disk_name(root_bdev->bd_disk, 0, name);
-		if (strncmp(name, "ubiblock", strlen("ubiblock")) == 0)
+		if (!(strncmp(root_bdev->bd_disk->disk_name, "ubiblock",
+			      strlen("ubiblock"))))
 			return chromeos_invalidate_kernel_nand(root_bdev);
 	}
 #endif

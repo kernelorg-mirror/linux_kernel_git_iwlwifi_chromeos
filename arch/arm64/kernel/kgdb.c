@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AArch64 KGDB support
  *
@@ -5,23 +6,17 @@
  *
  * Copyright (C) 2013 Cavium Inc.
  * Author: Vijaya Kumar K <vijaya.kumar@caviumnetworks.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <linux/bug.h>
 #include <linux/irq.h>
 #include <linux/kdebug.h>
 #include <linux/kgdb.h>
+#include <linux/kprobes.h>
+#include <linux/sched/task_stack.h>
+
+#include <asm/debug-monitors.h>
+#include <asm/insn.h>
 #include <asm/traps.h>
 
 struct dbg_reg_def_t dbg_reg_def[DBG_MAX_REG_NUM] = {
@@ -238,60 +233,43 @@ int kgdb_arch_handle_exception(int exception_vector, int signo,
 
 static int kgdb_brk_fn(struct pt_regs *regs, unsigned int esr)
 {
-	if (user_mode(regs))
-		return DBG_HOOK_ERROR;
-
 	kgdb_handle_exception(1, SIGTRAP, 0, regs);
 	return DBG_HOOK_HANDLED;
 }
+NOKPROBE_SYMBOL(kgdb_brk_fn)
 
 static int kgdb_compiled_brk_fn(struct pt_regs *regs, unsigned int esr)
 {
-	if (user_mode(regs))
-		return DBG_HOOK_ERROR;
-
 	compiled_break = 1;
 	kgdb_handle_exception(1, SIGTRAP, 0, regs);
 
 	return DBG_HOOK_HANDLED;
 }
+NOKPROBE_SYMBOL(kgdb_compiled_brk_fn);
 
 static int kgdb_step_brk_fn(struct pt_regs *regs, unsigned int esr)
 {
-	if (user_mode(regs))
+	if (!kgdb_single_step)
 		return DBG_HOOK_ERROR;
 
 	kgdb_handle_exception(0, SIGTRAP, 0, regs);
 	return DBG_HOOK_HANDLED;
 }
+NOKPROBE_SYMBOL(kgdb_step_brk_fn);
 
 static struct break_hook kgdb_brkpt_hook = {
-	.esr_mask	= 0xffffffff,
-	.esr_val	= (u32)ESR_ELx_VAL_BRK64(KGDB_DYN_DBG_BRK_IMM),
-	.fn		= kgdb_brk_fn
+	.fn		= kgdb_brk_fn,
+	.imm		= KGDB_DYN_DBG_BRK_IMM,
 };
 
 static struct break_hook kgdb_compiled_brkpt_hook = {
-	.esr_mask	= 0xffffffff,
-	.esr_val	= (u32)ESR_ELx_VAL_BRK64(KGDB_COMPILED_DBG_BRK_IMM),
-	.fn		= kgdb_compiled_brk_fn
+	.fn		= kgdb_compiled_brk_fn,
+	.imm		= KGDB_COMPILED_DBG_BRK_IMM,
 };
 
 static struct step_hook kgdb_step_hook = {
 	.fn		= kgdb_step_brk_fn
 };
-
-static void kgdb_call_nmi_hook(void *ignored)
-{
-	kgdb_nmicallback(raw_smp_processor_id(), get_irq_regs());
-}
-
-void kgdb_roundup_cpus(unsigned long flags)
-{
-	local_irq_enable();
-	smp_call_function(kgdb_call_nmi_hook, NULL, 0);
-	local_irq_disable();
-}
 
 static int __kgdb_notify(struct die_args *args, unsigned long cmd)
 {
@@ -324,8 +302,8 @@ static struct notifier_block kgdb_notifier = {
 };
 
 /*
- * kgdb_arch_init - Perform any architecture specific initalization.
- * This function will handle the initalization of any architecture
+ * kgdb_arch_init - Perform any architecture specific initialization.
+ * This function will handle the initialization of any architecture
  * specific callbacks.
  */
 int kgdb_arch_init(void)
@@ -335,9 +313,9 @@ int kgdb_arch_init(void)
 	if (ret != 0)
 		return ret;
 
-	register_break_hook(&kgdb_brkpt_hook);
-	register_break_hook(&kgdb_compiled_brkpt_hook);
-	register_step_hook(&kgdb_step_hook);
+	register_kernel_break_hook(&kgdb_brkpt_hook);
+	register_kernel_break_hook(&kgdb_compiled_brkpt_hook);
+	register_kernel_step_hook(&kgdb_step_hook);
 	return 0;
 }
 
@@ -348,21 +326,30 @@ int kgdb_arch_init(void)
  */
 void kgdb_arch_exit(void)
 {
-	unregister_break_hook(&kgdb_brkpt_hook);
-	unregister_break_hook(&kgdb_compiled_brkpt_hook);
-	unregister_step_hook(&kgdb_step_hook);
+	unregister_kernel_break_hook(&kgdb_brkpt_hook);
+	unregister_kernel_break_hook(&kgdb_compiled_brkpt_hook);
+	unregister_kernel_step_hook(&kgdb_step_hook);
 	unregister_die_notifier(&kgdb_notifier);
 }
 
-/*
- * ARM instructions are always in LE.
- * Break instruction is encoded in LE format
- */
-struct kgdb_arch arch_kgdb_ops = {
-	.gdb_bpt_instr = {
-		KGDB_DYN_BRK_INS_BYTE(0),
-		KGDB_DYN_BRK_INS_BYTE(1),
-		KGDB_DYN_BRK_INS_BYTE(2),
-		KGDB_DYN_BRK_INS_BYTE(3),
-	}
-};
+const struct kgdb_arch arch_kgdb_ops;
+
+int kgdb_arch_set_breakpoint(struct kgdb_bkpt *bpt)
+{
+	int err;
+
+	BUILD_BUG_ON(AARCH64_INSN_SIZE != BREAK_INSTR_SIZE);
+
+	err = aarch64_insn_read((void *)bpt->bpt_addr, (u32 *)bpt->saved_instr);
+	if (err)
+		return err;
+
+	return aarch64_insn_write((void *)bpt->bpt_addr,
+			(u32)AARCH64_BREAK_KGDB_DYN_DBG);
+}
+
+int kgdb_arch_remove_breakpoint(struct kgdb_bkpt *bpt)
+{
+	return aarch64_insn_write((void *)bpt->bpt_addr,
+			*(u32 *)bpt->saved_instr);
+}

@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat
- * Copyright (c) 2015 - 2016 DisplayLink (UK) Ltd.
+ * Copyright (c) 2015 - 2018 DisplayLink (UK) Ltd.
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License v2. See the file COPYING in the main directory of this archive for
@@ -45,7 +46,7 @@ struct evdi_gem_object *evdi_gem_alloc_object(struct drm_device *dev,
 		return NULL;
 	}
 
-	reservation_object_init(&obj->_resv);
+	dma_resv_init(&obj->_resv);
 	obj->resv = &obj->_resv;
 
 	return obj;
@@ -72,7 +73,7 @@ evdi_gem_create(struct drm_file *file,
 		return ret;
 	}
 
-	drm_gem_object_unreference_unlocked(&obj->base);
+	drm_gem_object_put_unlocked(&obj->base);
 	*handle_p = handle;
 	return 0;
 }
@@ -99,21 +100,21 @@ int evdi_drm_gem_mmap(struct file *filp, struct vm_area_struct *vma)
 	return ret;
 }
 
-int evdi_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+vm_fault_t evdi_gem_fault(struct vm_fault *vmf)
 {
+	struct vm_area_struct *vma = vmf->vma;
 	struct evdi_gem_object *obj = to_evdi_bo(vma->vm_private_data);
 	struct page *page;
 	unsigned int page_offset;
 	int ret = 0;
 
-	page_offset = ((unsigned long)vmf->virtual_address - vma->vm_start) >>
-	    PAGE_SHIFT;
+	page_offset = (vmf->address - vma->vm_start) >> PAGE_SHIFT;
 
 	if (!obj->pages)
 		return VM_FAULT_SIGBUS;
 
 	page = obj->pages[page_offset];
-	ret = vm_insert_page(vma, (unsigned long)vmf->virtual_address, page);
+	ret = vm_insert_page(vma, (unsigned long)vmf->address, page);
 	switch (ret) {
 	case -EAGAIN:
 	case 0:
@@ -150,7 +151,7 @@ static int evdi_gem_get_pages(struct evdi_gem_object *obj)
 static void evdi_gem_put_pages(struct evdi_gem_object *obj)
 {
 	if (obj->base.import_attach) {
-		drm_free_large(obj->pages);
+		kvfree(obj->pages);
 		obj->pages = NULL;
 		return;
 	}
@@ -215,7 +216,7 @@ void evdi_gem_free_object(struct drm_gem_object *gem_obj)
 	if (gem_obj->dev->vma_offset_manager)
 		drm_gem_free_mmap_offset(gem_obj);
 
-	reservation_object_fini(&obj->_resv);
+	dma_resv_init(&obj->_resv);
 	obj->resv = NULL;
 }
 
@@ -249,7 +250,7 @@ int evdi_gem_mmap(struct drm_file *file,
 	*offset = drm_vma_node_offset_addr(&gobj->base.vma_node);
 
  out:
-	drm_gem_object_unreference(&gobj->base);
+	drm_gem_object_put(&gobj->base);
  unlock:
 	mutex_unlock(&dev->struct_mutex);
 	return ret;
@@ -271,7 +272,7 @@ static int evdi_prime_create(struct drm_device *dev,
 		return -ENOMEM;
 
 	obj->sg = sg;
-	obj->pages = drm_malloc_ab(npages, sizeof(struct page *));
+	obj->pages = kvmalloc_array(npages, sizeof(struct page *), GFP_KERNEL);
 	if (obj->pages == NULL) {
 		DRM_ERROR("obj pages is NULL %d\n", npages);
 		return -ENOMEM;
@@ -290,7 +291,6 @@ struct evdi_drm_dmabuf_attachment {
 };
 
 static int evdi_attach_dma_buf(__always_unused struct dma_buf *dmabuf,
-			       __always_unused struct device *dev,
 			       struct dma_buf_attachment *attach)
 {
 	struct evdi_drm_dmabuf_attachment *evdi_attach;
@@ -409,20 +409,7 @@ static void *evdi_dmabuf_kmap(__always_unused struct dma_buf *dma_buf,
 	return NULL;
 }
 
-static void *evdi_dmabuf_kmap_atomic(__always_unused struct dma_buf *dma_buf,
-				     __always_unused unsigned long page_num)
-{
-	return NULL;
-}
-
 static void evdi_dmabuf_kunmap(
-			__always_unused struct dma_buf *dma_buf,
-			__always_unused unsigned long page_num,
-			__always_unused void *addr)
-{
-}
-
-static void evdi_dmabuf_kunmap_atomic(
 			__always_unused struct dma_buf *dma_buf,
 			__always_unused unsigned long page_num,
 			__always_unused void *addr)
@@ -441,10 +428,8 @@ static struct dma_buf_ops evdi_dmabuf_ops = {
 	.detach = evdi_detach_dma_buf,
 	.map_dma_buf = evdi_map_dma_buf,
 	.unmap_dma_buf = evdi_unmap_dma_buf,
-	.kmap = evdi_dmabuf_kmap,
-	.kmap_atomic = evdi_dmabuf_kmap_atomic,
-	.kunmap = evdi_dmabuf_kunmap,
-	.kunmap_atomic = evdi_dmabuf_kunmap_atomic,
+	.map = evdi_dmabuf_kmap,
+	.unmap = evdi_dmabuf_kunmap,
 	.mmap = evdi_dmabuf_mmap,
 	.release = drm_gem_dmabuf_release,
 };
@@ -461,7 +446,7 @@ struct drm_gem_object *evdi_gem_prime_import(struct drm_device *dev,
 	if (dma_buf->ops == &evdi_dmabuf_ops) {
 		uobj = to_evdi_bo(dma_buf->priv);
 		if (uobj->base.dev == dev) {
-			drm_gem_object_reference(&uobj->base);
+			drm_gem_object_get(&uobj->base);
 			return &uobj->base;
 		}
 	}
@@ -500,17 +485,17 @@ struct drm_gem_object *evdi_gem_prime_import(struct drm_device *dev,
 	return ERR_PTR(ret);
 }
 
-struct dma_buf *evdi_gem_prime_export(struct drm_device *dev,
-				      struct drm_gem_object *obj, int flags)
+struct dma_buf *evdi_gem_prime_export(struct drm_gem_object *obj, int flags)
 {
+	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 	struct evdi_gem_object *evdi_obj = to_evdi_bo(obj);
-	struct dma_buf_export_info exp_info = {
-		.exp_name = "evdi",
-		.ops = &evdi_dmabuf_ops,
-		.size = obj->size,
-		.flags = flags,
-		.resv = evdi_obj->resv,
-		.priv = obj
-	};
-	return drm_gem_dmabuf_export(dev, &exp_info);
+
+	exp_info.exp_name = "evdi",
+	exp_info.ops = &evdi_dmabuf_ops,
+	exp_info.size = obj->size,
+	exp_info.flags = flags,
+	exp_info.resv = evdi_obj->resv,
+	exp_info.priv = obj;
+
+	return drm_gem_dmabuf_export(obj->dev, &exp_info);
 }

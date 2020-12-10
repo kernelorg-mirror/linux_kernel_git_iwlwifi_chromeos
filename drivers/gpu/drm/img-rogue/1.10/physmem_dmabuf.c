@@ -85,8 +85,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * and using our dmabuf.
  */
 
-static int PVRDmaBufOpsAttach(struct dma_buf *psDmaBuf, struct device *psDev,
-                           struct dma_buf_attachment *psAttachment)
+static int PVRDmaBufOpsAttach(struct dma_buf *psDmaBuf,
+#if ((LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)) && \
+     !((LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)) && (defined(CHROMIUMOS_KERNEL))))
+			      struct device *psDev,
+#endif
+			      struct dma_buf_attachment *psAttachment)
 {
 	return -ENOSYS;
 }
@@ -128,7 +132,10 @@ static const struct dma_buf_ops sPVRDmaBufOps =
 	.unmap_dma_buf = PVRDmaBufOpsUnmap,
 	.release       = PVRDmaBufOpsRelease,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0))
+#if ((LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)) &&	\
+     !((LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)) && (defined(CHROMIUMOS_KERNEL))))
 	.map_atomic    = PVRDmaBufOpsKMap,
+#endif
 	.map           = PVRDmaBufOpsKMap,
 #else
 	.kmap_atomic   = PVRDmaBufOpsKMap,

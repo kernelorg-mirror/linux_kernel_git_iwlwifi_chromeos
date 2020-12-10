@@ -7,6 +7,8 @@
  *
  * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
+ * Copyright(c) 2017 Intel Deutschland GmbH
+ * Copyright(c) 2018 - 2019 Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,22 +19,19 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110,
- * USA
- *
  * The full GNU General Public License is included in this distribution
  * in the file called COPYING.
  *
  * Contact Information:
- *  Intel Linux Wireless <ilw@linux.intel.com>
+ *  Intel Linux Wireless <linuxwifi@intel.com>
  * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
  *
  * BSD LICENSE
  *
  * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
+ * Copyright(c) 2017 Intel Deutschland GmbH
+ * Copyright(c) 2018 - 2019 Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -66,7 +65,7 @@
 #include <linux/jiffies.h>
 #include <net/mac80211.h>
 
-#include "iwl-notif-wait.h"
+#include "fw/notif-wait.h"
 #include "iwl-trans.h"
 #include "fw-api.h"
 #include "time-event.h"
@@ -86,7 +85,7 @@ void iwl_mvm_te_clear_data(struct iwl_mvm *mvm,
 {
 	lockdep_assert_held(&mvm->time_event_lock);
 
-	if (!te_data->vif)
+	if (!te_data || !te_data->vif)
 		return;
 
 	list_del(&te_data->list);
@@ -99,7 +98,6 @@ void iwl_mvm_te_clear_data(struct iwl_mvm *mvm,
 void iwl_mvm_roc_done_wk(struct work_struct *wk)
 {
 	struct iwl_mvm *mvm = container_of(wk, struct iwl_mvm, roc_done_wk);
-	u32 queues = 0;
 
 	/*
 	 * Clear the ROC_RUNNING /ROC_AUX_RUNNING status bit.
@@ -108,14 +106,8 @@ void iwl_mvm_roc_done_wk(struct work_struct *wk)
 	 * in the case that the time event actually completed in the firmware
 	 * (which is handled in iwl_mvm_te_handle_notif).
 	 */
-	if (test_and_clear_bit(IWL_MVM_STATUS_ROC_RUNNING, &mvm->status)) {
-		queues |= BIT(IWL_MVM_OFFCHANNEL_QUEUE);
-		iwl_mvm_unref(mvm, IWL_MVM_REF_ROC);
-	}
-	if (test_and_clear_bit(IWL_MVM_STATUS_ROC_AUX_RUNNING, &mvm->status)) {
-		queues |= BIT(mvm->aux_queue);
-		iwl_mvm_unref(mvm, IWL_MVM_REF_ROC_AUX);
-	}
+	clear_bit(IWL_MVM_STATUS_ROC_RUNNING, &mvm->status);
+	clear_bit(IWL_MVM_STATUS_ROC_AUX_RUNNING, &mvm->status);
 
 	synchronize_net();
 
@@ -129,7 +121,25 @@ void iwl_mvm_roc_done_wk(struct work_struct *wk)
 	 * issue as it will have to complete before the next command is
 	 * executed, and a new time event means a new command.
 	 */
-	iwl_mvm_flush_tx_path(mvm, queues, CMD_ASYNC);
+	iwl_mvm_flush_sta(mvm, &mvm->aux_sta, true, CMD_ASYNC);
+
+	/* Do the same for the P2P device queue (STA) */
+	if (test_and_clear_bit(IWL_MVM_STATUS_NEED_FLUSH_P2P, &mvm->status)) {
+		struct iwl_mvm_vif *mvmvif;
+
+		/*
+		 * NB: access to this pointer would be racy, but the flush bit
+		 * can only be set when we had a P2P-Device VIF, and we have a
+		 * flush of this work in iwl_mvm_prepare_mac_removal() so it's
+		 * not really racy.
+		 */
+
+		if (!WARN_ON(!mvm->p2p_device_vif)) {
+			mvmvif = iwl_mvm_vif_from_mac80211(mvm->p2p_device_vif);
+			iwl_mvm_flush_sta(mvm, &mvmvif->bcast_sta, true,
+					  CMD_ASYNC);
+		}
+	}
 }
 
 static void iwl_mvm_roc_finished(struct iwl_mvm *mvm)
@@ -183,9 +193,13 @@ static bool iwl_mvm_te_check_disconnect(struct iwl_mvm *mvm,
 					struct ieee80211_vif *vif,
 					const char *errmsg)
 {
+	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
+
 	if (vif->type != NL80211_IFTYPE_STATION)
 		return false;
-	if (vif->bss_conf.assoc && vif->bss_conf.dtim_period)
+
+	if (!mvmvif->csa_bcn_pending && vif->bss_conf.assoc &&
+	    vif->bss_conf.dtim_period)
 		return false;
 	if (errmsg)
 		IWL_ERR(mvm, "%s\n", errmsg);
@@ -218,6 +232,7 @@ iwl_mvm_te_handle_notify_csa(struct iwl_mvm *mvm,
 			break;
 		}
 		iwl_mvm_csa_client_absent(mvm, te_data->vif);
+		cancel_delayed_work(&mvmvif->csa_work);
 		ieee80211_chswitch_done(te_data->vif, true);
 		break;
 	default:
@@ -238,14 +253,13 @@ static void iwl_mvm_te_check_trigger(struct iwl_mvm *mvm,
 	struct iwl_fw_dbg_trigger_time_event *te_trig;
 	int i;
 
-	if (!iwl_fw_dbg_trigger_enabled(mvm->fw, FW_DBG_TRIGGER_TIME_EVENT))
+	trig = iwl_fw_dbg_trigger_on(&mvm->fwrt,
+				     ieee80211_vif_to_wdev(te_data->vif),
+				     FW_DBG_TRIGGER_TIME_EVENT);
+	if (!trig)
 		return;
 
-	trig = iwl_fw_dbg_get_trigger(mvm->fw, FW_DBG_TRIGGER_TIME_EVENT);
 	te_trig = (void *)trig->data;
-
-	if (!iwl_fw_dbg_trigger_check_stop(mvm, te_data->vif, trig))
-		return;
 
 	for (i = 0; i < ARRAY_SIZE(te_trig->time_events); i++) {
 		u32 trig_te_id = le32_to_cpu(te_trig->time_events[i].id);
@@ -259,11 +273,11 @@ static void iwl_mvm_te_check_trigger(struct iwl_mvm *mvm,
 		    !(trig_status_bitmap & BIT(le32_to_cpu(notif->status))))
 			continue;
 
-		iwl_mvm_fw_dbg_collect_trig(mvm, trig,
-					    "Time event %d Action 0x%x received status: %d",
-					    te_data->id,
-					    le32_to_cpu(notif->action),
-					    le32_to_cpu(notif->status));
+		iwl_fw_dbg_collect_trig(&mvm->fwrt, trig,
+					"Time event %d Action 0x%x received status: %d",
+					te_data->id,
+					le32_to_cpu(notif->action),
+					le32_to_cpu(notif->status));
 		break;
 	}
 }
@@ -319,6 +333,7 @@ static void iwl_mvm_te_handle_notif(struct iwl_mvm *mvm,
 		switch (te_data->vif->type) {
 		case NL80211_IFTYPE_P2P_DEVICE:
 			ieee80211_remain_on_channel_expired(mvm->hw);
+			set_bit(IWL_MVM_STATUS_NEED_FLUSH_P2P, &mvm->status);
 			iwl_mvm_roc_finished(mvm);
 			break;
 		case NL80211_IFTYPE_STATION:
@@ -327,7 +342,7 @@ static void iwl_mvm_te_handle_notif(struct iwl_mvm *mvm,
 			 * and know the dtim period.
 			 */
 			iwl_mvm_te_check_disconnect(mvm, te_data->vif,
-				"No association and the time event is over already...");
+				"No beacon heard and the time event is over already...");
 			break;
 		default:
 			break;
@@ -340,7 +355,6 @@ static void iwl_mvm_te_handle_notif(struct iwl_mvm *mvm,
 
 		if (te_data->vif->type == NL80211_IFTYPE_P2P_DEVICE) {
 			set_bit(IWL_MVM_STATUS_ROC_RUNNING, &mvm->status);
-			iwl_mvm_ref(mvm, IWL_MVM_REF_ROC);
 			ieee80211_ready_on_channel(mvm->hw);
 		} else if (te_data->id == TE_CHANNEL_SWITCH_PERIOD) {
 			iwl_mvm_te_handle_notify_csa(mvm, te_data, notif);
@@ -370,20 +384,13 @@ static int iwl_mvm_aux_roc_te_handle_notif(struct iwl_mvm *mvm,
 
 	iwl_mvm_te_check_trigger(mvm, notif, te_data);
 
-	if (!le32_to_cpu(notif->status)) {
-		IWL_DEBUG_TE(mvm,
-			     "ERROR: Aux ROC Time Event %s notification failure\n",
-			     (le32_to_cpu(notif->action) &
-			      TE_V2_NOTIF_HOST_EVENT_START) ? "start" : "end");
-		return -EINVAL;
-	}
-
 	IWL_DEBUG_TE(mvm,
-		     "Aux ROC time event notification  - UID = 0x%x action %d\n",
+		     "Aux ROC time event notification  - UID = 0x%x action %d (error = %d)\n",
 		     le32_to_cpu(notif->unique_id),
-		     le32_to_cpu(notif->action));
+		     le32_to_cpu(notif->action), le32_to_cpu(notif->status));
 
-	if (le32_to_cpu(notif->action) == TE_V2_NOTIF_HOST_EVENT_END) {
+	if (!le32_to_cpu(notif->status) ||
+	    le32_to_cpu(notif->action) == TE_V2_NOTIF_HOST_EVENT_END) {
 		/* End TE, notify mac80211 */
 		ieee80211_remain_on_channel_expired(mvm->hw);
 		iwl_mvm_roc_finished(mvm); /* flush aux queue */
@@ -395,7 +402,6 @@ static int iwl_mvm_aux_roc_te_handle_notif(struct iwl_mvm *mvm,
 	} else if (le32_to_cpu(notif->action) == TE_V2_NOTIF_HOST_EVENT_START) {
 		set_bit(IWL_MVM_STATUS_ROC_AUX_RUNNING, &mvm->status);
 		te_data->running = true;
-		iwl_mvm_ref(mvm, IWL_MVM_REF_ROC_AUX);
 		ieee80211_ready_on_channel(mvm->hw); /* Start TE */
 	} else {
 		IWL_DEBUG_TE(mvm,
@@ -606,7 +612,7 @@ void iwl_mvm_protect_session(struct iwl_mvm *mvm,
 	time_cmd.repeat = 1;
 	time_cmd.policy = cpu_to_le16(TE_V2_NOTIF_HOST_EVENT_START |
 				      TE_V2_NOTIF_HOST_EVENT_END |
-				      T2_V2_START_IMMEDIATELY);
+				      TE_V2_START_IMMEDIATELY);
 
 	if (!wait_for_notif) {
 		iwl_mvm_time_event_send_add(mvm, vif, te_data, &time_cmd);
@@ -678,6 +684,8 @@ static void iwl_mvm_remove_aux_roc_te(struct iwl_mvm *mvm,
 				      struct iwl_mvm_time_event_data *te_data)
 {
 	struct iwl_hs20_roc_req aux_cmd = {};
+	u16 len = sizeof(aux_cmd) - iwl_mvm_chan_info_padding(mvm);
+
 	u32 uid;
 	int ret;
 
@@ -691,7 +699,7 @@ static void iwl_mvm_remove_aux_roc_te(struct iwl_mvm *mvm,
 	IWL_DEBUG_TE(mvm, "Removing BSS AUX ROC TE 0x%x\n",
 		     le32_to_cpu(aux_cmd.event_unique_id));
 	ret = iwl_mvm_send_cmd_pdu(mvm, HOT_SPOT_CMD, 0,
-				   sizeof(aux_cmd), &aux_cmd);
+				   len, &aux_cmd);
 
 	if (WARN_ON(ret))
 		return;
@@ -731,8 +739,21 @@ void iwl_mvm_stop_session_protection(struct iwl_mvm *mvm,
 {
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
 	struct iwl_mvm_time_event_data *te_data = &mvmvif->time_event_data;
+	u32 id;
 
 	lockdep_assert_held(&mvm->mutex);
+
+	spin_lock_bh(&mvm->time_event_lock);
+	id = te_data->id;
+	spin_unlock_bh(&mvm->time_event_lock);
+
+	if (id != TE_BSS_STA_AGGRESSIVE_ASSOC) {
+		IWL_DEBUG_TE(mvm,
+			     "don't remove TE with id=%u (not session protection)\n",
+			     id);
+		return;
+	}
+
 	iwl_mvm_remove_time_event(mvm, mvmvif, te_data);
 }
 
@@ -748,12 +769,6 @@ int iwl_mvm_start_p2p_roc(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 		IWL_WARN(mvm, "P2P_DEVICE remain on channel already running\n");
 		return -EBUSY;
 	}
-
-	/*
-	 * Flush the done work, just in case it's still pending, so that
-	 * the work it does can complete and we can accept new frames.
-	 */
-	flush_work(&mvm->roc_done_wk);
 
 	time_cmd.action = cpu_to_le32(FW_CTXT_ACTION_ADD);
 	time_cmd.id_and_color =
@@ -786,16 +801,14 @@ int iwl_mvm_start_p2p_roc(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	time_cmd.repeat = 1;
 	time_cmd.policy = cpu_to_le16(TE_V2_NOTIF_HOST_EVENT_START |
 				      TE_V2_NOTIF_HOST_EVENT_END |
-				      T2_V2_START_IMMEDIATELY);
+				      TE_V2_START_IMMEDIATELY);
 
 	return iwl_mvm_time_event_send_add(mvm, vif, te_data, &time_cmd);
 }
 
-void iwl_mvm_stop_roc(struct iwl_mvm *mvm)
+static struct iwl_mvm_time_event_data *iwl_mvm_get_roc_te(struct iwl_mvm *mvm)
 {
-	struct iwl_mvm_vif *mvmvif = NULL;
 	struct iwl_mvm_time_event_data *te_data;
-	bool is_p2p = false;
 
 	lockdep_assert_held(&mvm->mutex);
 
@@ -809,11 +822,8 @@ void iwl_mvm_stop_roc(struct iwl_mvm *mvm)
 	 * request
 	 */
 	list_for_each_entry(te_data, &mvm->time_event_list, list) {
-		if (te_data->vif->type == NL80211_IFTYPE_P2P_DEVICE) {
-			mvmvif = iwl_mvm_vif_from_mac80211(te_data->vif);
-			is_p2p = true;
-			goto remove_te;
-		}
+		if (te_data->vif->type == NL80211_IFTYPE_P2P_DEVICE)
+			goto out;
 	}
 
 	/* There can only be at most one AUX ROC time event, we just use the
@@ -822,21 +832,40 @@ void iwl_mvm_stop_roc(struct iwl_mvm *mvm)
 	te_data = list_first_entry_or_null(&mvm->aux_roc_te_list,
 					   struct iwl_mvm_time_event_data,
 					   list);
-	if (te_data)
-		mvmvif = iwl_mvm_vif_from_mac80211(te_data->vif);
-
-remove_te:
+out:
 	spin_unlock_bh(&mvm->time_event_lock);
+	return te_data;
+}
 
-	if (!mvmvif) {
+void iwl_mvm_cleanup_roc_te(struct iwl_mvm *mvm)
+{
+	struct iwl_mvm_time_event_data *te_data;
+	u32 uid;
+
+	te_data = iwl_mvm_get_roc_te(mvm);
+	if (te_data)
+		__iwl_mvm_remove_time_event(mvm, te_data, &uid);
+}
+
+void iwl_mvm_stop_roc(struct iwl_mvm *mvm)
+{
+	struct iwl_mvm_vif *mvmvif;
+	struct iwl_mvm_time_event_data *te_data;
+
+	te_data = iwl_mvm_get_roc_te(mvm);
+	if (!te_data) {
 		IWL_WARN(mvm, "No remain on channel event\n");
 		return;
 	}
 
-	if (is_p2p)
+	mvmvif = iwl_mvm_vif_from_mac80211(te_data->vif);
+
+	if (te_data->vif->type == NL80211_IFTYPE_P2P_DEVICE) {
 		iwl_mvm_remove_time_event(mvm, mvmvif, te_data);
-	else
+		set_bit(IWL_MVM_STATUS_NEED_FLUSH_P2P, &mvm->status);
+	} else {
 		iwl_mvm_remove_aux_roc_te(mvm, mvmvif, te_data);
+	}
 
 	iwl_mvm_roc_finished(mvm);
 }
@@ -852,8 +881,23 @@ int iwl_mvm_schedule_csa_period(struct iwl_mvm *mvm,
 	lockdep_assert_held(&mvm->mutex);
 
 	if (te_data->running) {
-		IWL_DEBUG_TE(mvm, "CS period is already scheduled\n");
-		return -EBUSY;
+		u32 id;
+
+		spin_lock_bh(&mvm->time_event_lock);
+		id = te_data->id;
+		spin_unlock_bh(&mvm->time_event_lock);
+
+		if (id == TE_CHANNEL_SWITCH_PERIOD) {
+			IWL_DEBUG_TE(mvm, "CS period is already scheduled\n");
+			return -EBUSY;
+		}
+
+		/*
+		 * Remove the session protection time event to allow the
+		 * channel switch. If we got here, we just heard a beacon so
+		 * the session protection is not needed anymore anyway.
+		 */
+		iwl_mvm_remove_time_event(mvm, mvmvif, te_data);
 	}
 
 	time_cmd.action = cpu_to_le32(FW_CTXT_ACTION_ADD);
@@ -867,6 +911,8 @@ int iwl_mvm_schedule_csa_period(struct iwl_mvm *mvm,
 	time_cmd.interval = cpu_to_le32(1);
 	time_cmd.policy = cpu_to_le16(TE_V2_NOTIF_HOST_EVENT_START |
 				      TE_V2_ABSENCE);
+	if (!apply_time)
+		time_cmd.policy |= cpu_to_le16(TE_V2_START_IMMEDIATELY);
 
 	return iwl_mvm_time_event_send_add(mvm, vif, te_data, &time_cmd);
 }

@@ -54,6 +54,11 @@ bool trace_rogue_are_fence_checks_traced(void);
 
 bool trace_rogue_are_fence_updates_traced(void);
 
+void trace_job_enqueue(IMG_UINT32 ui32FWContext,
+                       IMG_UINT32 ui32ExtJobRef,
+                       IMG_UINT32 ui32IntJobRef,
+                       const char *pszKickType);
+
 void trace_rogue_fence_updates(const char *cmd, const char *dm,
 							   IMG_UINT32 ui32FWContext,
 							   IMG_UINT32 ui32Offset,
@@ -70,20 +75,23 @@ void trace_rogue_fence_checks(const char *cmd, const char *dm,
 
 void trace_rogue_ufo_updates(IMG_UINT64 ui64OSTimestamp,
 							 IMG_UINT32 ui32FWCtx,
-							 IMG_UINT32 ui32JobId,
+							 IMG_UINT32 ui32ExtJobRef,
+							 IMG_UINT32 ui32IntJobRef,
 							 IMG_UINT32 ui32UFOCount,
 							 const RGX_HWPERF_UFO_DATA_ELEMENT *puData);
 
 void trace_rogue_ufo_checks_success(IMG_UINT64 ui64OSTimestamp,
 									IMG_UINT32 ui32FWCtx,
-									IMG_UINT32 ui32JobId,
+									IMG_UINT32 ui32ExtJobRef,
+									IMG_UINT32 ui32IntJobRef,
 									IMG_BOOL bPrEvent,
 									IMG_UINT32 ui32UFOCount,
 									const RGX_HWPERF_UFO_DATA_ELEMENT *puData);
 
 void trace_rogue_ufo_checks_fail(IMG_UINT64 ui64OSTimestamp,
 								 IMG_UINT32 ui32FWCtx,
-								 IMG_UINT32 ui32JobId,
+								 IMG_UINT32 ui32ExtJobRef,
+								 IMG_UINT32 ui32IntJobRef,
 								 IMG_BOOL bPrEvent,
 								 IMG_UINT32 ui32UFOCount,
 								 const RGX_HWPERF_UFO_DATA_ELEMENT *puData);
@@ -99,6 +107,14 @@ static inline
 bool trace_rogue_are_fence_updates_traced(void)
 {
 	return false;
+}
+
+static inline
+void trace_job_enqueue(IMG_UINT32 ui32FWContext,
+                       IMG_UINT32 ui32ExtJobRef,
+                       IMG_UINT32 ui32IntJobRef,
+                       const char *pszKickType)
+{
 }
 
 static inline
@@ -143,7 +159,8 @@ void trace_rogue_ufo_checks_success(IMG_UINT64 ui64OSTimestamp,
 static inline
 void trace_rogue_ufo_checks_fail(IMG_UINT64 ui64OSTimestamp,
 								 IMG_UINT32 ui32FWCtx,
-								 IMG_UINT32 ui32JobId,
+								 IMG_UINT32 ui32ExtJobRef,
+								 IMG_UINT32 ui32IntJobRef,
 								 IMG_BOOL bPrEvent,
 								 IMG_UINT32 ui32UFOCount,
 								 const RGX_HWPERF_UFO_DATA_ELEMENT *puData)

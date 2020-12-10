@@ -66,10 +66,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv.h"
 #include "rgxccb.h"
 #include "rgxhwperf.h"
+#include "ospvr_gputrace.h"
 #include "rgxtimerquery.h"
 #include "htbuffer.h"
 
-#include "rgxdefs_km.h"
+#include "km/rgxdefs_km.h"
 #include "rgx_fwif_km.h"
 #include "physmem.h"
 #include "sync_server.h"
@@ -1920,7 +1921,7 @@ PVRSRV_ERROR RGXCreateRPMContext(CONNECTION_DATA * psConnection,
 	*ppsRPMContext = psRPMContext;
 
 #if !defined(PVRSRV_USE_BRIDGE_LOCK)
-	eError = OSLockCreate(&psRPMContext->hLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psRPMContext->hLock);
 
 	if(eError != PVRSRV_OK)
 	{
@@ -2161,7 +2162,7 @@ PVRSRV_ERROR PVRSRVRGXCreateRayContextKM(CONNECTION_DATA				*psConnection,
 	}
 
 #if !defined(PVRSRV_USE_BRIDGE_LOCK)
-	eError = OSLockCreate(&psRayContext->hLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psRayContext->hLock);
 
 	if(eError != PVRSRV_OK)
 	{
@@ -3006,10 +3007,9 @@ PVRSRV_ERROR PVRSRVRGXKickRSKM(RGX_SERVER_RAY_CONTEXT		*psRayContext,
 	}
 	else
 	{
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-		RGXHWPerfFTraceGPUEnqueueEvent(psRayContext->psDeviceNode->pvDevice,
-				ui32FWCtx, ui32IntJobRef, RGX_HWPERF_KICK_TYPE_RS);
-#endif
+		PVRGpuTraceEnqueueEvent(psRayContext->psDeviceNode->pvDevice,
+		                        ui32FWCtx, ui32ExtJobRef, ui32IntJobRef,
+		                        RGX_HWPERF_KICK_TYPE_RS);
 	}
 
 #if defined(PVR_USE_FENCE_SYNC_MODEL)
@@ -3556,10 +3556,9 @@ PVRSRV_ERROR PVRSRVRGXKickVRDMKM(RGX_SERVER_RAY_CONTEXT		*psRayContext,
 	}
 	else
 	{
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-		RGXHWPerfFTraceGPUEnqueueEvent(psRayContext->psDeviceNode->pvDevice,
-				ui32FWCtx, ui32IntJobRef, RGX_HWPERF_KICK_TYPE_VRDM);
-#endif
+		PVRGpuTraceEnqueueEvent(psRayContext->psDeviceNode->pvDevice,
+		                        ui32FWCtx, ui32ExtJobRef, ui32IntJobRef,
+		                        RGX_HWPERF_KICK_TYPE_VRDM);
 	}
 
 #if defined(PVR_USE_FENCE_SYNC_MODEL)

@@ -122,7 +122,7 @@ X(HTBufferSizeInKB,                 UINT32,         ALWAYS,      PVRSRV_APPHINT_
 /* name,                            type,           class,       default,                                         helper,         */ \
 X(EnableHTBLogGroup,                UINT32Bitfield, ALWAYS,      PVRSRV_APPHINT_ENABLEHTBLOGGROUP,                htb_loggroup_tbl ) \
 X(HTBOperationMode,                 UINT32List,     ALWAYS,      PVRSRV_APPHINT_HTBOPERATIONMODE,                 htb_opmode_tbl   ) \
-X(EnableFTraceGPU,                  BOOL,           GPUTRACE_EV, PVRSRV_APPHINT_ENABLEFTRACEGPU,                  NO_PARAM_TABLE   ) \
+X(EnableFTraceGPU,                  BOOL,           ALWAYS,      PVRSRV_APPHINT_ENABLEFTRACEGPU,                  NO_PARAM_TABLE   ) \
 X(HWPerfFWFilter,                   UINT64,         ALWAYS,      PVRSRV_APPHINT_HWPERFFWFILTER,                   NO_PARAM_TABLE   ) \
 X(HWPerfHostFilter,                 UINT32,         ALWAYS,      PVRSRV_APPHINT_HWPERFHOSTFILTER,                 NO_PARAM_TABLE   ) \
 X(HWPerfClientFilter_Services,      UINT32,         ALWAYS,      PVRSRV_APPHINT_HWPERFCLIENTFILTER_SERVICES,      NO_PARAM_TABLE   ) \
@@ -178,8 +178,7 @@ X(DEBUG) \
 X(FWDBGCTRL) \
 X(PDUMP) \
 X(VALIDATION) \
-X(GPUVIRT_VAL) \
-X(GPUTRACE_EV)
+X(GPUVIRT_VAL)
 
 /*
 *******************************************************************************
@@ -223,13 +222,6 @@ X(GPUTRACE_EV)
 #else
 	#define APPHINT_ENABLED_CLASS_GPUVIRT_VAL IMG_FALSE
 	#define apphint_modparam_class_GPUVIRT_VAL(a, b, c)
-#endif
-#if defined(SUPPORT_GPUTRACE_EVENTS)
-	#define APPHINT_ENABLED_CLASS_GPUTRACE_EV IMG_TRUE
-	#define apphint_modparam_class_GPUTRACE_EV(a, b, c) apphint_modparam_enable(a, b, c)
-#else
-	#define APPHINT_ENABLED_CLASS_GPUTRACE_EV IMG_FALSE
-	#define apphint_modparam_class_GPUTRACE_EV(a, b, c)
 #endif
 
 /*

@@ -54,12 +54,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "allocmem.h"
 #include <asm/atomic.h>
 
-#define OSLockCreateNoStats(phLock, eLockType) ({ \
+#define OSLockCreateNoStats(phLock) ({ \
 	PVRSRV_ERROR e = PVRSRV_ERROR_OUT_OF_MEMORY; \
 	*(phLock) = OSAllocMemNoStats(sizeof(struct mutex)); \
 	if (*(phLock)) { mutex_init(*(phLock)); e = PVRSRV_OK; }; \
 	e;})
-#define OSLockCreate(phLock, eLockType) ({ \
+#define OSLockCreate(phLock) ({ \
 	PVRSRV_ERROR e = PVRSRV_ERROR_OUT_OF_MEMORY; \
 	*(phLock) = OSAllocMem(sizeof(struct mutex)); \
 	if (*(phLock)) { mutex_init(*(phLock)); e = PVRSRV_OK; }; \
@@ -106,18 +106,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 @Function       OSLockCreate
 @Description    Creates an operating system lock object.
 @Output         phLock           The created lock.
-@Input          eLockType        The type of lock required. This may be:
-                                 LOCK_TYPE_PASSIVE - the lock will not be used
-                                 in interrupt context or
-                                 LOCK_TYPE_DISPATCH - the lock may be used
-                                 in interrupt context.
 @Return         PVRSRV_OK on success. PVRSRV_ERROR_OUT_OF_MEMORY if the driver
                 cannot allocate CPU memory needed for the lock.
                 PVRSRV_ERROR_INIT_FAILURE if the Operating System fails to
                 allocate the lock.
  */ /**************************************************************************/
 IMG_INTERNAL
-PVRSRV_ERROR OSLockCreate(POS_LOCK *phLock, LOCK_TYPE eLockType);
+PVRSRV_ERROR OSLockCreate(POS_LOCK *phLock);
 #if defined(INTEGRITY_OS)
 #define OSLockCreateNoStats OSLockCreate
 #endif

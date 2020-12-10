@@ -24,7 +24,9 @@
 #include <linux/errno.h>
 #include <linux/export.h>
 #include <linux/kernel.h>
-#include <drm/drmP.h>
+
+#include <drm/drm_mode.h>
+#include <drm/drm_print.h>
 #include <drm/drm_rect.h>
 
 /**
@@ -52,7 +54,12 @@ EXPORT_SYMBOL(drm_rect_intersect);
 
 static u32 clip_scaled(u32 src, u32 dst, u32 clip)
 {
-	u64 tmp = mul_u32_u32(src, dst - clip);
+	u64 tmp;
+
+	if (dst == 0)
+		return 0;
+
+	tmp = mul_u32_u32(src, dst - clip);
 
 	/*
 	 * Round toward 1.0 when clipping so that we don't accidentally
@@ -208,114 +215,6 @@ int drm_rect_calc_vscale(const struct drm_rect *src,
 EXPORT_SYMBOL(drm_rect_calc_vscale);
 
 /**
- * drm_calc_hscale_relaxed - calculate the horizontal scaling factor
- * @src: source window rectangle
- * @dst: destination window rectangle
- * @min_hscale: minimum allowed horizontal scaling factor
- * @max_hscale: maximum allowed horizontal scaling factor
- *
- * Calculate the horizontal scaling factor as
- * (@src width) / (@dst width).
- *
- * If the calculated scaling factor is below @min_vscale,
- * decrease the height of rectangle @dst to compensate.
- *
- * If the calculated scaling factor is above @max_vscale,
- * decrease the height of rectangle @src to compensate.
- *
- * If the scale is below 1 << 16, round down. If the scale is above
- * 1 << 16, round up. This will calculate the scale with the most
- * pessimistic limit calculation.
- *
- * RETURNS:
- * The horizontal scaling factor.
- */
-int drm_rect_calc_hscale_relaxed(struct drm_rect *src,
-				 struct drm_rect *dst,
-				 int min_hscale, int max_hscale)
-{
-	int src_w = drm_rect_width(src);
-	int dst_w = drm_rect_width(dst);
-	int hscale = drm_calc_scale(src_w, dst_w);
-
-	if (hscale < 0 || dst_w == 0)
-		return hscale;
-
-	if (hscale < min_hscale) {
-		int max_dst_w = src_w / min_hscale;
-
-		drm_rect_adjust_size(dst, max_dst_w - dst_w, 0);
-
-		return min_hscale;
-	}
-
-	if (hscale > max_hscale) {
-		int max_src_w = dst_w * max_hscale;
-
-		drm_rect_adjust_size(src, max_src_w - src_w, 0);
-
-		return max_hscale;
-	}
-
-	return hscale;
-}
-EXPORT_SYMBOL(drm_rect_calc_hscale_relaxed);
-
-/**
- * drm_rect_calc_vscale_relaxed - calculate the vertical scaling factor
- * @src: source window rectangle
- * @dst: destination window rectangle
- * @min_vscale: minimum allowed vertical scaling factor
- * @max_vscale: maximum allowed vertical scaling factor
- *
- * Calculate the vertical scaling factor as
- * (@src height) / (@dst height).
- *
- * If the calculated scaling factor is below @min_vscale,
- * decrease the height of rectangle @dst to compensate.
- *
- * If the calculated scaling factor is above @max_vscale,
- * decrease the height of rectangle @src to compensate.
- *
- * If the scale is below 1 << 16, round down. If the scale is above
- * 1 << 16, round up. This will calculate the scale with the most
- * pessimistic limit calculation.
- *
- * RETURNS:
- * The vertical scaling factor.
- */
-int drm_rect_calc_vscale_relaxed(struct drm_rect *src,
-				 struct drm_rect *dst,
-				 int min_vscale, int max_vscale)
-{
-	int src_h = drm_rect_height(src);
-	int dst_h = drm_rect_height(dst);
-	int vscale = drm_calc_scale(src_h, dst_h);
-
-	if (vscale < 0 || dst_h == 0)
-		return vscale;
-
-	if (vscale < min_vscale) {
-		int max_dst_h = src_h / min_vscale;
-
-		drm_rect_adjust_size(dst, 0, max_dst_h - dst_h);
-
-		return min_vscale;
-	}
-
-	if (vscale > max_vscale) {
-		int max_src_h = dst_h * max_vscale;
-
-		drm_rect_adjust_size(src, 0, max_src_h - src_h);
-
-		return max_vscale;
-	}
-
-	return vscale;
-}
-EXPORT_SYMBOL(drm_rect_calc_vscale_relaxed);
-
-/**
  * drm_rect_debug_print - print the rectangle information
  * @prefix: prefix string
  * @r: rectangle to print
@@ -352,38 +251,38 @@ void drm_rect_rotate(struct drm_rect *r,
 {
 	struct drm_rect tmp;
 
-	if (rotation & (DRM_REFLECT_X | DRM_REFLECT_Y)) {
+	if (rotation & (DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y)) {
 		tmp = *r;
 
-		if (rotation & DRM_REFLECT_X) {
+		if (rotation & DRM_MODE_REFLECT_X) {
 			r->x1 = width - tmp.x2;
 			r->x2 = width - tmp.x1;
 		}
 
-		if (rotation & DRM_REFLECT_Y) {
+		if (rotation & DRM_MODE_REFLECT_Y) {
 			r->y1 = height - tmp.y2;
 			r->y2 = height - tmp.y1;
 		}
 	}
 
-	switch (rotation & DRM_ROTATE_MASK) {
-	case DRM_ROTATE_0:
+	switch (rotation & DRM_MODE_ROTATE_MASK) {
+	case DRM_MODE_ROTATE_0:
 		break;
-	case DRM_ROTATE_90:
+	case DRM_MODE_ROTATE_90:
 		tmp = *r;
 		r->x1 = tmp.y1;
 		r->x2 = tmp.y2;
 		r->y1 = width - tmp.x2;
 		r->y2 = width - tmp.x1;
 		break;
-	case DRM_ROTATE_180:
+	case DRM_MODE_ROTATE_180:
 		tmp = *r;
 		r->x1 = width - tmp.x2;
 		r->x2 = width - tmp.x1;
 		r->y1 = height - tmp.y2;
 		r->y2 = height - tmp.y1;
 		break;
-	case DRM_ROTATE_270:
+	case DRM_MODE_ROTATE_270:
 		tmp = *r;
 		r->x1 = height - tmp.y2;
 		r->x2 = height - tmp.y1;
@@ -413,10 +312,10 @@ EXPORT_SYMBOL(drm_rect_rotate);
  * to the vertical axis of the original untransformed
  * coordinate space, so that you never have to flip
  * them when doing a rotatation and its inverse.
- * That is, if you do:
+ * That is, if you do ::
  *
- * drm_rotate(&r, width, height, rotation);
- * drm_rotate_inv(&r, width, height, rotation);
+ *     drm_rect_rotate(&r, width, height, rotation);
+ *     drm_rect_rotate_inv(&r, width, height, rotation);
  *
  * you will always get back the original rectangle.
  */
@@ -426,24 +325,24 @@ void drm_rect_rotate_inv(struct drm_rect *r,
 {
 	struct drm_rect tmp;
 
-	switch (rotation & DRM_ROTATE_MASK) {
-	case DRM_ROTATE_0:
+	switch (rotation & DRM_MODE_ROTATE_MASK) {
+	case DRM_MODE_ROTATE_0:
 		break;
-	case DRM_ROTATE_90:
+	case DRM_MODE_ROTATE_90:
 		tmp = *r;
 		r->x1 = width - tmp.y2;
 		r->x2 = width - tmp.y1;
 		r->y1 = tmp.x1;
 		r->y2 = tmp.x2;
 		break;
-	case DRM_ROTATE_180:
+	case DRM_MODE_ROTATE_180:
 		tmp = *r;
 		r->x1 = width - tmp.x2;
 		r->x2 = width - tmp.x1;
 		r->y1 = height - tmp.y2;
 		r->y2 = height - tmp.y1;
 		break;
-	case DRM_ROTATE_270:
+	case DRM_MODE_ROTATE_270:
 		tmp = *r;
 		r->x1 = tmp.y1;
 		r->x2 = tmp.y2;
@@ -454,15 +353,15 @@ void drm_rect_rotate_inv(struct drm_rect *r,
 		break;
 	}
 
-	if (rotation & (DRM_REFLECT_X | DRM_REFLECT_Y)) {
+	if (rotation & (DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y)) {
 		tmp = *r;
 
-		if (rotation & DRM_REFLECT_X) {
+		if (rotation & DRM_MODE_REFLECT_X) {
 			r->x1 = width - tmp.x2;
 			r->x2 = width - tmp.x1;
 		}
 
-		if (rotation & DRM_REFLECT_Y) {
+		if (rotation & DRM_MODE_REFLECT_Y) {
 			r->y1 = height - tmp.y2;
 			r->y2 = height - tmp.y1;
 		}

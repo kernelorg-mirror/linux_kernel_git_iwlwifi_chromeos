@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _SPARC_PGTABLE_H
 #define _SPARC_PGTABLE_H
 
@@ -298,7 +299,7 @@ static inline pte_t mk_pte_io(unsigned long page, pgprot_t pgprot, int space)
 #define pgprot_noncached pgprot_noncached
 static inline pgprot_t pgprot_noncached(pgprot_t prot)
 {
-	prot &= ~__pgprot(SRMMU_CACHE);
+	pgprot_val(prot) &= ~pgprot_val(__pgprot(SRMMU_CACHE));
 	return prot;
 }
 
@@ -443,10 +444,5 @@ static inline int io_remap_pfn_range(struct vm_area_struct *vma,
 
 /* We provide our own get_unmapped_area to cope with VA holes for userland */
 #define HAVE_ARCH_UNMAPPED_AREA
-
-/*
- * No page table caches to initialise
- */
-#define pgtable_cache_init()	do { } while (0)
 
 #endif /* !(_SPARC_PGTABLE_H) */

@@ -31,7 +31,7 @@
 
 #define hdmi_log(fmt, ...) dev_printk(level, dev, fmt, ##__VA_ARGS__)
 
-static u8 hdmi_infoframe_checksum(u8 *ptr, size_t size)
+static u8 hdmi_infoframe_checksum(const u8 *ptr, size_t size)
 {
 	u8 csum = 0;
 	size_t i;
@@ -68,8 +68,36 @@ int hdmi_avi_infoframe_init(struct hdmi_avi_infoframe *frame)
 }
 EXPORT_SYMBOL(hdmi_avi_infoframe_init);
 
+static int hdmi_avi_infoframe_check_only(const struct hdmi_avi_infoframe *frame)
+{
+	if (frame->type != HDMI_INFOFRAME_TYPE_AVI ||
+	    frame->version != 2 ||
+	    frame->length != HDMI_AVI_INFOFRAME_SIZE)
+		return -EINVAL;
+
+	if (frame->picture_aspect > HDMI_PICTURE_ASPECT_16_9)
+		return -EINVAL;
+
+	return 0;
+}
+
 /**
- * hdmi_avi_infoframe_pack() - write HDMI AVI infoframe to binary buffer
+ * hdmi_avi_infoframe_check() - check a HDMI AVI infoframe
+ * @frame: HDMI AVI infoframe
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields.
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
+int hdmi_avi_infoframe_check(struct hdmi_avi_infoframe *frame)
+{
+	return hdmi_avi_infoframe_check_only(frame);
+}
+EXPORT_SYMBOL(hdmi_avi_infoframe_check);
+
+/**
+ * hdmi_avi_infoframe_pack_only() - write HDMI AVI infoframe to binary buffer
  * @frame: HDMI AVI infoframe
  * @buffer: destination buffer
  * @size: size of buffer
@@ -82,11 +110,16 @@ EXPORT_SYMBOL(hdmi_avi_infoframe_init);
  * Returns the number of bytes packed into the binary buffer or a negative
  * error code on failure.
  */
-ssize_t hdmi_avi_infoframe_pack(struct hdmi_avi_infoframe *frame, void *buffer,
-				size_t size)
+ssize_t hdmi_avi_infoframe_pack_only(const struct hdmi_avi_infoframe *frame,
+				     void *buffer, size_t size)
 {
 	u8 *ptr = buffer;
 	size_t length;
+	int ret;
+
+	ret = hdmi_avi_infoframe_check_only(frame);
+	if (ret)
+		return ret;
 
 	length = HDMI_INFOFRAME_HEADER_SIZE + frame->length;
 
@@ -149,6 +182,36 @@ ssize_t hdmi_avi_infoframe_pack(struct hdmi_avi_infoframe *frame, void *buffer,
 
 	return length;
 }
+EXPORT_SYMBOL(hdmi_avi_infoframe_pack_only);
+
+/**
+ * hdmi_avi_infoframe_pack() - check a HDMI AVI infoframe,
+ *                             and write it to binary buffer
+ * @frame: HDMI AVI infoframe
+ * @buffer: destination buffer
+ * @size: size of buffer
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields, after which it packs the information
+ * contained in the @frame structure into a binary representation that
+ * can be written into the corresponding controller registers. This function
+ * also computes the checksum as required by section 5.3.5 of the HDMI 1.4
+ * specification.
+ *
+ * Returns the number of bytes packed into the binary buffer or a negative
+ * error code on failure.
+ */
+ssize_t hdmi_avi_infoframe_pack(struct hdmi_avi_infoframe *frame,
+				void *buffer, size_t size)
+{
+	int ret;
+
+	ret = hdmi_avi_infoframe_check(frame);
+	if (ret)
+		return ret;
+
+	return hdmi_avi_infoframe_pack_only(frame, buffer, size);
+}
 EXPORT_SYMBOL(hdmi_avi_infoframe_pack);
 
 /**
@@ -175,8 +238,33 @@ int hdmi_spd_infoframe_init(struct hdmi_spd_infoframe *frame,
 }
 EXPORT_SYMBOL(hdmi_spd_infoframe_init);
 
+static int hdmi_spd_infoframe_check_only(const struct hdmi_spd_infoframe *frame)
+{
+	if (frame->type != HDMI_INFOFRAME_TYPE_SPD ||
+	    frame->version != 1 ||
+	    frame->length != HDMI_SPD_INFOFRAME_SIZE)
+		return -EINVAL;
+
+	return 0;
+}
+
 /**
- * hdmi_spd_infoframe_pack() - write HDMI SPD infoframe to binary buffer
+ * hdmi_spd_infoframe_check() - check a HDMI SPD infoframe
+ * @frame: HDMI SPD infoframe
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields.
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
+int hdmi_spd_infoframe_check(struct hdmi_spd_infoframe *frame)
+{
+	return hdmi_spd_infoframe_check_only(frame);
+}
+EXPORT_SYMBOL(hdmi_spd_infoframe_check);
+
+/**
+ * hdmi_spd_infoframe_pack_only() - write HDMI SPD infoframe to binary buffer
  * @frame: HDMI SPD infoframe
  * @buffer: destination buffer
  * @size: size of buffer
@@ -189,11 +277,16 @@ EXPORT_SYMBOL(hdmi_spd_infoframe_init);
  * Returns the number of bytes packed into the binary buffer or a negative
  * error code on failure.
  */
-ssize_t hdmi_spd_infoframe_pack(struct hdmi_spd_infoframe *frame, void *buffer,
-				size_t size)
+ssize_t hdmi_spd_infoframe_pack_only(const struct hdmi_spd_infoframe *frame,
+				     void *buffer, size_t size)
 {
 	u8 *ptr = buffer;
 	size_t length;
+	int ret;
+
+	ret = hdmi_spd_infoframe_check_only(frame);
+	if (ret)
+		return ret;
 
 	length = HDMI_INFOFRAME_HEADER_SIZE + frame->length;
 
@@ -219,6 +312,36 @@ ssize_t hdmi_spd_infoframe_pack(struct hdmi_spd_infoframe *frame, void *buffer,
 
 	return length;
 }
+EXPORT_SYMBOL(hdmi_spd_infoframe_pack_only);
+
+/**
+ * hdmi_spd_infoframe_pack() - check a HDMI SPD infoframe,
+ *                             and write it to binary buffer
+ * @frame: HDMI SPD infoframe
+ * @buffer: destination buffer
+ * @size: size of buffer
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields, after which it packs the information
+ * contained in the @frame structure into a binary representation that
+ * can be written into the corresponding controller registers. This function
+ * also computes the checksum as required by section 5.3.5 of the HDMI 1.4
+ * specification.
+ *
+ * Returns the number of bytes packed into the binary buffer or a negative
+ * error code on failure.
+ */
+ssize_t hdmi_spd_infoframe_pack(struct hdmi_spd_infoframe *frame,
+				void *buffer, size_t size)
+{
+	int ret;
+
+	ret = hdmi_spd_infoframe_check(frame);
+	if (ret)
+		return ret;
+
+	return hdmi_spd_infoframe_pack_only(frame, buffer, size);
+}
 EXPORT_SYMBOL(hdmi_spd_infoframe_pack);
 
 /**
@@ -239,8 +362,33 @@ int hdmi_audio_infoframe_init(struct hdmi_audio_infoframe *frame)
 }
 EXPORT_SYMBOL(hdmi_audio_infoframe_init);
 
+static int hdmi_audio_infoframe_check_only(const struct hdmi_audio_infoframe *frame)
+{
+	if (frame->type != HDMI_INFOFRAME_TYPE_AUDIO ||
+	    frame->version != 1 ||
+	    frame->length != HDMI_AUDIO_INFOFRAME_SIZE)
+		return -EINVAL;
+
+	return 0;
+}
+
 /**
- * hdmi_audio_infoframe_pack() - write HDMI audio infoframe to binary buffer
+ * hdmi_audio_infoframe_check() - check a HDMI audio infoframe
+ * @frame: HDMI audio infoframe
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields.
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
+int hdmi_audio_infoframe_check(struct hdmi_audio_infoframe *frame)
+{
+	return hdmi_audio_infoframe_check_only(frame);
+}
+EXPORT_SYMBOL(hdmi_audio_infoframe_check);
+
+/**
+ * hdmi_audio_infoframe_pack_only() - write HDMI audio infoframe to binary buffer
  * @frame: HDMI audio infoframe
  * @buffer: destination buffer
  * @size: size of buffer
@@ -253,12 +401,17 @@ EXPORT_SYMBOL(hdmi_audio_infoframe_init);
  * Returns the number of bytes packed into the binary buffer or a negative
  * error code on failure.
  */
-ssize_t hdmi_audio_infoframe_pack(struct hdmi_audio_infoframe *frame,
-				  void *buffer, size_t size)
+ssize_t hdmi_audio_infoframe_pack_only(const struct hdmi_audio_infoframe *frame,
+				       void *buffer, size_t size)
 {
 	unsigned char channels;
 	u8 *ptr = buffer;
 	size_t length;
+	int ret;
+
+	ret = hdmi_audio_infoframe_check_only(frame);
+	if (ret)
+		return ret;
 
 	length = HDMI_INFOFRAME_HEADER_SIZE + frame->length;
 
@@ -294,6 +447,36 @@ ssize_t hdmi_audio_infoframe_pack(struct hdmi_audio_infoframe *frame,
 
 	return length;
 }
+EXPORT_SYMBOL(hdmi_audio_infoframe_pack_only);
+
+/**
+ * hdmi_audio_infoframe_pack() - check a HDMI Audio infoframe,
+ *                               and write it to binary buffer
+ * @frame: HDMI Audio infoframe
+ * @buffer: destination buffer
+ * @size: size of buffer
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields, after which it packs the information
+ * contained in the @frame structure into a binary representation that
+ * can be written into the corresponding controller registers. This function
+ * also computes the checksum as required by section 5.3.5 of the HDMI 1.4
+ * specification.
+ *
+ * Returns the number of bytes packed into the binary buffer or a negative
+ * error code on failure.
+ */
+ssize_t hdmi_audio_infoframe_pack(struct hdmi_audio_infoframe *frame,
+				  void *buffer, size_t size)
+{
+	int ret;
+
+	ret = hdmi_audio_infoframe_check(frame);
+	if (ret)
+		return ret;
+
+	return hdmi_audio_infoframe_pack_only(frame, buffer, size);
+}
 EXPORT_SYMBOL(hdmi_audio_infoframe_pack);
 
 /**
@@ -316,6 +499,7 @@ int hdmi_vendor_infoframe_init(struct hdmi_vendor_infoframe *frame)
 	 * value
 	 */
 	frame->s3d_struct = HDMI_3D_STRUCTURE_INVALID;
+	frame->length = 4;
 
 	return 0;
 }
@@ -332,8 +516,42 @@ static int hdmi_vendor_infoframe_length(const struct hdmi_vendor_infoframe *fram
 		return 4;
 }
 
+static int hdmi_vendor_infoframe_check_only(const struct hdmi_vendor_infoframe *frame)
+{
+	if (frame->type != HDMI_INFOFRAME_TYPE_VENDOR ||
+	    frame->version != 1 ||
+	    frame->oui != HDMI_IEEE_OUI)
+		return -EINVAL;
+
+	/* only one of those can be supplied */
+	if (frame->vic != 0 && frame->s3d_struct != HDMI_3D_STRUCTURE_INVALID)
+		return -EINVAL;
+
+	if (frame->length != hdmi_vendor_infoframe_length(frame))
+		return -EINVAL;
+
+	return 0;
+}
+
 /**
- * hdmi_vendor_infoframe_pack() - write a HDMI vendor infoframe to binary buffer
+ * hdmi_vendor_infoframe_check() - check a HDMI vendor infoframe
+ * @frame: HDMI infoframe
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields.
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
+int hdmi_vendor_infoframe_check(struct hdmi_vendor_infoframe *frame)
+{
+	frame->length = hdmi_vendor_infoframe_length(frame);
+
+	return hdmi_vendor_infoframe_check_only(frame);
+}
+EXPORT_SYMBOL(hdmi_vendor_infoframe_check);
+
+/**
+ * hdmi_vendor_infoframe_pack_only() - write a HDMI vendor infoframe to binary buffer
  * @frame: HDMI infoframe
  * @buffer: destination buffer
  * @size: size of buffer
@@ -346,17 +564,16 @@ static int hdmi_vendor_infoframe_length(const struct hdmi_vendor_infoframe *fram
  * Returns the number of bytes packed into the binary buffer or a negative
  * error code on failure.
  */
-ssize_t hdmi_vendor_infoframe_pack(struct hdmi_vendor_infoframe *frame,
-				 void *buffer, size_t size)
+ssize_t hdmi_vendor_infoframe_pack_only(const struct hdmi_vendor_infoframe *frame,
+					void *buffer, size_t size)
 {
 	u8 *ptr = buffer;
 	size_t length;
+	int ret;
 
-	/* only one of those can be supplied */
-	if (frame->vic != 0 && frame->s3d_struct != HDMI_3D_STRUCTURE_INVALID)
-		return -EINVAL;
-
-	frame->length = hdmi_vendor_infoframe_length(frame);
+	ret = hdmi_vendor_infoframe_check_only(frame);
+	if (ret)
+		return ret;
 
 	length = HDMI_INFOFRAME_HEADER_SIZE + frame->length;
 
@@ -391,24 +608,278 @@ ssize_t hdmi_vendor_infoframe_pack(struct hdmi_vendor_infoframe *frame,
 
 	return length;
 }
+EXPORT_SYMBOL(hdmi_vendor_infoframe_pack_only);
+
+/**
+ * hdmi_vendor_infoframe_pack() - check a HDMI Vendor infoframe,
+ *                                and write it to binary buffer
+ * @frame: HDMI Vendor infoframe
+ * @buffer: destination buffer
+ * @size: size of buffer
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields, after which it packs the information
+ * contained in the @frame structure into a binary representation that
+ * can be written into the corresponding controller registers. This function
+ * also computes the checksum as required by section 5.3.5 of the HDMI 1.4
+ * specification.
+ *
+ * Returns the number of bytes packed into the binary buffer or a negative
+ * error code on failure.
+ */
+ssize_t hdmi_vendor_infoframe_pack(struct hdmi_vendor_infoframe *frame,
+				   void *buffer, size_t size)
+{
+	int ret;
+
+	ret = hdmi_vendor_infoframe_check(frame);
+	if (ret)
+		return ret;
+
+	return hdmi_vendor_infoframe_pack_only(frame, buffer, size);
+}
 EXPORT_SYMBOL(hdmi_vendor_infoframe_pack);
 
-/*
- * hdmi_vendor_any_infoframe_pack() - write a vendor infoframe to binary buffer
- */
-static ssize_t
-hdmi_vendor_any_infoframe_pack(union hdmi_vendor_any_infoframe *frame,
-			   void *buffer, size_t size)
+static int
+hdmi_vendor_any_infoframe_check_only(const union hdmi_vendor_any_infoframe *frame)
 {
+	if (frame->any.type != HDMI_INFOFRAME_TYPE_VENDOR ||
+	    frame->any.version != 1)
+		return -EINVAL;
+
+	return 0;
+}
+
+/**
+ * hdmi_drm_infoframe_init() - initialize an HDMI Dynaminc Range and
+ * mastering infoframe
+ * @frame: HDMI DRM infoframe
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
+int hdmi_drm_infoframe_init(struct hdmi_drm_infoframe *frame)
+{
+	memset(frame, 0, sizeof(*frame));
+
+	frame->type = HDMI_INFOFRAME_TYPE_DRM;
+	frame->version = 1;
+	frame->length = HDMI_DRM_INFOFRAME_SIZE;
+
+	return 0;
+}
+EXPORT_SYMBOL(hdmi_drm_infoframe_init);
+
+static int hdmi_drm_infoframe_check_only(const struct hdmi_drm_infoframe *frame)
+{
+	if (frame->type != HDMI_INFOFRAME_TYPE_DRM ||
+	    frame->version != 1)
+		return -EINVAL;
+
+	if (frame->length != HDMI_DRM_INFOFRAME_SIZE)
+		return -EINVAL;
+
+	return 0;
+}
+
+/**
+ * hdmi_drm_infoframe_check() - check a HDMI DRM infoframe
+ * @frame: HDMI DRM infoframe
+ *
+ * Validates that the infoframe is consistent.
+ * Returns 0 on success or a negative error code on failure.
+ */
+int hdmi_drm_infoframe_check(struct hdmi_drm_infoframe *frame)
+{
+	return hdmi_drm_infoframe_check_only(frame);
+}
+EXPORT_SYMBOL(hdmi_drm_infoframe_check);
+
+/**
+ * hdmi_drm_infoframe_pack_only() - write HDMI DRM infoframe to binary buffer
+ * @frame: HDMI DRM infoframe
+ * @buffer: destination buffer
+ * @size: size of buffer
+ *
+ * Packs the information contained in the @frame structure into a binary
+ * representation that can be written into the corresponding controller
+ * registers. Also computes the checksum as required by section 5.3.5 of
+ * the HDMI 1.4 specification.
+ *
+ * Returns the number of bytes packed into the binary buffer or a negative
+ * error code on failure.
+ */
+ssize_t hdmi_drm_infoframe_pack_only(const struct hdmi_drm_infoframe *frame,
+				     void *buffer, size_t size)
+{
+	u8 *ptr = buffer;
+	size_t length;
+	int i;
+
+	length = HDMI_INFOFRAME_HEADER_SIZE + frame->length;
+
+	if (size < length)
+		return -ENOSPC;
+
+	memset(buffer, 0, size);
+
+	ptr[0] = frame->type;
+	ptr[1] = frame->version;
+	ptr[2] = frame->length;
+	ptr[3] = 0; /* checksum */
+
+	/* start infoframe payload */
+	ptr += HDMI_INFOFRAME_HEADER_SIZE;
+
+	*ptr++ = frame->eotf;
+	*ptr++ = frame->metadata_type;
+
+	for (i = 0; i < 3; i++) {
+		*ptr++ = frame->display_primaries[i].x;
+		*ptr++ = frame->display_primaries[i].x >> 8;
+		*ptr++ = frame->display_primaries[i].y;
+		*ptr++ = frame->display_primaries[i].y >> 8;
+	}
+
+	*ptr++ = frame->white_point.x;
+	*ptr++ = frame->white_point.x >> 8;
+
+	*ptr++ = frame->white_point.y;
+	*ptr++ = frame->white_point.y >> 8;
+
+	*ptr++ = frame->max_display_mastering_luminance;
+	*ptr++ = frame->max_display_mastering_luminance >> 8;
+
+	*ptr++ = frame->min_display_mastering_luminance;
+	*ptr++ = frame->min_display_mastering_luminance >> 8;
+
+	*ptr++ = frame->max_cll;
+	*ptr++ = frame->max_cll >> 8;
+
+	*ptr++ = frame->max_fall;
+	*ptr++ = frame->max_fall >> 8;
+
+	hdmi_infoframe_set_checksum(buffer, length);
+
+	return length;
+}
+EXPORT_SYMBOL(hdmi_drm_infoframe_pack_only);
+
+/**
+ * hdmi_drm_infoframe_pack() - check a HDMI DRM infoframe,
+ *                             and write it to binary buffer
+ * @frame: HDMI DRM infoframe
+ * @buffer: destination buffer
+ * @size: size of buffer
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields, after which it packs the information
+ * contained in the @frame structure into a binary representation that
+ * can be written into the corresponding controller registers. This function
+ * also computes the checksum as required by section 5.3.5 of the HDMI 1.4
+ * specification.
+ *
+ * Returns the number of bytes packed into the binary buffer or a negative
+ * error code on failure.
+ */
+ssize_t hdmi_drm_infoframe_pack(struct hdmi_drm_infoframe *frame,
+				void *buffer, size_t size)
+{
+	int ret;
+
+	ret = hdmi_drm_infoframe_check(frame);
+	if (ret)
+		return ret;
+
+	return hdmi_drm_infoframe_pack_only(frame, buffer, size);
+}
+EXPORT_SYMBOL(hdmi_drm_infoframe_pack);
+
+/*
+ * hdmi_vendor_any_infoframe_check() - check a vendor infoframe
+ */
+static int
+hdmi_vendor_any_infoframe_check(union hdmi_vendor_any_infoframe *frame)
+{
+	int ret;
+
+	ret = hdmi_vendor_any_infoframe_check_only(frame);
+	if (ret)
+		return ret;
+
 	/* we only know about HDMI vendor infoframes */
 	if (frame->any.oui != HDMI_IEEE_OUI)
 		return -EINVAL;
 
-	return hdmi_vendor_infoframe_pack(&frame->hdmi, buffer, size);
+	return hdmi_vendor_infoframe_check(&frame->hdmi);
+}
+
+/*
+ * hdmi_vendor_any_infoframe_pack_only() - write a vendor infoframe to binary buffer
+ */
+static ssize_t
+hdmi_vendor_any_infoframe_pack_only(const union hdmi_vendor_any_infoframe *frame,
+				    void *buffer, size_t size)
+{
+	int ret;
+
+	ret = hdmi_vendor_any_infoframe_check_only(frame);
+	if (ret)
+		return ret;
+
+	/* we only know about HDMI vendor infoframes */
+	if (frame->any.oui != HDMI_IEEE_OUI)
+		return -EINVAL;
+
+	return hdmi_vendor_infoframe_pack_only(&frame->hdmi, buffer, size);
+}
+
+/*
+ * hdmi_vendor_any_infoframe_pack() - check a vendor infoframe,
+ *                                    and write it to binary buffer
+ */
+static ssize_t
+hdmi_vendor_any_infoframe_pack(union hdmi_vendor_any_infoframe *frame,
+			       void *buffer, size_t size)
+{
+	int ret;
+
+	ret = hdmi_vendor_any_infoframe_check(frame);
+	if (ret)
+		return ret;
+
+	return hdmi_vendor_any_infoframe_pack_only(frame, buffer, size);
 }
 
 /**
- * hdmi_infoframe_pack() - write a HDMI infoframe to binary buffer
+ * hdmi_infoframe_check() - check a HDMI infoframe
+ * @frame: HDMI infoframe
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields.
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
+int
+hdmi_infoframe_check(union hdmi_infoframe *frame)
+{
+	switch (frame->any.type) {
+	case HDMI_INFOFRAME_TYPE_AVI:
+		return hdmi_avi_infoframe_check(&frame->avi);
+	case HDMI_INFOFRAME_TYPE_SPD:
+		return hdmi_spd_infoframe_check(&frame->spd);
+	case HDMI_INFOFRAME_TYPE_AUDIO:
+		return hdmi_audio_infoframe_check(&frame->audio);
+	case HDMI_INFOFRAME_TYPE_VENDOR:
+		return hdmi_vendor_any_infoframe_check(&frame->vendor);
+	default:
+		WARN(1, "Bad infoframe type %d\n", frame->any.type);
+		return -EINVAL;
+	}
+}
+EXPORT_SYMBOL(hdmi_infoframe_check);
+
+/**
+ * hdmi_infoframe_pack_only() - write a HDMI infoframe to binary buffer
  * @frame: HDMI infoframe
  * @buffer: destination buffer
  * @size: size of buffer
@@ -422,13 +893,69 @@ hdmi_vendor_any_infoframe_pack(union hdmi_vendor_any_infoframe *frame,
  * error code on failure.
  */
 ssize_t
-hdmi_infoframe_pack(union hdmi_infoframe *frame, void *buffer, size_t size)
+hdmi_infoframe_pack_only(const union hdmi_infoframe *frame, void *buffer, size_t size)
+{
+	ssize_t length;
+
+	switch (frame->any.type) {
+	case HDMI_INFOFRAME_TYPE_AVI:
+		length = hdmi_avi_infoframe_pack_only(&frame->avi,
+						      buffer, size);
+		break;
+	case HDMI_INFOFRAME_TYPE_DRM:
+		length = hdmi_drm_infoframe_pack_only(&frame->drm,
+						      buffer, size);
+		break;
+	case HDMI_INFOFRAME_TYPE_SPD:
+		length = hdmi_spd_infoframe_pack_only(&frame->spd,
+						      buffer, size);
+		break;
+	case HDMI_INFOFRAME_TYPE_AUDIO:
+		length = hdmi_audio_infoframe_pack_only(&frame->audio,
+							buffer, size);
+		break;
+	case HDMI_INFOFRAME_TYPE_VENDOR:
+		length = hdmi_vendor_any_infoframe_pack_only(&frame->vendor,
+							     buffer, size);
+		break;
+	default:
+		WARN(1, "Bad infoframe type %d\n", frame->any.type);
+		length = -EINVAL;
+	}
+
+	return length;
+}
+EXPORT_SYMBOL(hdmi_infoframe_pack_only);
+
+/**
+ * hdmi_infoframe_pack() - check a HDMI infoframe,
+ *                         and write it to binary buffer
+ * @frame: HDMI infoframe
+ * @buffer: destination buffer
+ * @size: size of buffer
+ *
+ * Validates that the infoframe is consistent and updates derived fields
+ * (eg. length) based on other fields, after which it packs the information
+ * contained in the @frame structure into a binary representation that
+ * can be written into the corresponding controller registers. This function
+ * also computes the checksum as required by section 5.3.5 of the HDMI 1.4
+ * specification.
+ *
+ * Returns the number of bytes packed into the binary buffer or a negative
+ * error code on failure.
+ */
+ssize_t
+hdmi_infoframe_pack(union hdmi_infoframe *frame,
+		    void *buffer, size_t size)
 {
 	ssize_t length;
 
 	switch (frame->any.type) {
 	case HDMI_INFOFRAME_TYPE_AVI:
 		length = hdmi_avi_infoframe_pack(&frame->avi, buffer, size);
+		break;
+	case HDMI_INFOFRAME_TYPE_DRM:
+		length = hdmi_drm_infoframe_pack(&frame->drm, buffer, size);
 		break;
 	case HDMI_INFOFRAME_TYPE_SPD:
 		length = hdmi_spd_infoframe_pack(&frame->spd, buffer, size);
@@ -462,13 +989,15 @@ static const char *hdmi_infoframe_type_get_name(enum hdmi_infoframe_type type)
 		return "Source Product Description (SPD)";
 	case HDMI_INFOFRAME_TYPE_AUDIO:
 		return "Audio";
+	case HDMI_INFOFRAME_TYPE_DRM:
+		return "Dynamic Range and Mastering";
 	}
 	return "Reserved";
 }
 
 static void hdmi_infoframe_log_header(const char *level,
 				      struct device *dev,
-				      struct hdmi_any_infoframe *frame)
+				      const struct hdmi_any_infoframe *frame)
 {
 	hdmi_log("HDMI infoframe: %s, version %u, length %u\n",
 		hdmi_infoframe_type_get_name(frame->type),
@@ -589,10 +1118,10 @@ hdmi_extended_colorimetry_get_name(enum hdmi_extended_colorimetry ext_col)
 		return "xvYCC 709";
 	case HDMI_EXTENDED_COLORIMETRY_S_YCC_601:
 		return "sYCC 601";
-	case HDMI_EXTENDED_COLORIMETRY_ADOBE_YCC_601:
-		return "Adobe YCC 601";
-	case HDMI_EXTENDED_COLORIMETRY_ADOBE_RGB:
-		return "Adobe RGB";
+	case HDMI_EXTENDED_COLORIMETRY_OPYCC_601:
+		return "opYCC 601";
+	case HDMI_EXTENDED_COLORIMETRY_OPRGB:
+		return "opRGB";
 	case HDMI_EXTENDED_COLORIMETRY_BT2020_CONST_LUM:
 		return "BT.2020 Constant Luminance";
 	case HDMI_EXTENDED_COLORIMETRY_BT2020:
@@ -662,18 +1191,12 @@ hdmi_content_type_get_name(enum hdmi_content_type content_type)
 	return "Invalid";
 }
 
-/**
- * hdmi_avi_infoframe_log() - log info of HDMI AVI infoframe
- * @level: logging level
- * @dev: device
- * @frame: HDMI AVI infoframe
- */
 static void hdmi_avi_infoframe_log(const char *level,
 				   struct device *dev,
-				   struct hdmi_avi_infoframe *frame)
+				   const struct hdmi_avi_infoframe *frame)
 {
 	hdmi_infoframe_log_header(level, dev,
-				  (struct hdmi_any_infoframe *)frame);
+				  (const struct hdmi_any_infoframe *)frame);
 
 	hdmi_log("    colorspace: %s\n",
 			hdmi_colorspace_get_name(frame->colorspace));
@@ -739,20 +1262,14 @@ static const char *hdmi_spd_sdi_get_name(enum hdmi_spd_sdi sdi)
 	return "Reserved";
 }
 
-/**
- * hdmi_spd_infoframe_log() - log info of HDMI SPD infoframe
- * @level: logging level
- * @dev: device
- * @frame: HDMI SPD infoframe
- */
 static void hdmi_spd_infoframe_log(const char *level,
 				   struct device *dev,
-				   struct hdmi_spd_infoframe *frame)
+				   const struct hdmi_spd_infoframe *frame)
 {
 	u8 buf[17];
 
 	hdmi_infoframe_log_header(level, dev,
-				  (struct hdmi_any_infoframe *)frame);
+				  (const struct hdmi_any_infoframe *)frame);
 
 	memset(buf, 0, sizeof(buf));
 
@@ -875,18 +1392,12 @@ hdmi_audio_coding_type_ext_get_name(enum hdmi_audio_coding_type_ext ctx)
 	return "Reserved";
 }
 
-/**
- * hdmi_audio_infoframe_log() - log info of HDMI AUDIO infoframe
- * @level: logging level
- * @dev: device
- * @frame: HDMI AUDIO infoframe
- */
 static void hdmi_audio_infoframe_log(const char *level,
 				     struct device *dev,
-				     struct hdmi_audio_infoframe *frame)
+				     const struct hdmi_audio_infoframe *frame)
 {
 	hdmi_infoframe_log_header(level, dev,
-				  (struct hdmi_any_infoframe *)frame);
+				  (const struct hdmi_any_infoframe *)frame);
 
 	if (frame->channels)
 		hdmi_log("    channels: %u\n", frame->channels - 1);
@@ -906,6 +1417,34 @@ static void hdmi_audio_infoframe_log(const char *level,
 			frame->level_shift_value);
 	hdmi_log("    downmix inhibit: %s\n",
 			frame->downmix_inhibit ? "Yes" : "No");
+}
+
+static void hdmi_drm_infoframe_log(const char *level,
+				   struct device *dev,
+				   const struct hdmi_drm_infoframe *frame)
+{
+	int i;
+
+	hdmi_infoframe_log_header(level, dev,
+				  (struct hdmi_any_infoframe *)frame);
+	hdmi_log("length: %d\n", frame->length);
+	hdmi_log("metadata type: %d\n", frame->metadata_type);
+	hdmi_log("eotf: %d\n", frame->eotf);
+	for (i = 0; i < 3; i++) {
+		hdmi_log("x[%d]: %d\n", i, frame->display_primaries[i].x);
+		hdmi_log("y[%d]: %d\n", i, frame->display_primaries[i].y);
+	}
+
+	hdmi_log("white point x: %d\n", frame->white_point.x);
+	hdmi_log("white point y: %d\n", frame->white_point.y);
+
+	hdmi_log("max_display_mastering_luminance: %d\n",
+		 frame->max_display_mastering_luminance);
+	hdmi_log("min_display_mastering_luminance: %d\n",
+		 frame->min_display_mastering_luminance);
+
+	hdmi_log("max_cll: %d\n", frame->max_cll);
+	hdmi_log("max_fall: %d\n", frame->max_fall);
 }
 
 static const char *
@@ -937,21 +1476,15 @@ hdmi_3d_structure_get_name(enum hdmi_3d_structure s3d_struct)
 	return "Reserved";
 }
 
-/**
- * hdmi_vendor_infoframe_log() - log info of HDMI VENDOR infoframe
- * @level: logging level
- * @dev: device
- * @frame: HDMI VENDOR infoframe
- */
 static void
 hdmi_vendor_any_infoframe_log(const char *level,
 			      struct device *dev,
-			      union hdmi_vendor_any_infoframe *frame)
+			      const union hdmi_vendor_any_infoframe *frame)
 {
-	struct hdmi_vendor_infoframe *hvf = &frame->hdmi;
+	const struct hdmi_vendor_infoframe *hvf = &frame->hdmi;
 
 	hdmi_infoframe_log_header(level, dev,
-				  (struct hdmi_any_infoframe *)frame);
+				  (const struct hdmi_any_infoframe *)frame);
 
 	if (frame->any.oui != HDMI_IEEE_OUI) {
 		hdmi_log("    not a HDMI vendor infoframe\n");
@@ -981,7 +1514,7 @@ hdmi_vendor_any_infoframe_log(const char *level,
  */
 void hdmi_infoframe_log(const char *level,
 			struct device *dev,
-			union hdmi_infoframe *frame)
+			const union hdmi_infoframe *frame)
 {
 	switch (frame->any.type) {
 	case HDMI_INFOFRAME_TYPE_AVI:
@@ -996,14 +1529,18 @@ void hdmi_infoframe_log(const char *level,
 	case HDMI_INFOFRAME_TYPE_VENDOR:
 		hdmi_vendor_any_infoframe_log(level, dev, &frame->vendor);
 		break;
+	case HDMI_INFOFRAME_TYPE_DRM:
+		hdmi_drm_infoframe_log(level, dev, &frame->drm);
+		break;
 	}
 }
 EXPORT_SYMBOL(hdmi_infoframe_log);
 
 /**
  * hdmi_avi_infoframe_unpack() - unpack binary buffer to a HDMI AVI infoframe
- * @buffer: source buffer
  * @frame: HDMI AVI infoframe
+ * @buffer: source buffer
+ * @size: size of buffer
  *
  * Unpacks the information contained in binary @buffer into a structured
  * @frame of the HDMI Auxiliary Video (AVI) information frame.
@@ -1013,10 +1550,13 @@ EXPORT_SYMBOL(hdmi_infoframe_log);
  * Returns 0 on success or a negative error code on failure.
  */
 static int hdmi_avi_infoframe_unpack(struct hdmi_avi_infoframe *frame,
-				     void *buffer)
+				     const void *buffer, size_t size)
 {
-	u8 *ptr = buffer;
+	const u8 *ptr = buffer;
 	int ret;
+
+	if (size < HDMI_INFOFRAME_SIZE(AVI))
+		return -EINVAL;
 
 	if (ptr[0] != HDMI_INFOFRAME_TYPE_AVI ||
 	    ptr[1] != 2 ||
@@ -1065,8 +1605,9 @@ static int hdmi_avi_infoframe_unpack(struct hdmi_avi_infoframe *frame,
 
 /**
  * hdmi_spd_infoframe_unpack() - unpack binary buffer to a HDMI SPD infoframe
- * @buffer: source buffer
  * @frame: HDMI SPD infoframe
+ * @buffer: source buffer
+ * @size: size of buffer
  *
  * Unpacks the information contained in binary @buffer into a structured
  * @frame of the HDMI Source Product Description (SPD) information frame.
@@ -1076,10 +1617,13 @@ static int hdmi_avi_infoframe_unpack(struct hdmi_avi_infoframe *frame,
  * Returns 0 on success or a negative error code on failure.
  */
 static int hdmi_spd_infoframe_unpack(struct hdmi_spd_infoframe *frame,
-				     void *buffer)
+				     const void *buffer, size_t size)
 {
-	u8 *ptr = buffer;
+	const u8 *ptr = buffer;
 	int ret;
+
+	if (size < HDMI_INFOFRAME_SIZE(SPD))
+		return -EINVAL;
 
 	if (ptr[0] != HDMI_INFOFRAME_TYPE_SPD ||
 	    ptr[1] != 1 ||
@@ -1103,8 +1647,9 @@ static int hdmi_spd_infoframe_unpack(struct hdmi_spd_infoframe *frame,
 
 /**
  * hdmi_audio_infoframe_unpack() - unpack binary buffer to a HDMI AUDIO infoframe
- * @buffer: source buffer
  * @frame: HDMI Audio infoframe
+ * @buffer: source buffer
+ * @size: size of buffer
  *
  * Unpacks the information contained in binary @buffer into a structured
  * @frame of the HDMI Audio information frame.
@@ -1114,10 +1659,13 @@ static int hdmi_spd_infoframe_unpack(struct hdmi_spd_infoframe *frame,
  * Returns 0 on success or a negative error code on failure.
  */
 static int hdmi_audio_infoframe_unpack(struct hdmi_audio_infoframe *frame,
-				       void *buffer)
+				       const void *buffer, size_t size)
 {
-	u8 *ptr = buffer;
+	const u8 *ptr = buffer;
 	int ret;
+
+	if (size < HDMI_INFOFRAME_SIZE(AUDIO))
+		return -EINVAL;
 
 	if (ptr[0] != HDMI_INFOFRAME_TYPE_AUDIO ||
 	    ptr[1] != 1 ||
@@ -1148,8 +1696,9 @@ static int hdmi_audio_infoframe_unpack(struct hdmi_audio_infoframe *frame,
 
 /**
  * hdmi_vendor_infoframe_unpack() - unpack binary buffer to a HDMI vendor infoframe
- * @buffer: source buffer
  * @frame: HDMI Vendor infoframe
+ * @buffer: source buffer
+ * @size: size of buffer
  *
  * Unpacks the information contained in binary @buffer into a structured
  * @frame of the HDMI Vendor information frame.
@@ -1160,13 +1709,16 @@ static int hdmi_audio_infoframe_unpack(struct hdmi_audio_infoframe *frame,
  */
 static int
 hdmi_vendor_any_infoframe_unpack(union hdmi_vendor_any_infoframe *frame,
-				 void *buffer)
+				 const void *buffer, size_t size)
 {
-	u8 *ptr = buffer;
+	const u8 *ptr = buffer;
 	size_t length;
 	int ret;
 	u8 hdmi_video_format;
 	struct hdmi_vendor_infoframe *hvf = &frame->hdmi;
+
+	if (size < HDMI_INFOFRAME_HEADER_SIZE)
+		return -EINVAL;
 
 	if (ptr[0] != HDMI_INFOFRAME_TYPE_VENDOR ||
 	    ptr[1] != 1 ||
@@ -1174,6 +1726,9 @@ hdmi_vendor_any_infoframe_unpack(union hdmi_vendor_any_infoframe *frame,
 		return -EINVAL;
 
 	length = ptr[2];
+
+	if (size < HDMI_INFOFRAME_HEADER_SIZE + length)
+		return -EINVAL;
 
 	if (hdmi_infoframe_checksum(buffer,
 				    HDMI_INFOFRAME_HEADER_SIZE + length) != 0)
@@ -1220,9 +1775,74 @@ hdmi_vendor_any_infoframe_unpack(union hdmi_vendor_any_infoframe *frame,
 }
 
 /**
- * hdmi_infoframe_unpack() - unpack binary buffer to a HDMI infoframe
+ * hdmi_drm_infoframe_unpack() - unpack binary buffer to a HDMI DRM infoframe
+ * @frame: HDMI DRM infoframe
  * @buffer: source buffer
+ * @size: size of buffer
+ *
+ * Unpacks the information contained in binary @buffer into a structured
+ * @frame of the HDMI Dynamic Range and Mastering (DRM) information frame.
+ * Also verifies the checksum as required by section 5.3.5 of the HDMI 1.4
+ * specification.
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
+static int hdmi_drm_infoframe_unpack(struct hdmi_drm_infoframe *frame,
+				     const void *buffer, size_t size)
+{
+	const u8 *ptr = buffer;
+	const u8 *temp;
+	u8 x_lsb, x_msb;
+	u8 y_lsb, y_msb;
+	int ret;
+	int i;
+
+	if (size < HDMI_INFOFRAME_SIZE(DRM))
+		return -EINVAL;
+
+	if (ptr[0] != HDMI_INFOFRAME_TYPE_DRM ||
+	    ptr[1] != 1 ||
+	    ptr[2] != HDMI_DRM_INFOFRAME_SIZE)
+		return -EINVAL;
+
+	if (hdmi_infoframe_checksum(buffer, HDMI_INFOFRAME_SIZE(DRM)) != 0)
+		return -EINVAL;
+
+	ret = hdmi_drm_infoframe_init(frame);
+	if (ret)
+		return ret;
+
+	ptr += HDMI_INFOFRAME_HEADER_SIZE;
+
+	frame->eotf = ptr[0] & 0x7;
+	frame->metadata_type = ptr[1] & 0x7;
+
+	temp = ptr + 2;
+	for (i = 0; i < 3; i++) {
+		x_lsb = *temp++;
+		x_msb = *temp++;
+		frame->display_primaries[i].x =  (x_msb << 8) | x_lsb;
+		y_lsb = *temp++;
+		y_msb = *temp++;
+		frame->display_primaries[i].y = (y_msb << 8) | y_lsb;
+	}
+
+	frame->white_point.x = (ptr[15] << 8) | ptr[14];
+	frame->white_point.y = (ptr[17] << 8) | ptr[16];
+
+	frame->max_display_mastering_luminance = (ptr[19] << 8) | ptr[18];
+	frame->min_display_mastering_luminance = (ptr[21] << 8) | ptr[20];
+	frame->max_cll = (ptr[23] << 8) | ptr[22];
+	frame->max_fall = (ptr[25] << 8) | ptr[24];
+
+	return 0;
+}
+
+/**
+ * hdmi_infoframe_unpack() - unpack binary buffer to a HDMI infoframe
  * @frame: HDMI infoframe
+ * @buffer: source buffer
+ * @size: size of buffer
  *
  * Unpacks the information contained in binary buffer @buffer into a structured
  * @frame of a HDMI infoframe.
@@ -1231,23 +1851,30 @@ hdmi_vendor_any_infoframe_unpack(union hdmi_vendor_any_infoframe *frame,
  *
  * Returns 0 on success or a negative error code on failure.
  */
-int hdmi_infoframe_unpack(union hdmi_infoframe *frame, void *buffer)
+int hdmi_infoframe_unpack(union hdmi_infoframe *frame,
+			  const void *buffer, size_t size)
 {
 	int ret;
-	u8 *ptr = buffer;
+	const u8 *ptr = buffer;
+
+	if (size < HDMI_INFOFRAME_HEADER_SIZE)
+		return -EINVAL;
 
 	switch (ptr[0]) {
 	case HDMI_INFOFRAME_TYPE_AVI:
-		ret = hdmi_avi_infoframe_unpack(&frame->avi, buffer);
+		ret = hdmi_avi_infoframe_unpack(&frame->avi, buffer, size);
+		break;
+	case HDMI_INFOFRAME_TYPE_DRM:
+		ret = hdmi_drm_infoframe_unpack(&frame->drm, buffer, size);
 		break;
 	case HDMI_INFOFRAME_TYPE_SPD:
-		ret = hdmi_spd_infoframe_unpack(&frame->spd, buffer);
+		ret = hdmi_spd_infoframe_unpack(&frame->spd, buffer, size);
 		break;
 	case HDMI_INFOFRAME_TYPE_AUDIO:
-		ret = hdmi_audio_infoframe_unpack(&frame->audio, buffer);
+		ret = hdmi_audio_infoframe_unpack(&frame->audio, buffer, size);
 		break;
 	case HDMI_INFOFRAME_TYPE_VENDOR:
-		ret = hdmi_vendor_any_infoframe_unpack(&frame->vendor, buffer);
+		ret = hdmi_vendor_any_infoframe_unpack(&frame->vendor, buffer, size);
 		break;
 	default:
 		ret = -EINVAL;
@@ -1257,211 +1884,3 @@ int hdmi_infoframe_unpack(union hdmi_infoframe *frame, void *buffer)
 	return ret;
 }
 EXPORT_SYMBOL(hdmi_infoframe_unpack);
-
-/*
- * audio clock regeneration (acr) parameters
- * N and CTS computation are based on HDMI specification 1.4b
- */
-enum hdmi_audio_rate {
-	HDMI_AUDIO_N_CTS_32KHZ,
-	HDMI_AUDIO_N_CTS_44_1KHZ,
-	HDMI_AUDIO_N_CTS_48KHZ,
-};
-
-struct hdmi_audio_acr {
-	unsigned int tmds_clk;
-	struct hdmi_audio_n_cts n_cts;
-};
-
-static const struct hdmi_audio_acr hdmi_audio_standard_acr[3][13] = {
-	[HDMI_AUDIO_N_CTS_32KHZ] = {
-		/* N and CTS values for 32 kHz rate*/
-		{  25174825, {  4576,  28125, 0 } }, /* 25.20/1.001  MHz */
-		{  25200000, {  4096,  25200, 0 } }, /* 25.20        MHz */
-		{  27000000, {  4096,  27000, 0 } }, /* 27.00        MHz */
-		{  27027000, {  4096,  27027, 0 } }, /* 27.00*1.001  MHz */
-		{  54000000, {  4096,  54000, 0 } }, /* 54.00        MHz */
-		{  54054000, {  4096,  54054, 0 } }, /* 54.00*1.001  MHz */
-		{  74175824, { 11648, 210937, 50 } }, /* 74.25/1.001 MHz */
-		{  74250000, {  4096,  74250, 0 } }, /* 74.25        MHz */
-		{ 148351648, { 11648, 421875, 0 } }, /* 148.50/1.001 MHz */
-		{ 148500000, {  4096, 148500, 0 } }, /* 148.50       MHz */
-		{ 296703296, {  5824, 421875, 0 } }, /* 297/1.001 MHz (truncated)*/
-		{ 296703297, {  5824, 421875, 0 } }, /* 297/1.001 MHz (rounded)*/
-		{ 297000000, {  3072, 222750, 0 } }, /* 297          MHz */
-	},
-	[HDMI_AUDIO_N_CTS_44_1KHZ] = {
-		/* N and CTS values for 44.1 kHz, 88.2 kHz and 176.4 kHz rates*/
-		{  25174825, {  7007,  31250, 0 } }, /* 25.20/1.001  MHz */
-		{  25200000, {  6272,  28000, 0 } }, /* 25.20        MHz */
-		{  27000000, {  6272,  30000, 0 } }, /* 27.00        MHz */
-		{  27027000, {  6272,  30030, 0 } }, /* 27.00*1.001  MHz */
-		{  54000000, {  6272,  60000, 0 } }, /* 54.00        MHz */
-		{  54054000, {  6272,  60060, 0 } }, /* 54.00*1.001  MHz */
-		{  74175824, { 17836, 234375, 0 } }, /* 74.25/1.001  MHz */
-		{  74250000, {  6272,  82500, 0 } }, /* 74.25        MHz */
-		{ 148351648, {  8918, 234375, 0 } }, /* 148.50/1.001 MHz */
-		{ 148500000, {  6272, 165000, 0 } }, /* 148.50       MHz */
-		{ 296703296, {  4459, 234375, 0 } }, /* 297/1.001 MHz (truncated) */
-		{ 296703297, {  4459, 234375, 0 } }, /* 297/1.001 MHz (rounded) */
-		{ 297000000, {  4704, 247500, 0 } }, /* 297          MHz */
-	},
-	[HDMI_AUDIO_N_CTS_48KHZ] = {
-		/* N and CTS values for 48 kHz, 96 kHz and 192 kHz rates*/
-		{  25174825, {  6864,  28125, 0 } }, /* 25.20/1.001  MHz */
-		{  25200000, {  6144,  25200, 0 } }, /* 25.20        MHz */
-		{  27000000, {  6144,  27000, 0 } }, /* 27.00        MHz */
-		{  27027000, {  6144,  27027, 0 } }, /* 27.00*1.001  MHz */
-		{  54000000, {  6144,  54000, 0 } }, /* 54.00        MHz */
-		{  54054000, {  6144,  54054, 0 } }, /* 54.00*1.001  MHz */
-		{  74175824, { 11648, 140625, 0 } }, /* 74.25/1.001  MHz */
-		{  74250000, {  6144,  74250, 0 } }, /* 74.25        MHz */
-		{ 148351648, {  5824, 140625, 0 } }, /* 148.50/1.001 MHz */
-		{ 148500000, {  6144, 148500, 0 } }, /* 148.50       MHz */
-		{ 296703296, {  5824, 281250, 0 } }, /* 297/1.001 MHz (truncated) */
-		{ 296703297, {  5824, 281250, 0 } }, /* 297/1.001 MHz (rounded) */
-		{ 297000000, {  5120, 247500, 0 } }, /* 297          MHz */
-	}
-};
-
-/**
- * hdmi_audio_get_coherent_n_cts() - compute N and CTS parameters for coherent
- * clocks. Coherent clock means that audio and TMDS clocks have the same
- * source (no drifts between clocks).
- *
- * @audio_fs: audio frame clock frequency in Hz
- * @tmds_clk: HDMI TMDS clock frequency in Hz
- * @n_cts: N and CTS parameter returned to user
- *
- * Values computed are based on table described in HDMI specification 1.4b
- *
- * Returns 0 on success or a negative error code on failure.
- */
-int hdmi_audio_get_coherent_n_cts(unsigned int audio_fs,
-				  unsigned int tmds_clk,
-				  struct hdmi_audio_n_cts *n_cts)
-{
-	int audio_freq_id, i;
-	int rate_coeff = 1;
-	u64 val, min;
-	const struct hdmi_audio_acr  *acr_table;
-	const struct hdmi_audio_n_cts *predef_n_cts = NULL;
-
-	switch (audio_fs) {
-	case 32000:
-		audio_freq_id = HDMI_AUDIO_N_CTS_32KHZ;
-		n_cts->n = 4096;
-		break;
-	case 44100:
-		audio_freq_id = HDMI_AUDIO_N_CTS_44_1KHZ;
-		n_cts->n = 6272;
-		break;
-	case 48000:
-		audio_freq_id = HDMI_AUDIO_N_CTS_48KHZ;
-		n_cts->n = 6144;
-		break;
-	case 88200:
-		audio_freq_id = HDMI_AUDIO_N_CTS_44_1KHZ;
-		rate_coeff = 2;
-		n_cts->n = 6272 * 2;
-		break;
-	case 96000:
-		audio_freq_id = HDMI_AUDIO_N_CTS_48KHZ;
-		rate_coeff = 2;
-		n_cts->n = 6144 * 2;
-		break;
-	case 176400:
-		audio_freq_id = HDMI_AUDIO_N_CTS_44_1KHZ;
-		rate_coeff = 4;
-		n_cts->n = 6272 * 4;
-		break;
-	case 192000:
-		audio_freq_id = HDMI_AUDIO_N_CTS_48KHZ;
-		rate_coeff = 4;
-		n_cts->n = 6144 * 4;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	acr_table = hdmi_audio_standard_acr[audio_freq_id];
-	for (i = 0; i < ARRAY_SIZE(hdmi_audio_standard_acr[0]); i++) {
-		if (tmds_clk == acr_table[i].tmds_clk) {
-			predef_n_cts = &acr_table[i].n_cts;
-			n_cts->n = predef_n_cts->n * rate_coeff;
-			n_cts->cts = predef_n_cts->cts;
-			n_cts->cts_1_ratio = predef_n_cts->cts_1_ratio;
-			return 0;
-		}
-	}
-
-	/*
-	 * Pre-defined frequency not found. Compute CTS using formula:
-	 * CTS = (Ftdms_clk * N) / (128 * audio_fs)
-	 */
-	val = (u64)tmds_clk * n_cts->n;
-	n_cts->cts = div64_u64(val, 128UL * audio_fs);
-
-	n_cts->cts_1_ratio = 0;
-	min = (u64)n_cts->cts * 128UL * audio_fs;
-	if (min < val) {
-		/*
-		 * Non-accurate value for CTS
-		 * compute ratio, needed by user to alternate in ACR
-		 * between CTS and CTS + 1 value.
-		 */
-		n_cts->cts_1_ratio = ((u32)(val - min)) * 100 /
-				     (128 * audio_fs);
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL(hdmi_audio_get_coherent_n_cts);
-
-/**
- * hdmi_audio_get_non_coherent_n() - get N parameter for non-coherent
- * clocks. None-coherent clocks means that audio and TMDS clocks have not the
- * same source (drifts between clocks). In this case assumption is that CTS is
- * automatically calculated by hardware.
- *
- * @audio_fs: audio frame clock frequency in Hz
- *
- * Values computed are based on table described in HDMI specification 1.4b
- *
- * Returns n value.
- */
-int hdmi_audio_get_non_coherent_n(unsigned int audio_fs)
-{
-	unsigned int n;
-
-	switch (audio_fs) {
-	case 32000:
-		n = 4096;
-		break;
-	case 44100:
-		n = 6272;
-		break;
-	case 48000:
-		n = 6144;
-		break;
-	case 88200:
-		n = 6272 * 2;
-		break;
-	case 96000:
-		n = 6144 * 2;
-		break;
-	case 176400:
-		n = 6272 * 4;
-		break;
-	case 192000:
-		n = 6144 * 4;
-		break;
-	default:
-		/* Not pre-defined, recommended value: 128 * fs / 1000 */
-		n = (audio_fs * 128) / 1000;
-	}
-
-	return n;
-}
-EXPORT_SYMBOL(hdmi_audio_get_non_coherent_n);
-

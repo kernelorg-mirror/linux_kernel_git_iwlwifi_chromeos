@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /**
  * evdi_ioc32.c
  *
  * Copyright (c) 2016 The Chromium OS Authors
- * Copyright (c) 2017 DisplayLink (UK) Ltd.
+ * Copyright (c) 2018 DisplayLink (UK) Ltd.
  *
  * This program is free software; you can redistribute  it and/or modify it
  * under  the terms of  the GNU General  Public License as published by the
@@ -22,7 +23,7 @@
 
 #include <drm/drmP.h>
 #include <drm/drm_edid.h>
-#include <drm/evdi_drm.h>
+#include <uapi/drm/evdi_drm.h>
 
 #include "evdi_drv.h"
 
@@ -55,7 +56,7 @@ static int compat_evdi_connect(struct file *file,
 		return -EFAULT;
 
 	request = compat_alloc_user_space(sizeof(*request));
-	if (!access_ok(VERIFY_WRITE, request, sizeof(*request))
+	if (!access_ok(request, sizeof(*request))
 	    || __put_user(req32.connected, &request->connected)
 	    || __put_user(req32.dev_index, &request->dev_index)
 	    || __put_user((void __user *)(unsigned long)req32.edid_ptr32,
@@ -79,7 +80,7 @@ static int compat_evdi_grabpix(struct file *file,
 		return -EFAULT;
 
 	request = compat_alloc_user_space(sizeof(*request));
-	if (!access_ok(VERIFY_WRITE, request, sizeof(*request))
+	if (!access_ok(request, sizeof(*request))
 	    || __put_user(req32.mode, &request->mode)
 	    || __put_user(req32.buf_width, &request->buf_width)
 	    || __put_user(req32.buf_height, &request->buf_height)

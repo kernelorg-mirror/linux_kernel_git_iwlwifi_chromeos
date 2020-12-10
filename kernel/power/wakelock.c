@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * kernel/power/wakelock.c
  *
@@ -186,6 +187,7 @@ static struct wakelock *wakelock_lookup_add(const char *name, size_t len,
 		kfree(wl);
 		return ERR_PTR(-ENOMEM);
 	}
+
 	wl->ws = wakeup_source_register(NULL, wl->name);
 	if (!wl->ws) {
 		kfree(wl->name);

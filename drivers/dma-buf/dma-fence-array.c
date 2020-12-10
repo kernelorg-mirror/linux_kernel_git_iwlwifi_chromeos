@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * dma-fence-array: aggregate fences to be waited together
  *
@@ -6,20 +7,13 @@
  * Authors:
  *	Gustavo Padovan <gustavo@padovan.org>
  *	Christian König <christian.koenig@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/dma-fence-array.h>
+
+#define PENDING_ERROR 1
 
 static const char *dma_fence_array_get_driver_name(struct dma_fence *fence)
 {
@@ -31,12 +25,31 @@ static const char *dma_fence_array_get_timeline_name(struct dma_fence *fence)
 	return "unbound";
 }
 
-static void fence_array_signal_worker(struct work_struct *work)
+static void dma_fence_array_set_pending_error(struct dma_fence_array *array,
+					      int error)
 {
-	struct dma_fence_array *array =
-		container_of(work, struct dma_fence_array, signal_work);
+	/*
+	 * Propagate the first error reported by any of our fences, but only
+	 * before we ourselves are signaled.
+	 */
+	if (error)
+		cmpxchg(&array->base.error, PENDING_ERROR, error);
+}
+
+static void dma_fence_array_clear_pending_error(struct dma_fence_array *array)
+{
+	/* Clear the error flag if not actually set. */
+	cmpxchg(&array->base.error, PENDING_ERROR, 0);
+}
+
+static void irq_dma_fence_array_work(struct irq_work *wrk)
+{
+	struct dma_fence_array *array = container_of(wrk, typeof(*array), work);
+
+	dma_fence_array_clear_pending_error(array);
 
 	dma_fence_signal(&array->base);
+	dma_fence_put(&array->base);
 }
 
 static void dma_fence_array_cb_func(struct dma_fence *f,
@@ -46,9 +59,12 @@ static void dma_fence_array_cb_func(struct dma_fence *f,
 		container_of(cb, struct dma_fence_array_cb, cb);
 	struct dma_fence_array *array = array_cb->array;
 
+	dma_fence_array_set_pending_error(array, f->error);
+
 	if (atomic_dec_and_test(&array->num_pending))
-		schedule_work(&array->signal_work);
-	dma_fence_put(&array->base);
+		irq_work_queue(&array->work);
+	else
+		dma_fence_put(&array->base);
 }
 
 static bool dma_fence_array_enable_signaling(struct dma_fence *fence)
@@ -70,9 +86,14 @@ static bool dma_fence_array_enable_signaling(struct dma_fence *fence)
 		dma_fence_get(&array->base);
 		if (dma_fence_add_callback(array->fences[i], &cb[i].cb,
 					   dma_fence_array_cb_func)) {
+			int error = array->fences[i]->error;
+
+			dma_fence_array_set_pending_error(array, error);
 			dma_fence_put(&array->base);
-			if (atomic_dec_and_test(&array->num_pending))
+			if (atomic_dec_and_test(&array->num_pending)) {
+				dma_fence_array_clear_pending_error(array);
 				return false;
+			}
 		}
 	}
 
@@ -86,25 +107,16 @@ static bool dma_fence_array_signaled(struct dma_fence *fence)
 	return atomic_read(&array->num_pending) <= 0;
 }
 
-static void fence_array_release_worker(struct work_struct *work)
+static void dma_fence_array_release(struct dma_fence *fence)
 {
-	struct dma_fence_array *array =
-		container_of(work, struct dma_fence_array, release_work);
+	struct dma_fence_array *array = to_dma_fence_array(fence);
 	unsigned i;
-
-	flush_work(&array->signal_work);
 
 	for (i = 0; i < array->num_fences; ++i)
 		dma_fence_put(array->fences[i]);
 
 	kfree(array->fences);
-	dma_fence_free(&array->base);
-}
-
-static void dma_fence_array_release(struct dma_fence *fence)
-{
-	struct dma_fence_array *array = to_dma_fence_array(fence);
-	schedule_work(&array->release_work);
+	dma_fence_free(fence);
 }
 
 const struct dma_fence_ops dma_fence_array_ops = {
@@ -112,7 +124,6 @@ const struct dma_fence_ops dma_fence_array_ops = {
 	.get_timeline_name = dma_fence_array_get_timeline_name,
 	.enable_signaling = dma_fence_array_enable_signaling,
 	.signaled = dma_fence_array_signaled,
-	.wait = dma_fence_default_wait,
 	.release = dma_fence_array_release,
 };
 EXPORT_SYMBOL(dma_fence_array_ops);
@@ -150,15 +161,16 @@ struct dma_fence_array *dma_fence_array_create(int num_fences,
 	if (!array)
 		return NULL;
 
-	INIT_WORK(&array->signal_work, fence_array_signal_worker);
-	INIT_WORK(&array->release_work, fence_array_release_worker);
 	spin_lock_init(&array->lock);
 	dma_fence_init(&array->base, &dma_fence_array_ops, &array->lock,
 		       context, seqno);
+	init_irq_work(&array->work, irq_dma_fence_array_work);
 
 	array->num_fences = num_fences;
 	atomic_set(&array->num_pending, signal_on_any ? 1 : num_fences);
 	array->fences = fences;
+
+	array->base.error = PENDING_ERROR;
 
 	return array;
 }

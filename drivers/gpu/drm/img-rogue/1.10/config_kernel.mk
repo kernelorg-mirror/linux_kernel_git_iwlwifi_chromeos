@@ -18,7 +18,6 @@ override PVR_HANDLE_BACKEND := idr
 override PVR_SYSTEM := mt8173
 override RGX_TIMECORR_CLOCK := mono
 override SUPPORT_BUFFER_SYNC := 1
-override SUPPORT_GPUTRACE_EVENTS := 1
 override SUPPORT_RGX := 1
 override TARGET_OS :=
 override VMM_TYPE := stub

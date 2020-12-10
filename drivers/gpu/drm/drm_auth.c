@@ -28,22 +28,39 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <drm/drmP.h>
+#include <linux/slab.h>
+
+#include <drm/drm_auth.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_file.h>
+#include <drm/drm_lease.h>
+#include <drm/drm_print.h>
+
 #include "drm_internal.h"
 #include "drm_legacy.h"
 
 /**
- * drm_getmagic - Get unique magic of a client
- * @dev: DRM device to operate on
- * @data: ioctl data containing the drm_auth object
- * @file_priv: DRM file that performs the operation
+ * DOC: master and authentication
  *
- * This looks up the unique magic of the passed client and returns it. If the
- * client did not have a magic assigned, yet, a new one is registered. The magic
- * is stored in the passed drm_auth object.
+ * &struct drm_master is used to track groups of clients with open
+ * primary/legacy device nodes. For every &struct drm_file which has had at
+ * least once successfully became the device master (either through the
+ * SET_MASTER IOCTL, or implicitly through opening the primary device node when
+ * no one else is the current master that time) there exists one &drm_master.
+ * This is noted in &drm_file.is_master. All other clients have just a pointer
+ * to the &drm_master they are associated with.
  *
- * Returns: 0 on success, negative error code on failure.
+ * In addition only one &drm_master can be the current master for a &drm_device.
+ * It can be switched through the DROP_MASTER and SET_MASTER IOCTL, or
+ * implicitly through closing/openeing the primary device node. See also
+ * drm_is_current_master().
+ *
+ * Clients can authenticate against the current master (if it matches their own)
+ * using the GETMAGIC and AUTHMAGIC IOCTLs. Together with exchanging masters,
+ * this allows controlled access to the device for an entire group of mutually
+ * trusted clients.
  */
+
 int drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_auth *auth = data;
@@ -64,16 +81,6 @@ int drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	return ret < 0 ? ret : 0;
 }
 
-/**
- * drm_authmagic - Authenticate client with a magic
- * @dev: DRM device to operate on
- * @data: ioctl data containing the drm_auth object
- * @file_priv: DRM file that performs the operation
- *
- * This looks up a DRM client by the passed magic and authenticates it.
- *
- * Returns: 0 on success, negative error code on failure.
- */
 int drm_authmagic(struct drm_device *dev, void *data,
 		  struct drm_file *file_priv)
 {
@@ -93,7 +100,7 @@ int drm_authmagic(struct drm_device *dev, void *data,
 	return file ? 0 : -EINVAL;
 }
 
-static struct drm_master *drm_master_create(struct drm_device *dev)
+struct drm_master *drm_master_create(struct drm_device *dev)
 {
 	struct drm_master *master;
 
@@ -102,10 +109,15 @@ static struct drm_master *drm_master_create(struct drm_device *dev)
 		return NULL;
 
 	kref_init(&master->refcount);
-	spin_lock_init(&master->lock.spinlock);
-	init_waitqueue_head(&master->lock.lock_queue);
+	drm_master_legacy_init(master);
 	idr_init(&master->magic_map);
 	master->dev = dev;
+
+	/* initialize the tree of output resource lessees */
+	INIT_LIST_HEAD(&master->lessees);
+	INIT_LIST_HEAD(&master->lessee_list);
+	idr_init(&master->leases);
+	idr_init(&master->lessee_idr);
 
 	return master;
 }
@@ -126,16 +138,6 @@ static int drm_set_master(struct drm_device *dev, struct drm_file *fpriv,
 	return ret;
 }
 
-/*
- * drm_new_set_master - Allocate a new master object and become master for the
- * associated master realm.
- *
- * @dev: The associated device.
- * @fpriv: File private identifying the client.
- *
- * This function must be called with dev::master_mutex held.
- * Returns negative error code on failure. Zero on success.
- */
 static int drm_new_set_master(struct drm_device *dev, struct drm_file *fpriv)
 {
 	struct drm_master *old_master;
@@ -143,6 +145,7 @@ static int drm_new_set_master(struct drm_device *dev, struct drm_file *fpriv)
 
 	lockdep_assert_held_once(&dev->master_mutex);
 
+	WARN_ON(fpriv->is_master);
 	old_master = fpriv->master;
 	fpriv->master = drm_master_create(dev);
 	if (!fpriv->master) {
@@ -171,6 +174,7 @@ out_err:
 	/* drop references and restore old master on failure */
 	drm_master_put(&fpriv->master);
 	fpriv->master = old_master;
+	fpriv->is_master = 0;
 
 	return ret;
 }
@@ -199,6 +203,12 @@ int drm_setmaster_ioctl(struct drm_device *dev, void *data,
 		goto out_unlock;
 	}
 
+	if (file_priv->master->lessor != NULL) {
+		DRM_DEBUG_LEASE("Attempt to set lessee %d as master\n", file_priv->master->lessee_id);
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	ret = drm_set_master(dev, file_priv, false);
 out_unlock:
 	mutex_unlock(&dev->master_mutex);
@@ -224,6 +234,12 @@ int drm_dropmaster_ioctl(struct drm_device *dev, void *data,
 
 	if (!dev->master)
 		goto out_unlock;
+
+	if (file_priv->master->lessor != NULL) {
+		DRM_DEBUG_LEASE("Attempt to drop lessee %d as master\n", file_priv->master->lessee_id);
+		ret = -EINVAL;
+		goto out_unlock;
+	}
 
 	ret = 0;
 	drm_drop_master(dev, file_priv);
@@ -261,37 +277,46 @@ void drm_master_release(struct drm_file *file_priv)
 	if (!drm_is_current_master(file_priv))
 		goto out;
 
-	if (!drm_core_check_feature(dev, DRIVER_MODESET)) {
-		/*
-		 * Since the master is disappearing, so is the
-		 * possibility to lock.
-		 */
-		mutex_lock(&dev->struct_mutex);
-		if (master->lock.hw_lock) {
-			if (dev->sigdata.lock == master->lock.hw_lock)
-				dev->sigdata.lock = NULL;
-			master->lock.hw_lock = NULL;
-			master->lock.file_priv = NULL;
-			wake_up_interruptible_all(&master->lock.lock_queue);
-		}
-		mutex_unlock(&dev->struct_mutex);
-	}
+	drm_legacy_lock_master_cleanup(dev, master);
 
 	if (dev->master == file_priv->master)
 		drm_drop_master(dev, file_priv);
 out:
+	if (drm_core_check_feature(dev, DRIVER_MODESET) && file_priv->is_master) {
+		/* Revoke any leases held by this or lessees, but only if
+		 * this is the "real" master
+		 */
+		drm_lease_revoke(master);
+	}
+
 	/* drop the master reference held by the file priv */
 	if (file_priv->master)
 		drm_master_put(&file_priv->master);
 	mutex_unlock(&dev->master_mutex);
 }
 
+/**
+ * drm_is_current_master - checks whether @priv is the current master
+ * @fpriv: DRM file private
+ *
+ * Checks whether @fpriv is current master on its device. This decides whether a
+ * client is allowed to run DRM_MASTER IOCTLs.
+ *
+ * Most of the modern IOCTL which require DRM_MASTER are for kernel modesetting
+ * - the current master is assumed to own the non-shareable display hardware.
+ */
 bool drm_is_current_master(struct drm_file *fpriv)
 {
-	return fpriv->is_master && fpriv->master == fpriv->minor->dev->master;
+	return fpriv->is_master && drm_lease_owner(fpriv->master) == fpriv->minor->dev->master;
 }
 EXPORT_SYMBOL(drm_is_current_master);
 
+/**
+ * drm_master_get - reference a master pointer
+ * @master: &struct drm_master
+ *
+ * Increments the reference count of @master and returns a pointer to @master.
+ */
 struct drm_master *drm_master_get(struct drm_master *master)
 {
 	kref_get(&master->refcount);
@@ -304,19 +329,51 @@ static void drm_master_destroy(struct kref *kref)
 	struct drm_master *master = container_of(kref, struct drm_master, refcount);
 	struct drm_device *dev = master->dev;
 
+	if (drm_core_check_feature(dev, DRIVER_MODESET))
+		drm_lease_destroy(master);
+
 	if (dev->driver->master_destroy)
 		dev->driver->master_destroy(dev, master);
 
 	drm_legacy_master_rmmaps(dev, master);
 
 	idr_destroy(&master->magic_map);
+	idr_destroy(&master->leases);
+	idr_destroy(&master->lessee_idr);
+
 	kfree(master->unique);
 	kfree(master);
 }
 
+/**
+ * drm_master_put - unreference and clear a master pointer
+ * @master: pointer to a pointer of &struct drm_master
+ *
+ * This decrements the &drm_master behind @master and sets it to NULL.
+ */
 void drm_master_put(struct drm_master **master)
 {
 	kref_put(&(*master)->refcount, drm_master_destroy);
 	*master = NULL;
 }
 EXPORT_SYMBOL(drm_master_put);
+
+/* Used by drm_client and drm_fb_helper */
+bool drm_master_internal_acquire(struct drm_device *dev)
+{
+	mutex_lock(&dev->master_mutex);
+	if (dev->master) {
+		mutex_unlock(&dev->master_mutex);
+		return false;
+	}
+
+	return true;
+}
+EXPORT_SYMBOL(drm_master_internal_acquire);
+
+/* Used by drm_client and drm_fb_helper */
+void drm_master_internal_release(struct drm_device *dev)
+{
+	mutex_unlock(&dev->master_mutex);
+}
+EXPORT_SYMBOL(drm_master_internal_release);

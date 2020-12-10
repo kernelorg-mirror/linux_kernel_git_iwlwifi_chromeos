@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * seq_buf.c
  *
@@ -139,7 +140,7 @@ int seq_buf_bprintf(struct seq_buf *s, const char *fmt, const u32 *binary)
  */
 int seq_buf_puts(struct seq_buf *s, const char *str)
 {
-	unsigned int len = strlen(str);
+	size_t len = strlen(str);
 
 	WARN_ON(s->size == 0);
 
@@ -310,10 +311,12 @@ int seq_buf_to_user(struct seq_buf *s, char __user *ubuf, int cnt)
 	if (!cnt)
 		return 0;
 
-	if (s->len <= s->readpos)
+	len = seq_buf_used(s);
+
+	if (len <= s->readpos)
 		return -EBUSY;
 
-	len = seq_buf_used(s) - s->readpos;
+	len -= s->readpos;
 	if (cnt > len)
 		cnt = len;
 	ret = copy_to_user(ubuf, s->buffer + s->readpos, cnt);

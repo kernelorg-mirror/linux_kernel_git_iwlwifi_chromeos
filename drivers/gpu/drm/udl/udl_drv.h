@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2012 Red Hat
  *
@@ -5,18 +6,20 @@
  * Copyright (C) 2009 Roberto De Ioris <roberto@unbit.it>
  * Copyright (C) 2009 Jaya Kumar <jayakumar.lkml@gmail.com>
  * Copyright (C) 2009 Bernie Thompson <bernie@plugable.com>
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
 
 #ifndef UDL_DRV_H
 #define UDL_DRV_H
 
+#include <linux/mm_types.h>
 #include <linux/usb.h>
+
+#include <drm/drm_device.h>
+#include <drm/drm_framebuffer.h>
 #include <drm/drm_gem.h>
-#include <drm/drm_cache.h>
+
+struct drm_encoder;
+struct drm_mode_create_dumb;
 
 #define DRIVER_NAME		"udl"
 #define DRIVER_DESC		"DisplayLink"
@@ -53,10 +56,12 @@ struct udl_cursor_hline;
 struct udl_flip_queue;
 
 struct udl_device {
+	struct drm_device drm;
 	struct device *dev;
-	struct drm_device *ddev;
 	struct usb_device *udev;
 	struct drm_crtc *crtc;
+
+	struct mutex gem_lock;
 
 	int sku_pixel_limit;
 
@@ -73,8 +78,9 @@ struct udl_device {
 	atomic_t cpu_kcycles_used; /* transpired during pixel processing */
 
 	struct udl_flip_queue *flip_queue;
-	struct mutex transfer_lock; /* to serialize transfers */
 };
+
+#define to_udl(x) container_of(x, struct udl_device, drm)
 
 struct udl_gem_object {
 	struct drm_gem_object base;
@@ -90,8 +96,6 @@ struct udl_framebuffer {
 	struct drm_framebuffer base;
 	struct udl_gem_object *obj;
 	bool active_16; /* active on the 16-bit channel */
-	int x1, y1, x2, y2; /* dirty rect */
-	spinlock_t dirty_lock;
 };
 
 #define to_udl_fb(x) container_of(x, struct udl_framebuffer, base)
@@ -109,8 +113,8 @@ struct urb *udl_get_urb(struct drm_device *dev);
 int udl_submit_urb(struct drm_device *dev, struct urb *urb, size_t len);
 void udl_urb_completion(struct urb *urb);
 
-int udl_driver_load(struct drm_device *dev, unsigned long flags);
-int udl_driver_unload(struct drm_device *dev);
+int udl_init(struct udl_device *udl);
+void udl_fini(struct drm_device *dev);
 
 int udl_fbdev_init(struct drm_device *dev);
 void udl_fbdev_cleanup(struct drm_device *dev);
@@ -120,7 +124,7 @@ udl_fb_user_fb_create(struct drm_device *dev,
 		      struct drm_file *file,
 		      const struct drm_mode_fb_cmd2 *mode_cmd);
 
-int udl_render_hline(struct drm_device *dev, int bpp, struct urb **urb_ptr,
+int udl_render_hline(struct drm_device *dev, int log_bpp, struct urb **urb_ptr,
 		     const char *front, char **urb_buf_ptr,
 		     u32 byte_offset, u32 device_byte_offset, u32 byte_width,
 		     struct udl_cursor_hline *cursor_hline,
@@ -135,8 +139,7 @@ int udl_gem_mmap(struct drm_file *file_priv, struct drm_device *dev,
 void udl_gem_free_object(struct drm_gem_object *gem_obj);
 struct udl_gem_object *udl_gem_alloc_object(struct drm_device *dev,
 					    size_t size);
-struct dma_buf *udl_gem_prime_export(struct drm_device *dev,
-				     struct drm_gem_object *obj, int flags);
+struct dma_buf *udl_gem_prime_export(struct drm_gem_object *obj, int flags);
 struct drm_gem_object *udl_gem_prime_import(struct drm_device *dev,
 				struct dma_buf *dma_buf);
 
@@ -145,7 +148,7 @@ void udl_gem_put_pages(struct udl_gem_object *obj);
 int udl_gem_vmap(struct udl_gem_object *obj);
 void udl_gem_vunmap(struct udl_gem_object *obj);
 int udl_drm_gem_mmap(struct file *filp, struct vm_area_struct *vma);
-int udl_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf);
+vm_fault_t udl_gem_fault(struct vm_fault *vmf);
 
 int udl_handle_damage(struct udl_framebuffer *fb, int x, int y,
 		      int width, int height);

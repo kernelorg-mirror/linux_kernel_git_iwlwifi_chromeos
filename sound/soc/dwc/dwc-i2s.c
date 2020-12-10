@@ -18,12 +18,12 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/pm_runtime.h>
 #include <sound/designware_i2s.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/dmaengine_pcm.h>
-
 #include "local.h"
 
 static inline void i2s_write_reg(void __iomem *io_base, int reg, u32 val)
@@ -62,27 +62,40 @@ static inline void i2s_clear_irqs(struct dw_i2s_dev *dev, u32 stream)
 	}
 }
 
-static void i2s_start(struct dw_i2s_dev *dev,
-		      struct snd_pcm_substream *substream)
+static inline void i2s_disable_irqs(struct dw_i2s_dev *dev, u32 stream,
+				    int chan_nr)
 {
 	u32 i, irq;
-	i2s_write_reg(dev->i2s_base, IER, 1);
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		for (i = 0; i < 4; i++) {
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		for (i = 0; i < (chan_nr / 2); i++) {
+			irq = i2s_read_reg(dev->i2s_base, IMR(i));
+			i2s_write_reg(dev->i2s_base, IMR(i), irq | 0x30);
+		}
+	} else {
+		for (i = 0; i < (chan_nr / 2); i++) {
+			irq = i2s_read_reg(dev->i2s_base, IMR(i));
+			i2s_write_reg(dev->i2s_base, IMR(i), irq | 0x03);
+		}
+	}
+}
+
+static inline void i2s_enable_irqs(struct dw_i2s_dev *dev, u32 stream,
+				   int chan_nr)
+{
+	u32 i, irq;
+
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		for (i = 0; i < (chan_nr / 2); i++) {
 			irq = i2s_read_reg(dev->i2s_base, IMR(i));
 			i2s_write_reg(dev->i2s_base, IMR(i), irq & ~0x30);
 		}
-		i2s_write_reg(dev->i2s_base, ITER, 1);
 	} else {
-		for (i = 0; i < 4; i++) {
+		for (i = 0; i < (chan_nr / 2); i++) {
 			irq = i2s_read_reg(dev->i2s_base, IMR(i));
 			i2s_write_reg(dev->i2s_base, IMR(i), irq & ~0x03);
 		}
-		i2s_write_reg(dev->i2s_base, IRER, 1);
 	}
-
-	i2s_write_reg(dev->i2s_base, CER, 1);
 }
 
 static irqreturn_t i2s_irq_handler(int irq, void *dev_id)
@@ -136,27 +149,33 @@ static irqreturn_t i2s_irq_handler(int irq, void *dev_id)
 		return IRQ_NONE;
 }
 
+static void i2s_start(struct dw_i2s_dev *dev,
+		      struct snd_pcm_substream *substream)
+{
+	struct i2s_clk_config_data *config = &dev->config;
+
+	i2s_write_reg(dev->i2s_base, IER, 1);
+	i2s_enable_irqs(dev, substream->stream, config->chan_nr);
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		i2s_write_reg(dev->i2s_base, ITER, 1);
+	else
+		i2s_write_reg(dev->i2s_base, IRER, 1);
+
+	i2s_write_reg(dev->i2s_base, CER, 1);
+}
+
 static void i2s_stop(struct dw_i2s_dev *dev,
 		struct snd_pcm_substream *substream)
 {
-	u32 i = 0, irq;
 
 	i2s_clear_irqs(dev, substream->stream);
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		i2s_write_reg(dev->i2s_base, ITER, 0);
-
-		for (i = 0; i < 4; i++) {
-			irq = i2s_read_reg(dev->i2s_base, IMR(i));
-			i2s_write_reg(dev->i2s_base, IMR(i), irq | 0x30);
-		}
-	} else {
+	else
 		i2s_write_reg(dev->i2s_base, IRER, 0);
 
-		for (i = 0; i < 4; i++) {
-			irq = i2s_read_reg(dev->i2s_base, IMR(i));
-			i2s_write_reg(dev->i2s_base, IMR(i), irq | 0x03);
-		}
-	}
+	i2s_disable_irqs(dev, substream->stream, 8);
 
 	if (!dev->active) {
 		i2s_write_reg(dev->i2s_base, CER, 0);
@@ -188,35 +207,60 @@ static int dw_i2s_startup(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static void dw_i2s_config(struct dw_i2s_dev *dev, int stream)
+{
+	u32 ch_reg;
+	struct i2s_clk_config_data *config = &dev->config;
+
+
+	i2s_disable_channels(dev, stream);
+
+	for (ch_reg = 0; ch_reg < (config->chan_nr / 2); ch_reg++) {
+		if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+			i2s_write_reg(dev->i2s_base, TCR(ch_reg),
+				      dev->xfer_resolution);
+			i2s_write_reg(dev->i2s_base, TFCR(ch_reg),
+				      dev->fifo_th - 1);
+			i2s_write_reg(dev->i2s_base, TER(ch_reg), 1);
+		} else {
+			i2s_write_reg(dev->i2s_base, RCR(ch_reg),
+				      dev->xfer_resolution);
+			i2s_write_reg(dev->i2s_base, RFCR(ch_reg),
+				      dev->fifo_th - 1);
+			i2s_write_reg(dev->i2s_base, RER(ch_reg), 1);
+		}
+
+	}
+}
+
 static int dw_i2s_hw_params(struct snd_pcm_substream *substream,
 		struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
 	struct dw_i2s_dev *dev = snd_soc_dai_get_drvdata(dai);
 	struct i2s_clk_config_data *config = &dev->config;
-	u32 ccr, xfer_resolution, ch_reg, irq;
 	int ret;
 
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S16_LE:
 		config->data_width = 16;
-		ccr = 0x00;
-		xfer_resolution = 0x02;
+		dev->ccr = 0x00;
+		dev->xfer_resolution = 0x02;
 		break;
 
 	case SNDRV_PCM_FORMAT_S24_LE:
 		config->data_width = 24;
-		ccr = 0x08;
-		xfer_resolution = 0x04;
+		dev->ccr = 0x08;
+		dev->xfer_resolution = 0x04;
 		break;
 
 	case SNDRV_PCM_FORMAT_S32_LE:
 		config->data_width = 32;
-		ccr = 0x10;
-		xfer_resolution = 0x05;
+		dev->ccr = 0x10;
+		dev->xfer_resolution = 0x05;
 		break;
 
 	default:
-		dev_err(dev->dev, "designware-i2s: unsuppted PCM fmt");
+		dev_err(dev->dev, "designware-i2s: unsupported PCM fmt");
 		return -EINVAL;
 	}
 
@@ -233,27 +277,9 @@ static int dw_i2s_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	i2s_disable_channels(dev, substream->stream);
+	dw_i2s_config(dev, substream->stream);
 
-	for (ch_reg = 0; ch_reg < (config->chan_nr / 2); ch_reg++) {
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-			i2s_write_reg(dev->i2s_base, TCR(ch_reg),
-				      xfer_resolution);
-			i2s_write_reg(dev->i2s_base, TFCR(ch_reg), 0x02);
-			irq = i2s_read_reg(dev->i2s_base, IMR(ch_reg));
-			i2s_write_reg(dev->i2s_base, IMR(ch_reg), irq & ~0x30);
-			i2s_write_reg(dev->i2s_base, TER(ch_reg), 1);
-		} else {
-			i2s_write_reg(dev->i2s_base, RCR(ch_reg),
-				      xfer_resolution);
-			i2s_write_reg(dev->i2s_base, RFCR(ch_reg), 0x07);
-			irq = i2s_read_reg(dev->i2s_base, IMR(ch_reg));
-			i2s_write_reg(dev->i2s_base, IMR(ch_reg), irq & ~0x03);
-			i2s_write_reg(dev->i2s_base, RER(ch_reg), 1);
-		}
-	}
-
-	i2s_write_reg(dev->i2s_base, CCR, ccr);
+	i2s_write_reg(dev->i2s_base, CCR, dev->ccr);
 
 	config->sample_rate = params_rate(params);
 
@@ -355,7 +381,7 @@ static int dw_i2s_set_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
 	return ret;
 }
 
-static struct snd_soc_dai_ops dw_i2s_dai_ops = {
+static const struct snd_soc_dai_ops dw_i2s_dai_ops = {
 	.startup	= dw_i2s_startup,
 	.shutdown	= dw_i2s_shutdown,
 	.hw_params	= dw_i2s_hw_params,
@@ -364,27 +390,49 @@ static struct snd_soc_dai_ops dw_i2s_dai_ops = {
 	.set_fmt	= dw_i2s_set_fmt,
 };
 
-static const struct snd_soc_component_driver dw_i2s_component = {
-	.name		= "dw-i2s",
-};
-
 #ifdef CONFIG_PM
-
-static int dw_i2s_suspend(struct snd_soc_dai *dai)
+static int dw_i2s_runtime_suspend(struct device *dev)
 {
-	struct dw_i2s_dev *dev = snd_soc_dai_get_drvdata(dai);
+	struct dw_i2s_dev *dw_dev = dev_get_drvdata(dev);
+
+	if (dw_dev->capability & DW_I2S_MASTER)
+		clk_disable(dw_dev->clk);
+	return 0;
+}
+
+static int dw_i2s_runtime_resume(struct device *dev)
+{
+	struct dw_i2s_dev *dw_dev = dev_get_drvdata(dev);
+
+	if (dw_dev->capability & DW_I2S_MASTER)
+		clk_enable(dw_dev->clk);
+	return 0;
+}
+
+static int dw_i2s_suspend(struct snd_soc_component *component)
+{
+	struct dw_i2s_dev *dev = snd_soc_component_get_drvdata(component);
 
 	if (dev->capability & DW_I2S_MASTER)
 		clk_disable(dev->clk);
 	return 0;
 }
 
-static int dw_i2s_resume(struct snd_soc_dai *dai)
+static int dw_i2s_resume(struct snd_soc_component *component)
 {
-	struct dw_i2s_dev *dev = snd_soc_dai_get_drvdata(dai);
+	struct dw_i2s_dev *dev = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dai *dai;
+	int stream;
 
 	if (dev->capability & DW_I2S_MASTER)
 		clk_enable(dev->clk);
+
+	for_each_component_dais(component, dai) {
+		for_each_pcm_streams(stream)
+			if (snd_soc_dai_stream_active(dai, stream))
+				dw_i2s_config(dev, stream);
+	}
+
 	return 0;
 }
 
@@ -392,6 +440,12 @@ static int dw_i2s_resume(struct snd_soc_dai *dai)
 #define dw_i2s_suspend	NULL
 #define dw_i2s_resume	NULL
 #endif
+
+static const struct snd_soc_component_driver dw_i2s_component = {
+	.name		= "dw-i2s",
+	.suspend	= dw_i2s_suspend,
+	.resume		= dw_i2s_resume,
+};
 
 /*
  * The following tables allow a direct lookup of various parameters
@@ -436,11 +490,16 @@ static int dw_configure_dai(struct dw_i2s_dev *dev,
 	 */
 	u32 comp1 = i2s_read_reg(dev->i2s_base, dev->i2s_reg_comp1);
 	u32 comp2 = i2s_read_reg(dev->i2s_base, dev->i2s_reg_comp2);
+	u32 fifo_depth = 1 << (1 + COMP1_FIFO_DEPTH_GLOBAL(comp1));
 	u32 idx;
 
 	if (dev->capability & DWC_I2S_RECORD &&
 			dev->quirks & DW_I2S_QUIRK_COMP_PARAM1)
 		comp1 = comp1 & ~BIT(5);
+
+	if (dev->capability & DWC_I2S_PLAY &&
+			dev->quirks & DW_I2S_QUIRK_COMP_PARAM1)
+		comp1 = comp1 & ~BIT(6);
 
 	if (COMP1_TX_ENABLED(comp1)) {
 		dev_dbg(dev->dev, " designware: play supported\n");
@@ -478,6 +537,7 @@ static int dw_configure_dai(struct dw_i2s_dev *dev,
 		dev->capability |= DW_I2S_SLAVE;
 	}
 
+	dev->fifo_th = fifo_depth / 2;
 	return 0;
 }
 
@@ -538,7 +598,6 @@ static int dw_configure_dai_by_dt(struct dw_i2s_dev *dev,
 		dev->capability |= DWC_I2S_PLAY;
 		dev->play_dma_data.dt.addr = res->start + I2S_TXDMA;
 		dev->play_dma_data.dt.addr_width = bus_widths[idx];
-		dev->play_dma_data.dt.chan_name = "TX";
 		dev->play_dma_data.dt.fifo_size = fifo_depth *
 			(fifo_width[idx2]) >> 8;
 		dev->play_dma_data.dt.maxburst = 16;
@@ -549,7 +608,6 @@ static int dw_configure_dai_by_dt(struct dw_i2s_dev *dev,
 		dev->capability |= DWC_I2S_RECORD;
 		dev->capture_dma_data.dt.addr = res->start + I2S_RXDMA;
 		dev->capture_dma_data.dt.addr_width = bus_widths[idx];
-		dev->capture_dma_data.dt.chan_name = "RX";
 		dev->capture_dma_data.dt.fifo_size = fifo_depth *
 			(fifo_width[idx2] >> 8);
 		dev->capture_dma_data.dt.maxburst = 16;
@@ -569,18 +627,14 @@ static int dw_i2s_probe(struct platform_device *pdev)
 	const char *clk_id;
 
 	dev = devm_kzalloc(&pdev->dev, sizeof(*dev), GFP_KERNEL);
-	if (!dev) {
-		dev_warn(&pdev->dev, "kzalloc fail\n");
+	if (!dev)
 		return -ENOMEM;
-	}
 
 	dw_i2s_dai = devm_kzalloc(&pdev->dev, sizeof(*dw_i2s_dai), GFP_KERNEL);
 	if (!dw_i2s_dai)
 		return -ENOMEM;
 
 	dw_i2s_dai->ops = &dw_i2s_dai_ops;
-	dw_i2s_dai->suspend = dw_i2s_suspend;
-	dw_i2s_dai->resume = dw_i2s_resume;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	dev->i2s_base = devm_ioremap_resource(&pdev->dev, res);
@@ -608,9 +662,6 @@ static int dw_i2s_probe(struct platform_device *pdev)
 		if (dev->quirks & DW_I2S_QUIRK_COMP_REG_OFFSET) {
 			dev->i2s_reg_comp1 = pdata->i2s_reg_comp1;
 			dev->i2s_reg_comp2 = pdata->i2s_reg_comp2;
-		} else {
-			dev->i2s_reg_comp1 = I2S_COMP_PARAM_1;
-			dev->i2s_reg_comp2 = I2S_COMP_PARAM_2;
 		}
 		ret = dw_configure_dai_by_pd(dev, dw_i2s_dai, res, pdata);
 	} else {
@@ -647,25 +698,23 @@ static int dw_i2s_probe(struct platform_device *pdev)
 	}
 
 	if (!pdata) {
-		ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
-		if (ret == -EPROBE_DEFER) {
-			dev_err(&pdev->dev,
-				"failed to register PCM, deferring probe\n");
-			return ret;
-		} else if (ret) {
-			dev_err(&pdev->dev,
-				"Could not register DMA PCM: %d\n"
-				"falling back to PIO mode\n", ret);
+		if (irq >= 0) {
 			ret = dw_pcm_register(pdev);
-			if (ret) {
-				dev_err(&pdev->dev,
-					"Could not register PIO PCM: %d\n",
+			dev->use_pio = true;
+		} else {
+			ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL,
+					0);
+			dev->use_pio = false;
+		}
+
+		if (ret) {
+			dev_err(&pdev->dev, "could not register pcm: %d\n",
 					ret);
-				goto err_clk_disable;
-			}
+			goto err_clk_disable;
 		}
 	}
 
+	pm_runtime_enable(&pdev->dev);
 	return 0;
 
 err_clk_disable:
@@ -681,6 +730,7 @@ static int dw_i2s_remove(struct platform_device *pdev)
 	if (dev->capability & DW_I2S_MASTER)
 		clk_disable_unprepare(dev->clk);
 
+	pm_runtime_disable(&pdev->dev);
 	return 0;
 }
 
@@ -693,12 +743,17 @@ static const struct of_device_id dw_i2s_of_match[] = {
 MODULE_DEVICE_TABLE(of, dw_i2s_of_match);
 #endif
 
+static const struct dev_pm_ops dwc_pm_ops = {
+	SET_RUNTIME_PM_OPS(dw_i2s_runtime_suspend, dw_i2s_runtime_resume, NULL)
+};
+
 static struct platform_driver dw_i2s_driver = {
 	.probe		= dw_i2s_probe,
 	.remove		= dw_i2s_remove,
 	.driver		= {
 		.name	= "designware-i2s",
 		.of_match_table = of_match_ptr(dw_i2s_of_match),
+		.pm = &dwc_pm_ops,
 	},
 };
 

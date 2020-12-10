@@ -1099,7 +1099,7 @@ PVRSRVServerSyncAllocKM(CONNECTION_DATA * psConnection,
 		goto fail_sync_alloc;
 	}
 
-	eError = OSLockCreate(&psNewSync->hLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psNewSync->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto fail_lock_create;
@@ -2258,7 +2258,7 @@ PVRSRV_ERROR SyncRegisterConnection(SYNC_CONNECTION_DATA **ppsSyncConnectionData
 		goto fail_alloc;
 	}
 
-	eError = OSLockCreate(&psSyncConnectionData->hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psSyncConnectionData->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto fail_lockcreate;
@@ -2467,7 +2467,7 @@ static PVRSRV_ERROR SyncRecordListInit(PVRSRV_DEVICE_NODE *psDevNode)
 	psDevNode->ui32SyncServerRecordCount = 0;
 	psDevNode->ui32SyncServerRecordCountHighWatermark = 0;
 
-	eError = OSLockCreate(&psDevNode->hSyncServerRecordLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psDevNode->hSyncServerRecordLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto fail_lock_create;
@@ -2530,7 +2530,7 @@ PVRSRV_ERROR ServerSyncInit(PVRSRV_DEVICE_NODE *psDevNode)
 {
 	PVRSRV_ERROR eError;
 
-	eError = OSLockCreate(&psDevNode->hSyncServerListLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psDevNode->hSyncServerListLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto fail_lock_create;
@@ -2586,7 +2586,7 @@ PVRSRV_ERROR ServerSyncInitOnce(PVRSRV_DATA *psPVRSRVData)
 	PVR_UNREFERENCED_PARAMETER(psPVRSRVData);
 
 #if !defined(PVRSRV_USE_BRIDGE_LOCK)
-	eError = OSLockCreate(&ghServerSyncLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&ghServerSyncLock);
 
 	if (eError != PVRSRV_OK)
 	{

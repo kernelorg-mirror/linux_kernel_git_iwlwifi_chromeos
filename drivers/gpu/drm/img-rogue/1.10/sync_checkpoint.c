@@ -384,7 +384,7 @@ _AllocSyncCheckpointBlock(_SYNC_CHECKPOINT_CONTEXT *psContext,
 
 	OSAtomicWrite(&psSyncBlk->hRefCount, 1);
 
-	OSLockCreate(&psSyncBlk->hLock, LOCK_TYPE_NONE);
+	OSLockCreate(&psSyncBlk->hLock);
 
 	PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS,
 	                      "Allocated Sync Checkpoint UFO block (FirmwareVAddr = 0x%08x)",
@@ -818,7 +818,7 @@ SyncCheckpointContextCreate(PPVRSRV_DEVICE_NODE psDevNode,
 	psContextCtl = OSAllocMem(sizeof(*psContextCtl));
 	PVR_LOGG_IF_NOMEM(psContextCtl, "OSAllocMem", eError, fail_alloc2); /* Sets OOM error code */
 
-	eError = OSLockCreate(&psContext->hLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psContext->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_LOG_ERROR(eError, "SyncCheckpointContextCreate call "
@@ -826,7 +826,7 @@ SyncCheckpointContextCreate(PPVRSRV_DEVICE_NODE psDevNode,
 		goto fail_create_context_lock;
 	}
 
-	eError = OSLockCreate(&psContextCtl->hDeferredCleanupListLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psContextCtl->hDeferredCleanupListLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_LOG_ERROR(eError, "SyncCheckpointContextCreate call "
@@ -835,7 +835,7 @@ SyncCheckpointContextCreate(PPVRSRV_DEVICE_NODE psDevNode,
 	}
 
 #if (SYNC_CHECKPOINT_POOL_SIZE > 0)
-	eError = OSLockCreate(&psContextCtl->hSyncCheckpointPoolLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psContextCtl->hSyncCheckpointPoolLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_LOG_ERROR(eError, "SyncCheckpointContextCreate call "
@@ -1093,7 +1093,7 @@ SyncCheckpointAlloc(PSYNC_CHECKPOINT_CONTEXT psSyncContext,
 		psNewSyncCheckpoint = OSAllocMem(sizeof(*psNewSyncCheckpoint));
 		PVR_LOGG_IF_NOMEM(psNewSyncCheckpoint, "OSAllocMem", eError, fail_alloc); /* Sets OOM error code */
 
-		eError = OSLockCreate(&psNewSyncCheckpoint->hLock, LOCK_TYPE_NONE);
+		eError = OSLockCreate(&psNewSyncCheckpoint->hLock);
 
 		PVR_LOGG_IF_ERROR(eError, "OSLockCreate", fail_create_checkpoint_lock);
 
@@ -1899,7 +1899,7 @@ SyncCheckpointInit(PPVRSRV_DEVICE_NODE psDevNode)
 
 	if (!gbSyncCheckpointInit)
 	{
-		eError = OSLockCreate(&psDevNode->hSyncCheckpointListLock, LOCK_TYPE_NONE);
+		eError = OSLockCreate(&psDevNode->hSyncCheckpointListLock);
 		if (eError == PVRSRV_OK)
 		{
 			dllist_init(&psDevNode->sSyncCheckpointSyncsList);
@@ -2231,7 +2231,7 @@ static PVRSRV_ERROR _SyncCheckpointRecordListInit(PVRSRV_DEVICE_NODE *psDevNode)
 {
 	PVRSRV_ERROR eError;
 
-	eError = OSLockCreate(&psDevNode->hSyncCheckpointRecordLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&psDevNode->hSyncCheckpointRecordLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto fail_lock_create;

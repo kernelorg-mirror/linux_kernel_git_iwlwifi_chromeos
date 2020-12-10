@@ -46,7 +46,6 @@ mwifiex_process_cmdresp_error(struct mwifiex_private *priv,
 {
 	struct mwifiex_adapter *adapter = priv->adapter;
 	struct host_cmd_ds_802_11_ps_mode_enh *pm;
-	unsigned long flags;
 
 	mwifiex_dbg(adapter, ERROR,
 		    "CMD_RESP: cmd %#x error, result=%#x\n",
@@ -70,11 +69,7 @@ mwifiex_process_cmdresp_error(struct mwifiex_private *priv,
 		break;
 	case HostCmd_CMD_802_11_SCAN:
 	case HostCmd_CMD_802_11_SCAN_EXT:
-		mwifiex_cancel_pending_scan_cmd(adapter);
-
-		spin_lock_irqsave(&adapter->mwifiex_cmd_lock, flags);
-		adapter->scan_processing = false;
-		spin_unlock_irqrestore(&adapter->mwifiex_cmd_lock, flags);
+		mwifiex_cancel_scan(adapter);
 		break;
 
 	case HostCmd_CMD_MAC_CONTROL:
@@ -91,9 +86,9 @@ mwifiex_process_cmdresp_error(struct mwifiex_private *priv,
 	/* Handling errors here */
 	mwifiex_recycle_cmd_node(adapter, adapter->curr_cmd);
 
-	spin_lock_irqsave(&adapter->mwifiex_cmd_lock, flags);
+	spin_lock_bh(&adapter->mwifiex_cmd_lock);
 	adapter->curr_cmd = NULL;
-	spin_unlock_irqrestore(&adapter->mwifiex_cmd_lock, flags);
+	spin_unlock_bh(&adapter->mwifiex_cmd_lock);
 }
 
 /*
@@ -624,7 +619,7 @@ static int mwifiex_ret_802_11_key_material_v2(struct mwifiex_private *priv,
 	key_v2 = &resp->params.key_material_v2;
 
 	len = le16_to_cpu(key_v2->key_param_set.key_params.aes.key_len);
-	if (len > WLAN_KEY_LEN_CCMP)
+	if (len > sizeof(key_v2->key_param_set.key_params.aes.key))
 		return -EINVAL;
 
 	if (le16_to_cpu(key_v2->action) == HostCmd_ACT_GEN_SET) {
@@ -640,7 +635,7 @@ static int mwifiex_ret_802_11_key_material_v2(struct mwifiex_private *priv,
 		return 0;
 
 	memset(priv->aes_key_v2.key_param_set.key_params.aes.key, 0,
-	       WLAN_KEY_LEN_CCMP);
+	       sizeof(key_v2->key_param_set.key_params.aes.key));
 	priv->aes_key_v2.key_param_set.key_params.aes.key_len =
 				cpu_to_le16(len);
 	memcpy(priv->aes_key_v2.key_param_set.key_params.aes.key,
@@ -1037,23 +1032,20 @@ mwifiex_create_custom_regdomain(struct mwifiex_private *priv,
 	struct ieee80211_regdomain *regd;
 	struct ieee80211_reg_rule *rule;
 	bool new_rule;
-	int regd_size, idx, freq, prev_freq = 0;
+	int idx, freq, prev_freq = 0;
 	u32 bw, prev_bw = 0;
 	u8 chflags, prev_chflags = 0, valid_rules = 0;
 
 	if (WARN_ON_ONCE(num_chan > NL80211_MAX_SUPP_REG_RULES))
 		return ERR_PTR(-EINVAL);
 
-	regd_size = sizeof(struct ieee80211_regdomain) +
-		    num_chan * sizeof(struct ieee80211_reg_rule);
-
-	regd = kzalloc(regd_size, GFP_KERNEL);
+	regd = kzalloc(struct_size(regd, reg_rules, num_chan), GFP_KERNEL);
 	if (!regd)
 		return ERR_PTR(-ENOMEM);
 
 	for (idx = 0; idx < num_chan; idx++) {
 		u8 chan;
-		enum ieee80211_band band;
+		enum nl80211_band band;
 
 		chan = *buf++;
 		if (!chan) {
@@ -1061,14 +1053,14 @@ mwifiex_create_custom_regdomain(struct mwifiex_private *priv,
 			return NULL;
 		}
 		chflags = *buf++;
-		band = (chan <= 14) ? IEEE80211_BAND_2GHZ : IEEE80211_BAND_5GHZ;
+		band = (chan <= 14) ? NL80211_BAND_2GHZ : NL80211_BAND_5GHZ;
 		freq = ieee80211_channel_to_frequency(chan, band);
 		new_rule = false;
 
 		if (chflags & MWIFIEX_CHANNEL_DISABLED)
 			continue;
 
-		if (band == IEEE80211_BAND_5GHZ) {
+		if (band == NL80211_BAND_5GHZ) {
 			if (!(chflags & MWIFIEX_CHANNEL_NOHT80))
 				bw = MHZ_TO_KHZ(80);
 			else if (!(chflags & MWIFIEX_CHANNEL_NOHT40))
@@ -1161,6 +1153,43 @@ static int mwifiex_ret_chan_region_cfg(struct mwifiex_private *priv,
 	return 0;
 }
 
+static int mwifiex_ret_pkt_aggr_ctrl(struct mwifiex_private *priv,
+				     struct host_cmd_ds_command *resp)
+{
+	struct host_cmd_ds_pkt_aggr_ctrl *pkt_aggr_ctrl =
+					&resp->params.pkt_aggr_ctrl;
+	struct mwifiex_adapter *adapter = priv->adapter;
+
+	adapter->bus_aggr.enable = le16_to_cpu(pkt_aggr_ctrl->enable);
+	if (adapter->bus_aggr.enable)
+		adapter->intf_hdr_len = INTF_HEADER_LEN;
+	adapter->bus_aggr.mode = MWIFIEX_BUS_AGGR_MODE_LEN_V2;
+	adapter->bus_aggr.tx_aggr_max_size =
+				le16_to_cpu(pkt_aggr_ctrl->tx_aggr_max_size);
+	adapter->bus_aggr.tx_aggr_max_num =
+				le16_to_cpu(pkt_aggr_ctrl->tx_aggr_max_num);
+	adapter->bus_aggr.tx_aggr_align =
+				le16_to_cpu(pkt_aggr_ctrl->tx_aggr_align);
+
+	return 0;
+}
+
+static int mwifiex_ret_get_chan_info(struct mwifiex_private *priv,
+				     struct host_cmd_ds_command *resp,
+				     struct mwifiex_channel_band *channel_band)
+{
+	struct host_cmd_ds_sta_configure *sta_cfg_cmd = &resp->params.sta_cfg;
+	struct host_cmd_tlv_channel_band *tlv_band_channel;
+
+	tlv_band_channel =
+	(struct host_cmd_tlv_channel_band *)sta_cfg_cmd->tlv_buffer;
+	memcpy(&channel_band->band_config, &tlv_band_channel->band_config,
+	       sizeof(struct mwifiex_band_config));
+	channel_band->channel = tlv_band_channel->channel;
+
+	return 0;
+}
+
 /*
  * This function handles the command responses.
  *
@@ -1208,7 +1237,7 @@ int mwifiex_process_sta_cmdresp(struct mwifiex_private *priv, u16 cmdresp_no,
 		break;
 	case HostCmd_CMD_802_11_BG_SCAN_QUERY:
 		ret = mwifiex_ret_802_11_scan(priv, resp);
-		cfg80211_sched_scan_results(priv->wdev.wiphy);
+		cfg80211_sched_scan_results(priv->wdev.wiphy, 0);
 		mwifiex_dbg(adapter, CMD,
 			    "info: CMD_RESP: BG_SCAN result is ready!\n");
 		break;
@@ -1261,6 +1290,9 @@ int mwifiex_process_sta_cmdresp(struct mwifiex_private *priv, u16 cmdresp_no,
 		ret = mwifiex_ret_remain_on_chan(priv, resp, data_buf);
 		break;
 	case HostCmd_CMD_11AC_CFG:
+		break;
+	case HostCmd_CMD_PACKET_AGGR_CTRL:
+		ret = mwifiex_ret_pkt_aggr_ctrl(priv, resp);
 		break;
 	case HostCmd_CMD_P2P_MODE_CFG:
 		ret = mwifiex_ret_p2p_mode_cfg(priv, resp, data_buf);
@@ -1380,6 +1412,9 @@ int mwifiex_process_sta_cmdresp(struct mwifiex_private *priv, u16 cmdresp_no,
 		break;
 	case HostCmd_CMD_CHAN_REGION_CFG:
 		ret = mwifiex_ret_chan_region_cfg(priv, resp);
+		break;
+	case HostCmd_CMD_STA_CONFIGURE:
+		ret = mwifiex_ret_get_chan_info(priv, resp, data_buf);
 		break;
 	default:
 		mwifiex_dbg(adapter, ERROR,

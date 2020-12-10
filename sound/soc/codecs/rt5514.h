@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * rt5514.h  --  RT5514 ALSA SoC audio driver
  *
  * Copyright 2015 Realtek Microelectronics
  * Author: Oder Chiou <oder_chiou@realtek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __RT5514_H__
@@ -167,6 +164,18 @@
 #define RT5514_I2S_DL_24			(0x2 << 0)
 #define RT5514_I2S_DL_8				(0x3 << 0)
 
+/* RT5514_I2S_CTRL2 (0x2014) */
+#define RT5514_TDM_DOCKING_MODE			(0x1 << 31)
+#define RT5514_TDM_DOCKING_MODE_SFT		31
+#define RT5514_TDM_DOCKING_VALID_CH_MASK	(0x1 << 29)
+#define RT5514_TDM_DOCKING_VALID_CH_SFT		29
+#define RT5514_TDM_DOCKING_VALID_CH2		(0x0 << 29)
+#define RT5514_TDM_DOCKING_VALID_CH4		(0x1 << 29)
+#define RT5514_TDM_DOCKING_START_MASK		(0x1 << 28)
+#define RT5514_TDM_DOCKING_START_SFT		28
+#define RT5514_TDM_DOCKING_START_SLOT0		(0x0 << 28)
+#define RT5514_TDM_DOCKING_START_SLOT4		(0x1 << 28)
+
 /* RT5514_DIG_SOURCE_CTRL (0x20a4) */
 #define RT5514_AD1_DMIC_INPUT_SEL		(0x1 << 1)
 #define RT5514_AD1_DMIC_INPUT_SEL_SFT		1
@@ -245,7 +254,6 @@
 
 #define RT5514_FIRMWARE1	"rt5514_dsp_fw1.bin"
 #define RT5514_FIRMWARE2	"rt5514_dsp_fw2.bin"
-#define RT5514_FIRMWARE3	"rt5514_dsp_fw3.bin"
 
 /* System Clock Source */
 enum {
@@ -261,7 +269,7 @@ enum {
 
 struct rt5514_priv {
 	struct rt5514_platform_data pdata;
-	struct snd_soc_codec *codec;
+	struct snd_soc_component *component;
 	struct regmap *i2c_regmap, *regmap;
 	struct clk *mclk, *dsp_calib_clk;
 	int sysclk;
@@ -272,8 +280,6 @@ struct rt5514_priv {
 	int pll_in;
 	int pll_out;
 	int dsp_enabled;
-	u8 *model_buf;
-	unsigned int model_len;
 	unsigned int pll3_cal_value;
 };
 

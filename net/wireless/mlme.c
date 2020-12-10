@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * cfg80211 MLME SAP interface
  *
@@ -20,15 +21,25 @@
 
 
 void cfg80211_rx_assoc_resp(struct net_device *dev, struct cfg80211_bss *bss,
-			    const u8 *buf, size_t len, int uapsd_queues)
+			    const u8 *buf, size_t len, int uapsd_queues,
+			    const u8 *req_ies, size_t req_ies_len)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	struct wiphy *wiphy = wdev->wiphy;
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
 	struct ieee80211_mgmt *mgmt = (struct ieee80211_mgmt *)buf;
-	u8 *ie = mgmt->u.assoc_resp.variable;
-	int ieoffs = offsetof(struct ieee80211_mgmt, u.assoc_resp.variable);
-	u16 status_code = le16_to_cpu(mgmt->u.assoc_resp.status_code);
+	struct cfg80211_connect_resp_params cr;
+
+	memset(&cr, 0, sizeof(cr));
+	cr.status = (int)le16_to_cpu(mgmt->u.assoc_resp.status_code);
+	cr.bssid = mgmt->bssid;
+	cr.bss = bss;
+	cr.req_ie = req_ies;
+	cr.req_ie_len = req_ies_len;
+	cr.resp_ie = mgmt->u.assoc_resp.variable;
+	cr.resp_ie_len =
+		len - offsetof(struct ieee80211_mgmt, u.assoc_resp.variable);
+	cr.timeout_reason = NL80211_TIMEOUT_UNSPECIFIED;
 
 	trace_cfg80211_send_rx_assoc(dev, bss);
 
@@ -38,17 +49,16 @@ void cfg80211_rx_assoc_resp(struct net_device *dev, struct cfg80211_bss *bss,
 	 * and got a reject -- we only try again with an assoc
 	 * frame instead of reassoc.
 	 */
-	if (cfg80211_sme_rx_assoc_resp(wdev, status_code)) {
+	if (cfg80211_sme_rx_assoc_resp(wdev, cr.status)) {
 		cfg80211_unhold_bss(bss_from_pub(bss));
 		cfg80211_put_bss(wiphy, bss);
 		return;
 	}
 
-	nl80211_send_rx_assoc(rdev, dev, buf, len, GFP_KERNEL, uapsd_queues);
+	nl80211_send_rx_assoc(rdev, dev, buf, len, GFP_KERNEL, uapsd_queues,
+			      req_ies, req_ies_len);
 	/* update current_bss etc., consumes the bss reference */
-	__cfg80211_connect_result(dev, mgmt->bssid, NULL, 0, ie, len - ieoffs,
-				  status_code,
-				  status_code == WLAN_STATUS_SUCCESS, bss);
+	__cfg80211_connect_result(dev, &cr, cr.status == WLAN_STATUS_SUCCESS);
 }
 EXPORT_SYMBOL(cfg80211_rx_assoc_resp);
 
@@ -216,14 +226,14 @@ int cfg80211_mlme_auth(struct cfg80211_registered_device *rdev,
 		       const u8 *ssid, int ssid_len,
 		       const u8 *ie, int ie_len,
 		       const u8 *key, int key_len, int key_idx,
-		       const u8 *sae_data, int sae_data_len)
+		       const u8 *auth_data, int auth_data_len)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	struct cfg80211_auth_request req = {
 		.ie = ie,
 		.ie_len = ie_len,
-		.sae_data = sae_data,
-		.sae_data_len = sae_data_len,
+		.auth_data = auth_data,
+		.auth_data_len = auth_data_len,
 		.auth_type = auth_type,
 		.key = key,
 		.key_len = key_len,
@@ -234,7 +244,7 @@ int cfg80211_mlme_auth(struct cfg80211_registered_device *rdev,
 	ASSERT_WDEV_LOCK(wdev);
 
 	if (auth_type == NL80211_AUTHTYPE_SHARED_KEY)
-		if (!key || !key_len || key_idx < 0 || key_idx > 4)
+		if (!key || !key_len || key_idx < 0 || key_idx > 3)
 			return -EINVAL;
 
 	if (wdev->current_bss &&
@@ -266,11 +276,11 @@ void cfg80211_oper_and_ht_capa(struct ieee80211_ht_cap *ht_capa,
 
 	p1 = (u8*)(ht_capa);
 	p2 = (u8*)(ht_capa_mask);
-	for (i = 0; i<sizeof(*ht_capa); i++)
+	for (i = 0; i < sizeof(*ht_capa); i++)
 		p1[i] &= p2[i];
 }
 
-/*  Do a logical ht_capa &= ht_capa_mask.  */
+/*  Do a logical vht_capa &= vht_capa_mask.  */
 void cfg80211_oper_and_vht_capa(struct ieee80211_vht_cap *vht_capa,
 				const struct ieee80211_vht_cap *vht_capa_mask)
 {
@@ -344,6 +354,11 @@ int cfg80211_mlme_deauth(struct cfg80211_registered_device *rdev,
 	    (!wdev->current_bss ||
 	     !ether_addr_equal(wdev->current_bss->pub.bssid, bssid)))
 		return 0;
+
+	if (ether_addr_equal(wdev->disconnect_bssid, bssid) ||
+	    (wdev->current_bss &&
+	     ether_addr_equal(wdev->current_bss->pub.bssid, bssid)))
+		wdev->conn_owner_nlportid = 0;
 
 	return rdev_deauth(rdev, dev, &req);
 }
@@ -657,14 +672,31 @@ int cfg80211_mlme_mgmt_tx(struct cfg80211_registered_device *rdev,
 			return err;
 	}
 
-	if (!ether_addr_equal(mgmt->sa, wdev_address(wdev)))
-		return -EINVAL;
+	if (!ether_addr_equal(mgmt->sa, wdev_address(wdev))) {
+		/* Allow random TA to be used with Public Action frames if the
+		 * driver has indicated support for this. Otherwise, only allow
+		 * the local address to be used.
+		 */
+		if (!ieee80211_is_action(mgmt->frame_control) ||
+		    mgmt->u.action.category != WLAN_CATEGORY_PUBLIC)
+			return -EINVAL;
+		if (!wdev->current_bss &&
+		    !wiphy_ext_feature_isset(
+			    &rdev->wiphy,
+			    NL80211_EXT_FEATURE_MGMT_TX_RANDOM_TA))
+			return -EINVAL;
+		if (wdev->current_bss &&
+		    !wiphy_ext_feature_isset(
+			    &rdev->wiphy,
+			    NL80211_EXT_FEATURE_MGMT_TX_RANDOM_TA_CONNECTED))
+			return -EINVAL;
+	}
 
 	/* Transmit the Action frame as requested by user space */
 	return rdev_mgmt_tx(rdev, wdev, params, cookie);
 }
 
-bool cfg80211_rx_mgmt(struct wireless_dev *wdev, int freq, int sig_mbm,
+bool cfg80211_rx_mgmt(struct wireless_dev *wdev, int freq, int sig_dbm,
 		      const u8 *buf, size_t len, u32 flags)
 {
 	struct wiphy *wiphy = wdev->wiphy;
@@ -680,7 +712,7 @@ bool cfg80211_rx_mgmt(struct wireless_dev *wdev, int freq, int sig_mbm,
 		cpu_to_le16(IEEE80211_FCTL_FTYPE | IEEE80211_FCTL_STYPE);
 	u16 stype;
 
-	trace_cfg80211_rx_mgmt(wdev, freq, sig_mbm);
+	trace_cfg80211_rx_mgmt(wdev, freq, sig_dbm);
 	stype = (le16_to_cpu(mgmt->frame_control) & IEEE80211_FCTL_STYPE) >> 4;
 
 	if (!(stypes->rx & BIT(stype))) {
@@ -707,7 +739,7 @@ bool cfg80211_rx_mgmt(struct wireless_dev *wdev, int freq, int sig_mbm,
 
 		/* Indicate the received Action frame to user space */
 		if (nl80211_send_mgmt(rdev, wdev, reg->nlportid,
-				      freq, sig_mbm,
+				      freq, sig_dbm,
 				      buf, len, flags, GFP_ATOMIC))
 			continue;
 
@@ -730,7 +762,7 @@ void cfg80211_sched_dfs_chan_update(struct cfg80211_registered_device *rdev)
 
 void cfg80211_dfs_channels_update_work(struct work_struct *work)
 {
-	struct delayed_work *delayed_work;
+	struct delayed_work *delayed_work = to_delayed_work(work);
 	struct cfg80211_registered_device *rdev;
 	struct cfg80211_chan_def chandef;
 	struct ieee80211_supported_band *sband;
@@ -742,13 +774,12 @@ void cfg80211_dfs_channels_update_work(struct work_struct *work)
 	enum nl80211_radar_event radar_event;
 	int bandid, i;
 
-	delayed_work = container_of(work, struct delayed_work, work);
 	rdev = container_of(delayed_work, struct cfg80211_registered_device,
 			    dfs_update_channels_wk);
 	wiphy = &rdev->wiphy;
 
 	rtnl_lock();
-	for (bandid = 0; bandid < IEEE80211_NUM_BANDS; bandid++) {
+	for (bandid = 0; bandid < NUM_NL80211_BANDS; bandid++) {
 		sband = wiphy->bands[bandid];
 		if (!sband)
 			continue;
@@ -845,7 +876,7 @@ void cfg80211_cac_event(struct net_device *netdev,
 
 	trace_cfg80211_cac_event(netdev, event);
 
-	if (WARN_ON(!wdev->cac_started))
+	if (WARN_ON(!wdev->cac_started && event != NL80211_RADAR_CAC_STARTED))
 		return;
 
 	if (WARN_ON(!wdev->chandef.chan))
@@ -861,14 +892,17 @@ void cfg80211_cac_event(struct net_device *netdev,
 		       sizeof(struct cfg80211_chan_def));
 		queue_work(cfg80211_wq, &rdev->propagate_cac_done_wk);
 		cfg80211_sched_dfs_chan_update(rdev);
-		break;
+		/* fall through */
 	case NL80211_RADAR_CAC_ABORTED:
+		wdev->cac_started = false;
+		break;
+	case NL80211_RADAR_CAC_STARTED:
+		wdev->cac_started = true;
 		break;
 	default:
 		WARN_ON(1);
 		return;
 	}
-	wdev->cac_started = false;
 
 	nl80211_radar_notify(rdev, chandef, event, netdev, gfp);
 }

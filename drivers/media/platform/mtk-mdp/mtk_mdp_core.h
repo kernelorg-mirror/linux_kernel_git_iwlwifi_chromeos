@@ -1,16 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2015-2016 MediaTek Inc.
  * Author: Houlong Wei <houlong.wei@mediatek.com>
  *         Ming Hsiu Tsai <minghsiu.tsai@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef __MTK_MDP_CORE_H__
@@ -41,7 +33,7 @@
 #define MTK_MDP_CTX_ERROR		BIT(5)
 
 /**
- *  struct mtk_mdp_pix_align - alignement of image
+ *  struct mtk_mdp_pix_align - alignment of image
  *  @org_w: source alignment of width
  *  @org_h: source alignment of height
  *  @target_w: dst alignment of width
@@ -122,8 +114,8 @@ struct mtk_mdp_frame {
 /**
  * struct mtk_mdp_variant - image processor variant information
  * @pix_max:		maximum limit of image size
- * @pix_min:		minimun limit of image size
- * @pix_align:		alignement of image
+ * @pix_min:		minimum limit of image size
+ * @pix_align:		alignment of image
  * @h_scale_up_max:	maximum scale-up in horizontal
  * @v_scale_up_max:	maximum scale-up in vertical
  * @h_scale_down_max:	maximum scale-down in horizontal
@@ -148,7 +140,6 @@ struct mtk_mdp_variant {
  * @id:		image processor device index (0..MTK_MDP_MAX_DEVS)
  * @comp:	MDP function components
  * @m2m_dev:	v4l2 memory-to-memory device data
- * @alloc_ctx:	videobuf2 memory allocator context
  * @ctx_list:	list of struct mtk_mdp_ctx
  * @vdev:	video device for image processor driver
  * @v4l2_dev:	V4L2 device to register video devices for.
@@ -167,7 +158,6 @@ struct mtk_mdp_dev {
 	u16				id;
 	struct mtk_mdp_comp		*comp[MTK_MDP_COMP_ID_MAX];
 	struct v4l2_m2m_dev		*m2m_dev;
-	struct vb2_alloc_ctx		*alloc_ctx;
 	struct list_head		ctx_list;
 	struct video_device		*vdev;
 	struct v4l2_device		v4l2_dev;
@@ -242,19 +232,21 @@ extern int mtk_mdp_dbg_level;
 				level, __func__, __LINE__, ##args);	 \
 	} while (0)
 
+#define mtk_mdp_err(fmt, args...)					\
+	pr_err("[MTK_MDP][ERROR] %s:%d: " fmt "\n", __func__, __LINE__, \
+	       ##args)
+
+
 #define mtk_mdp_dbg_enter()  mtk_mdp_dbg(3, "+")
 #define mtk_mdp_dbg_leave()  mtk_mdp_dbg(3, "-")
 
 #else
 
 #define mtk_mdp_dbg(level, fmt, args...) {}
+#define mtk_mdp_err(fmt, args...)
 #define mtk_mdp_dbg_enter()
 #define mtk_mdp_dbg_leave()
 
 #endif
-
-#define mtk_mdp_err(fmt, args...)					\
-	pr_err("[MTK_MDP][ERROR] %s:%d: " fmt "\n", __func__, __LINE__, \
-	       ##args)
 
 #endif /* __MTK_MDP_CORE_H__ */

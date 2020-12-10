@@ -75,8 +75,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgx_heaps.h"
 #if defined(__KERNEL__)
 #include "pvrsrv.h"
-#include "rgxdefs_km.h"
-#include "rgx_bvnc_defs_km.h"
+#include "km/rgxdefs_km.h"
+#include "km/rgx_bvnc_defs_km.h"
 #include "device.h"
 #include "rgxdevice.h"
 #include "pvr_ricommon.h"
@@ -1156,7 +1156,7 @@ DevmemCreateHeap(DEVMEM_CONTEXT *psCtx,
 	}
 	psHeap->hDevMemServerHeap = hDevMemServerHeap;
 
-	eError = OSLockCreate(&psHeap->hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psHeap->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto e7;

@@ -30,10 +30,10 @@
 
 #include <net/bluetooth/bluetooth.h>
 
-void baswap(bdaddr_t *dst, bdaddr_t *src)
+void baswap(bdaddr_t *dst, const bdaddr_t *src)
 {
-	unsigned char *d = (unsigned char *) dst;
-	unsigned char *s = (unsigned char *) src;
+	const unsigned char *s = (const unsigned char *)src;
+	unsigned char *d = (unsigned char *)dst;
 	unsigned int i;
 
 	for (i = 0; i < 6; i++)
@@ -225,7 +225,6 @@ void bt_warn_ratelimited(const char *format, ...)
 
 	vaf.fmt = format;
 	vaf.va = &args;
-
 	pr_warn_ratelimited("%pV", &vaf);
 
 	va_end(args);

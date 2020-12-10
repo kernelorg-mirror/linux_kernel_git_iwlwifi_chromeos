@@ -1,24 +1,17 @@
-/*
- * ChromeOS EC communication protocol helper functions
- *
- * Copyright (C) 2015 Google, Inc
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
+// SPDX-License-Identifier: GPL-2.0
+// ChromeOS EC communication protocol helper functions
+//
+// Copyright (C) 2015 Google, Inc
 
-#include <linux/mfd/cros_ec.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/module.h>
+#include <linux/platform_data/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_proto.h>
 #include <linux/slab.h>
+#include <asm/unaligned.h>
+
+#include "cros_ec_trace.h"
 
 #define EC_COMMAND_RETRIES	50
 
@@ -77,7 +70,9 @@ static int send_command(struct cros_ec_device *ec_dev,
 		return -EIO;
 	}
 
+	trace_cros_ec_request_start(msg);
 	ret = (*xfer_fxn)(ec_dev, msg);
+	trace_cros_ec_request_done(msg, ret);
 	if (msg->result == EC_RES_IN_PROGRESS) {
 		int i;
 		struct cros_ec_command *status_msg;
@@ -100,7 +95,9 @@ static int send_command(struct cros_ec_device *ec_dev,
 		for (i = 0; i < EC_COMMAND_RETRIES; i++) {
 			usleep_range(10000, 11000);
 
+			trace_cros_ec_request_start(status_msg);
 			ret = (*xfer_fxn)(ec_dev, status_msg);
+			trace_cros_ec_request_done(status_msg, ret);
 			if (ret == -EAGAIN)
 				continue;
 			if (ret < 0)
@@ -122,6 +119,17 @@ static int send_command(struct cros_ec_device *ec_dev,
 	return ret;
 }
 
+/**
+ * cros_ec_prepare_tx() - Prepare an outgoing message in the output buffer.
+ * @ec_dev: Device to register.
+ * @msg: Message to write.
+ *
+ * This is intended to be used by all ChromeOS EC drivers, but at present
+ * only SPI uses it. Once LPC uses the same protocol it can start using it.
+ * I2C could use it now, with a refactor of the existing code.
+ *
+ * Return: 0 on success or negative error code.
+ */
 int cros_ec_prepare_tx(struct cros_ec_device *ec_dev,
 		       struct cros_ec_command *msg)
 {
@@ -146,6 +154,16 @@ int cros_ec_prepare_tx(struct cros_ec_device *ec_dev,
 }
 EXPORT_SYMBOL(cros_ec_prepare_tx);
 
+/**
+ * cros_ec_check_result() - Check ec_msg->result.
+ * @ec_dev: EC device.
+ * @msg: Message to check.
+ *
+ * This is used by ChromeOS EC drivers to check the ec_msg->result for
+ * errors and to warn about them.
+ *
+ * Return: 0 on success or negative error code.
+ */
 int cros_ec_check_result(struct cros_ec_device *ec_dev,
 			 struct cros_ec_command *msg)
 {
@@ -163,43 +181,6 @@ int cros_ec_check_result(struct cros_ec_device *ec_dev,
 	}
 }
 EXPORT_SYMBOL(cros_ec_check_result);
-
-
-/*
- * cros_ec_get_host_command_version_mask
- *
- * Get the version mask of a given command.
- *
- * @ec_dev: EC device to call
- * @msg: message structure to use
- * @cmd: command to get the version of.
- * @mask: result when function returns 0.
- *
- * LOCKING:
- * the caller has ec_dev->lock mutex, or the caller knows there is
- * no other command in progress.
- */
-static int cros_ec_get_host_command_version_mask(struct cros_ec_device *ec_dev,
-						 struct cros_ec_command *msg,
-						 uint16_t cmd, uint32_t *mask)
-{
-	struct ec_params_get_cmd_versions *pver;
-	struct ec_response_get_cmd_versions *rver;
-	int ret;
-
-	msg->command = EC_CMD_GET_CMD_VERSIONS;
-	msg->version = 0;
-	msg->outsize = sizeof(*pver);
-	msg->insize = sizeof(*rver);
-
-	pver = (struct ec_params_get_cmd_versions *)msg->data;
-	rver = (struct ec_response_get_cmd_versions *)msg->data;
-	pver->cmd = cmd;
-	ret = send_command(ec_dev, msg);
-	if (ret > 0)
-		*mask = rver->version_mask;
-	return ret;
-}
 
 /*
  * cros_ec_get_host_event_wake_mask
@@ -226,10 +207,18 @@ static int cros_ec_get_host_event_wake_mask(struct cros_ec_device *ec_dev,
 	msg->outsize = 0;
 	msg->insize = sizeof(*r);
 
-	r = (struct ec_response_host_event_mask *)msg->data;
 	ret = send_command(ec_dev, msg);
-	if (ret > 0)
+	if (ret >= 0) {
+		if (msg->result == EC_RES_INVALID_COMMAND)
+			return -EOPNOTSUPP;
+		if (msg->result != EC_RES_SUCCESS)
+			return -EPROTO;
+	}
+	if (ret > 0) {
+		r = (struct ec_response_host_event_mask *)msg->data;
 		*mask = r->mask;
+	}
+
 	return ret;
 }
 
@@ -318,12 +307,67 @@ static int cros_ec_host_command_proto_query_v2(struct cros_ec_device *ec_dev)
 	return ret;
 }
 
+/*
+ * cros_ec_get_host_command_version_mask
+ *
+ * Get the version mask of a given command.
+ *
+ * @ec_dev: EC device to call
+ * @msg: message structure to use
+ * @cmd: command to get the version of.
+ * @mask: result when function returns 0.
+ *
+ * @return 0 on success, error code otherwise
+ *
+ * LOCKING:
+ * the caller has ec_dev->lock mutex or the caller knows there is
+ * no other command in progress.
+ */
+static int cros_ec_get_host_command_version_mask(struct cros_ec_device *ec_dev,
+	u16 cmd, u32 *mask)
+{
+	struct ec_params_get_cmd_versions *pver;
+	struct ec_response_get_cmd_versions *rver;
+	struct cros_ec_command *msg;
+	int ret;
+
+	msg = kmalloc(sizeof(*msg) + max(sizeof(*rver), sizeof(*pver)),
+		      GFP_KERNEL);
+	if (!msg)
+		return -ENOMEM;
+
+	msg->version = 0;
+	msg->command = EC_CMD_GET_CMD_VERSIONS;
+	msg->insize = sizeof(*rver);
+	msg->outsize = sizeof(*pver);
+
+	pver = (struct ec_params_get_cmd_versions *)msg->data;
+	pver->cmd = cmd;
+
+	ret = send_command(ec_dev, msg);
+	if (ret > 0) {
+		rver = (struct ec_response_get_cmd_versions *)msg->data;
+		*mask = rver->version_mask;
+	}
+
+	kfree(msg);
+
+	return ret;
+}
+
+/**
+ * cros_ec_query_all() -  Query the protocol version supported by the
+ *         ChromeOS EC.
+ * @ec_dev: Device to register.
+ *
+ * Return: 0 on success or negative error code.
+ */
 int cros_ec_query_all(struct cros_ec_device *ec_dev)
 {
 	struct device *dev = ec_dev->dev;
 	struct cros_ec_command *proto_msg;
 	struct ec_response_get_protocol_info *proto_info;
-	uint32_t ver_mask = 0;
+	u32 ver_mask = 0;
 	int ret;
 
 	proto_msg = kzalloc(sizeof(*proto_msg) + sizeof(*proto_info),
@@ -383,8 +427,8 @@ int cros_ec_query_all(struct cros_ec_device *ec_dev)
 			ec_dev->max_response = EC_PROTO2_MAX_PARAM_SIZE;
 			ec_dev->max_passthru = 0;
 			ec_dev->pkt_xfer = NULL;
-			ec_dev->din_size = EC_MSG_BYTES;
-			ec_dev->dout_size = EC_MSG_BYTES;
+			ec_dev->din_size = EC_PROTO2_MSG_BYTES;
+			ec_dev->dout_size = EC_PROTO2_MSG_BYTES;
 		} else {
 			/*
 			 * It's possible for a test to occur too early when
@@ -414,26 +458,50 @@ int cros_ec_query_all(struct cros_ec_device *ec_dev)
 	}
 
 	/* Probe if MKBP event is supported */
-	ret = cros_ec_get_host_command_version_mask(ec_dev, proto_msg,
+	ret = cros_ec_get_host_command_version_mask(ec_dev,
 						    EC_CMD_GET_NEXT_EVENT,
 						    &ver_mask);
-	if (ret < 0 || ver_mask == 0) {
+	if (ret < 0 || ver_mask == 0)
 		ec_dev->mkbp_event_supported = 0;
-		dev_info(ec_dev->dev, "MKBP not supported\n");
-	} else {
+	else
 		ec_dev->mkbp_event_supported = fls(ver_mask);
-		dev_info(ec_dev->dev, "MKBP support version %u\n",
-			ec_dev->mkbp_event_supported - 1);
-	}
 
-	/*
-	 * Get host event wake mask, assume all events are wake events
-	 * if unavailable.
-	 */
+	dev_dbg(ec_dev->dev, "MKBP support version %u\n",
+		ec_dev->mkbp_event_supported - 1);
+
+	/* Probe if host sleep v1 is supported for S0ix failure detection. */
+	ret = cros_ec_get_host_command_version_mask(ec_dev,
+						    EC_CMD_HOST_SLEEP_EVENT,
+						    &ver_mask);
+	ec_dev->host_sleep_v1 = (ret >= 0 && (ver_mask & EC_VER_MASK(1)));
+
+	/* Get host event wake mask. */
 	ret = cros_ec_get_host_event_wake_mask(ec_dev, proto_msg,
 					       &ec_dev->host_event_wake_mask);
-	if (ret < 0)
-		ec_dev->host_event_wake_mask = (u32)-1;
+	if (ret < 0) {
+		/*
+		 * If the EC doesn't support EC_CMD_HOST_EVENT_GET_WAKE_MASK,
+		 * use a reasonable default. Note that we ignore various
+		 * battery, AC status, and power-state events, because (a)
+		 * those can be quite common (e.g., when sitting at full
+		 * charge, on AC) and (b) these are not actionable wake events;
+		 * if anything, we'd like to continue suspending (to save
+		 * power), not wake up.
+		 */
+		ec_dev->host_event_wake_mask = U32_MAX &
+			~(BIT(EC_HOST_EVENT_AC_DISCONNECTED) |
+			  BIT(EC_HOST_EVENT_BATTERY_LOW) |
+			  BIT(EC_HOST_EVENT_BATTERY_CRITICAL) |
+			  BIT(EC_HOST_EVENT_PD_MCU) |
+			  BIT(EC_HOST_EVENT_BATTERY_STATUS));
+		/*
+		 * Old ECs may not support this command. Complain about all
+		 * other errors.
+		 */
+		if (ret != -EOPNOTSUPP)
+			dev_err(ec_dev->dev,
+				"failed to retrieve wake mask: %d\n", ret);
+	}
 
 	ret = 0;
 
@@ -443,6 +511,16 @@ exit:
 }
 EXPORT_SYMBOL(cros_ec_query_all);
 
+/**
+ * cros_ec_cmd_xfer() - Send a command to the ChromeOS EC.
+ * @ec_dev: EC device.
+ * @msg: Message to write.
+ *
+ * Call this to send a command to the ChromeOS EC.  This should be used
+ * instead of calling the EC's cmd_xfer() callback directly.
+ *
+ * Return: 0 on success or negative error code.
+ */
 int cros_ec_cmd_xfer(struct cros_ec_device *ec_dev,
 		     struct cros_ec_command *msg)
 {
@@ -490,6 +568,21 @@ int cros_ec_cmd_xfer(struct cros_ec_device *ec_dev,
 }
 EXPORT_SYMBOL(cros_ec_cmd_xfer);
 
+/**
+ * cros_ec_cmd_xfer_status() - Send a command to the ChromeOS EC.
+ * @ec_dev: EC device.
+ * @msg: Message to write.
+ *
+ * This function is identical to cros_ec_cmd_xfer, except it returns success
+ * status only if both the command was transmitted successfully and the EC
+ * replied with success status. It's not necessary to check msg->result when
+ * using this function.
+ *
+ * Return:
+ * >=0 - The number of bytes transferred
+ * -ENOTSUPP - Operation not supported
+ * -EPROTO - Protocol error
+ */
 int cros_ec_cmd_xfer_status(struct cros_ec_device *ec_dev,
 			    struct cros_ec_command *msg)
 {
@@ -498,6 +591,10 @@ int cros_ec_cmd_xfer_status(struct cros_ec_device *ec_dev,
 	ret = cros_ec_cmd_xfer(ec_dev, msg);
 	if (ret < 0) {
 		dev_err(ec_dev->dev, "Command xfer error (err:%d)\n", ret);
+	} else if (msg->result == EC_RES_INVALID_VERSION) {
+		dev_dbg(ec_dev->dev, "Command invalid version (err:%d)\n",
+			msg->result);
+		return -ENOTSUPP;
 	} else if (msg->result != EC_RES_SUCCESS) {
 		dev_dbg(ec_dev->dev, "Command result (err: %d)\n", msg->result);
 		return -EPROTO;
@@ -506,6 +603,174 @@ int cros_ec_cmd_xfer_status(struct cros_ec_device *ec_dev,
 	return ret;
 }
 EXPORT_SYMBOL(cros_ec_cmd_xfer_status);
+
+static int get_next_event_xfer(struct cros_ec_device *ec_dev,
+			       struct cros_ec_command *msg,
+			       struct ec_response_get_next_event_v1 *event,
+			       int version, uint32_t size)
+{
+	int ret;
+
+	msg->version = version;
+	msg->command = EC_CMD_GET_NEXT_EVENT;
+	msg->insize = size;
+	msg->outsize = 0;
+
+	ret = cros_ec_cmd_xfer(ec_dev, msg);
+	if (ret > 0) {
+		ec_dev->event_size = ret - 1;
+		ec_dev->event_data = *event;
+	}
+
+	return ret;
+}
+
+static int get_next_event(struct cros_ec_device *ec_dev)
+{
+	struct {
+		struct cros_ec_command msg;
+		struct ec_response_get_next_event_v1 event;
+	} __packed buf;
+	struct cros_ec_command *msg = &buf.msg;
+	struct ec_response_get_next_event_v1 *event = &buf.event;
+	const int cmd_version = ec_dev->mkbp_event_supported - 1;
+
+	memset(msg, 0, sizeof(*msg));
+	if (ec_dev->suspended) {
+		dev_dbg(ec_dev->dev, "Device suspended.\n");
+		return -EHOSTDOWN;
+	}
+
+	if (cmd_version == 0)
+		return get_next_event_xfer(ec_dev, msg, event, 0,
+				  sizeof(struct ec_response_get_next_event));
+
+	return get_next_event_xfer(ec_dev, msg, event, cmd_version,
+				sizeof(struct ec_response_get_next_event_v1));
+}
+
+static int get_keyboard_state_event(struct cros_ec_device *ec_dev)
+{
+	u8 buffer[sizeof(struct cros_ec_command) +
+		  sizeof(ec_dev->event_data.data)];
+	struct cros_ec_command *msg = (struct cros_ec_command *)&buffer;
+
+	msg->version = 0;
+	msg->command = EC_CMD_MKBP_STATE;
+	msg->insize = sizeof(ec_dev->event_data.data);
+	msg->outsize = 0;
+
+	ec_dev->event_size = cros_ec_cmd_xfer(ec_dev, msg);
+	ec_dev->event_data.event_type = EC_MKBP_EVENT_KEY_MATRIX;
+	memcpy(&ec_dev->event_data.data, msg->data,
+	       sizeof(ec_dev->event_data.data));
+
+	return ec_dev->event_size;
+}
+
+/**
+ * cros_ec_get_next_event() - Fetch next event from the ChromeOS EC.
+ * @ec_dev: Device to fetch event from.
+ * @wake_event: Pointer to a bool set to true upon return if the event might be
+ *              treated as a wake event. Ignored if null.
+ * @has_more_events: Pointer to bool set to true if more than one event is
+ *              pending.
+ *              Some EC will set this flag to indicate cros_ec_get_next_event()
+ *              can be called multiple times in a row.
+ *              It is an optimization to prevent issuing a EC command for
+ *              nothing or wait for another interrupt from the EC to process
+ *              the next message.
+ *              Ignored if null.
+ *
+ * Return: negative error code on errors; 0 for no data; or else number of
+ * bytes received (i.e., an event was retrieved successfully). Event types are
+ * written out to @ec_dev->event_data.event_type on success.
+ */
+int cros_ec_get_next_event(struct cros_ec_device *ec_dev,
+			   bool *wake_event,
+			   bool *has_more_events)
+{
+	u8 event_type;
+	u32 host_event;
+	int ret;
+
+	/*
+	 * Default value for wake_event.
+	 * Wake up on keyboard event, wake up for spurious interrupt or link
+	 * error to the EC.
+	 */
+	if (wake_event)
+		*wake_event = true;
+
+	/*
+	 * Default value for has_more_events.
+	 * EC will raise another interrupt if AP does not process all events
+	 * anyway.
+	 */
+	if (has_more_events)
+		*has_more_events = false;
+
+	if (!ec_dev->mkbp_event_supported)
+		return get_keyboard_state_event(ec_dev);
+
+	ret = get_next_event(ec_dev);
+	if (ret <= 0)
+		return ret;
+
+	if (has_more_events)
+		*has_more_events = ec_dev->event_data.event_type &
+			EC_MKBP_HAS_MORE_EVENTS;
+	ec_dev->event_data.event_type &= EC_MKBP_EVENT_TYPE_MASK;
+
+	if (wake_event) {
+		event_type = ec_dev->event_data.event_type;
+		host_event = cros_ec_get_host_event(ec_dev);
+
+		/*
+		 * Sensor events need to be parsed by the sensor sub-device.
+		 * Defer them, and don't report the wakeup here.
+		 */
+		if (event_type == EC_MKBP_EVENT_SENSOR_FIFO)
+			*wake_event = false;
+		/* Masked host-events should not count as wake events. */
+		else if (host_event &&
+			 !(host_event & ec_dev->host_event_wake_mask))
+			*wake_event = false;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(cros_ec_get_next_event);
+
+/**
+ * cros_ec_get_host_event() - Return a mask of event set by the ChromeOS EC.
+ * @ec_dev: Device to fetch event from.
+ *
+ * When MKBP is supported, when the EC raises an interrupt, we collect the
+ * events raised and call the functions in the ec notifier. This function
+ * is a helper to know which events are raised.
+ *
+ * Return: 0 on error or non-zero bitmask of one or more EC_HOST_EVENT_*.
+ */
+u32 cros_ec_get_host_event(struct cros_ec_device *ec_dev)
+{
+	u32 host_event;
+
+	BUG_ON(!ec_dev->mkbp_event_supported);
+
+	if (ec_dev->event_data.event_type != EC_MKBP_EVENT_HOST_EVENT)
+		return 0;
+
+	if (ec_dev->event_size != sizeof(host_event)) {
+		dev_warn(ec_dev->dev, "Invalid host event size\n");
+		return 0;
+	}
+
+	host_event = get_unaligned_le32(&ec_dev->event_data.data.host_event);
+
+	return host_event;
+}
+EXPORT_SYMBOL(cros_ec_get_host_event);
 
 /**
  * cros_ec_check_features() - Test for the presence of EC features

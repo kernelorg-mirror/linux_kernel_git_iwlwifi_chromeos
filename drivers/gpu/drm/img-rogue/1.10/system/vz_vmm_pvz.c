@@ -54,7 +54,7 @@ PVRSRV_ERROR SysVzPvzConnectionInit(void)
 	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
 
 	/* Create para-virtualization connection lock */
-	eError = OSLockCreate(&psPVRSRVData->hPvzConnectionLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psPVRSRVData->hPvzConnectionLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,

@@ -46,8 +46,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* Our own interface */
 #include "mmu_common.h"
 
-#include "rgx_bvnc_defs_km.h"
-#include "rgxmmudefs_km.h"
+#include "km/rgx_bvnc_defs_km.h"
+#include "km/rgxmmudefs_km.h"
 /*
 Interfaces to other modules:
 
@@ -2422,7 +2422,7 @@ MMU_ContextCreate(PVRSRV_DEVICE_NODE *psDevNode,
 		goto e4;
 	}
 
-	OSLockCreate(&psCtx->psCleanupData->hCleanupLock, LOCK_TYPE_PASSIVE);
+	OSLockCreate(&psCtx->psCleanupData->hCleanupLock);
 	psCtx->psCleanupData->bMMUContextExists = IMG_TRUE;
 	dllist_init(&psCtx->psCleanupData->sMMUCtxCleanupItemsHead);
 	OSAtomicWrite(&psCtx->psCleanupData->iRef, 1);
@@ -2451,7 +2451,7 @@ MMU_ContextCreate(PVRSRV_DEVICE_NODE *psDevNode,
 	psMMUContext->sBaseLevelInfo.ui32NumOfEntries = ui32BaseObjects;
 	psMMUContext->sBaseLevelInfo.ui32RefCount = 0;
 
-	eError = OSLockCreate(&psMMUContext->hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psMMUContext->hLock);
 
 	if (eError != PVRSRV_OK)
 	{

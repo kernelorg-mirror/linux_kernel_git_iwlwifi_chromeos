@@ -42,7 +42,6 @@ int register_alt_sys_call_table(struct alt_sys_call_table *entry)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(register_alt_sys_call_table);
 
 int set_alt_sys_call_table(char * __user uname)
 {
@@ -65,4 +64,3 @@ int set_alt_sys_call_table(char * __user uname)
 
 	return -ENOENT;
 }
-EXPORT_SYMBOL_GPL(set_alt_sys_call_table);

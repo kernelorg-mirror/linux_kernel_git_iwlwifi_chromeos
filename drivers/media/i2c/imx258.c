@@ -1235,12 +1235,12 @@ static int imx258_probe(struct i2c_client *client)
 	/* Initialize subdev */
 	imx258->sd.internal_ops = &imx258_internal_ops;
 	imx258->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	imx258->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
+	imx258->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 
 	/* Initialize source pad */
 	imx258->pad.flags = MEDIA_PAD_FL_SOURCE;
 
-	ret = media_entity_init(&imx258->sd.entity, 1, &imx258->pad, 0);
+	ret = media_entity_pads_init(&imx258->sd.entity, 1, &imx258->pad);
 	if (ret)
 		goto error_handler_free;
 

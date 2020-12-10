@@ -17,7 +17,6 @@
 #include <linux/init.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/tps68470.h>
-#include <linux/module.h>
 #include <linux/regmap.h>
 
 static const struct mfd_cell tps68470s[] = {
@@ -87,7 +86,6 @@ static const struct acpi_device_id tps68470_acpi_ids[] = {
 	{"INT3472"},
 	{},
 };
-MODULE_DEVICE_TABLE(acpi, tps68470_acpi_ids);
 
 static struct i2c_driver tps68470_driver = {
 	.driver = {

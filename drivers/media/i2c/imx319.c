@@ -2356,7 +2356,9 @@ error:
 static struct imx319_hwcfg *imx319_get_hwcfg(struct device *dev)
 {
 	struct imx319_hwcfg *cfg;
-	struct v4l2_fwnode_endpoint *bus_cfg;
+	struct v4l2_fwnode_endpoint bus_cfg = {
+		.bus_type = V4L2_MBUS_CSI2_DPHY
+	};
 	struct fwnode_handle *ep;
 	struct fwnode_handle *fwnode = dev_fwnode(dev);
 	unsigned int i;
@@ -2369,8 +2371,8 @@ static struct imx319_hwcfg *imx319_get_hwcfg(struct device *dev)
 	if (!ep)
 		return NULL;
 
-	bus_cfg = v4l2_fwnode_endpoint_alloc_parse(ep);
-	if (IS_ERR(bus_cfg))
+	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &bus_cfg);
+	if (ret)
 		goto out_err;
 
 	cfg = devm_kzalloc(dev, sizeof(*cfg), GFP_KERNEL);
@@ -2391,30 +2393,30 @@ static struct imx319_hwcfg *imx319_get_hwcfg(struct device *dev)
 		goto out_err;
 	}
 
-	dev_dbg(dev, "num of link freqs: %d", bus_cfg->nr_of_link_frequencies);
-	if (!bus_cfg->nr_of_link_frequencies) {
+	dev_dbg(dev, "num of link freqs: %d", bus_cfg.nr_of_link_frequencies);
+	if (!bus_cfg.nr_of_link_frequencies) {
 		dev_warn(dev, "no link frequencies defined");
 		goto out_err;
 	}
 
-	cfg->nr_of_link_freqs = bus_cfg->nr_of_link_frequencies;
+	cfg->nr_of_link_freqs = bus_cfg.nr_of_link_frequencies;
 	cfg->link_freqs = devm_kcalloc(dev,
-				       bus_cfg->nr_of_link_frequencies + 1,
+				       bus_cfg.nr_of_link_frequencies + 1,
 				       sizeof(*cfg->link_freqs), GFP_KERNEL);
 	if (!cfg->link_freqs)
 		goto out_err;
 
-	for (i = 0; i < bus_cfg->nr_of_link_frequencies; i++) {
-		cfg->link_freqs[i] = bus_cfg->link_frequencies[i];
+	for (i = 0; i < bus_cfg.nr_of_link_frequencies; i++) {
+		cfg->link_freqs[i] = bus_cfg.link_frequencies[i];
 		dev_dbg(dev, "link_freq[%d] = %lld", i, cfg->link_freqs[i]);
 	}
 
-	v4l2_fwnode_endpoint_free(bus_cfg);
+	v4l2_fwnode_endpoint_free(&bus_cfg);
 	fwnode_handle_put(ep);
 	return cfg;
 
 out_err:
-	v4l2_fwnode_endpoint_free(bus_cfg);
+	v4l2_fwnode_endpoint_free(&bus_cfg);
 	fwnode_handle_put(ep);
 	return NULL;
 }
@@ -2457,8 +2459,9 @@ static int imx319_probe(struct i2c_client *client)
 	}
 
 	if (i == imx319->hwcfg->nr_of_link_freqs) {
-		dev_warn(&client->dev, "no link frequency supported "
-			 "defaulting to %lld\n", imx319->link_def_freq);
+		dev_err(&client->dev, "no link frequency supported");
+		ret = -EINVAL;
+		goto error_probe;
 	}
 
 	/* Set default mode to max resolution */
@@ -2475,11 +2478,11 @@ static int imx319_probe(struct i2c_client *client)
 	imx319->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
 		V4L2_SUBDEV_FL_HAS_EVENTS;
 	imx319->sd.entity.ops = &imx319_subdev_entity_ops;
-	imx319->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
+	imx319->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 
 	/* Initialize source pad */
 	imx319->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_init(&imx319->sd.entity, 1, &imx319->pad, 0);
+	ret = media_entity_pads_init(&imx319->sd.entity, 1, &imx319->pad);
 	if (ret) {
 		dev_err(&client->dev, "failed to init entity pads: %d", ret);
 		goto error_handler_free;

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_CONTEXT_TRACKING_H
 #define _LINUX_CONTEXT_TRACKING_H
 
@@ -29,6 +30,19 @@ static inline void user_exit(void)
 {
 	if (context_tracking_is_enabled())
 		context_tracking_exit(CONTEXT_USER);
+}
+
+/* Called with interrupts disabled.  */
+static inline void user_enter_irqoff(void)
+{
+	if (context_tracking_is_enabled())
+		__context_tracking_enter(CONTEXT_USER);
+
+}
+static inline void user_exit_irqoff(void)
+{
+	if (context_tracking_is_enabled())
+		__context_tracking_exit(CONTEXT_USER);
 }
 
 static inline enum ctx_state exception_enter(void)
@@ -69,6 +83,8 @@ static inline enum ctx_state ct_state(void)
 #else
 static inline void user_enter(void) { }
 static inline void user_exit(void) { }
+static inline void user_enter_irqoff(void) { }
+static inline void user_exit_irqoff(void) { }
 static inline enum ctx_state exception_enter(void) { return 0; }
 static inline void exception_exit(enum ctx_state prev_ctx) { }
 static inline enum ctx_state ct_state(void) { return CONTEXT_DISABLED; }
@@ -87,7 +103,7 @@ static inline void context_tracking_init(void) { }
 /* must be called with irqs disabled */
 static inline void guest_enter_irqoff(void)
 {
-	if (vtime_accounting_enabled())
+	if (vtime_accounting_cpu_enabled())
 		vtime_guest_enter(current);
 	else
 		current->flags |= PF_VCPU;
@@ -111,7 +127,7 @@ static inline void guest_exit_irqoff(void)
 	if (context_tracking_is_enabled())
 		__context_tracking_exit(CONTEXT_GUEST);
 
-	if (vtime_accounting_enabled())
+	if (vtime_accounting_cpu_enabled())
 		vtime_guest_exit(current);
 	else
 		current->flags &= ~PF_VCPU;

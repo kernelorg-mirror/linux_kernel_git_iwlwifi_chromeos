@@ -1,21 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel CE4100  platform specific setup code
  *
  * (C) Copyright 2010 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2
- * of the License.
  */
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/irq.h>
-#include <linux/module.h>
 #include <linux/reboot.h>
 #include <linux/serial_reg.h>
 #include <linux/serial_8250.h>
-#include <linux/reboot.h>
 
 #include <asm/ce4100.h>
 #include <asm/prom.h>
@@ -86,7 +80,7 @@ static void ce4100_mem_serial_out(struct uart_port *p, int offset, int value)
 }
 
 static void ce4100_serial_fixup(int port, struct uart_port *up,
-	unsigned short *capabilites)
+	u32 *capabilities)
 {
 #ifdef CONFIG_EARLY_PRINTK
 	/*
@@ -113,7 +107,7 @@ static void ce4100_serial_fixup(int port, struct uart_port *up,
 	up->serial_in = ce4100_mem_serial_in;
 	up->serial_out = ce4100_mem_serial_out;
 
-	*capabilites |= (1 << 12);
+	*capabilities |= (1 << 12);
 }
 
 static __init void sdv_serial_fixup(void)

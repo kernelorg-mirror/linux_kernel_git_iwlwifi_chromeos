@@ -1,18 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Analogix DP (Display port) core register interface driver.
  *
  * Copyright (C) 2012 Samsung Electronics Co., Ltd.
  * Author: Jingoo Han <jg1.han@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #include <linux/delay.h>
 #include <linux/device.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
 
@@ -75,9 +71,9 @@ void analogix_dp_init_analog_param(struct analogix_dp_device *dp)
 	reg = SEL_24M | TX_DVDD_BIT_1_0625V;
 	writel(reg, dp->reg_base + ANALOGIX_DP_ANALOG_CTL_2);
 
-	if (dp->plat_data && (dp->plat_data->dev_type == ROCKCHIP_DP)) {
+	if (dp->plat_data && is_rockchip(dp->plat_data->dev_type)) {
 		reg = REF_CLK_24M;
-		if (dp->plat_data->subdev_type == RK3288_DP)
+		if (dp->plat_data->dev_type == RK3288_DP)
 			reg ^= REF_CLK_MASK;
 
 		writel(reg, dp->reg_base + ANALOGIX_DP_PLL_REG_1);
@@ -126,7 +122,7 @@ void analogix_dp_reset(struct analogix_dp_device *dp)
 	analogix_dp_stop_video(dp);
 	analogix_dp_enable_video_mute(dp, 0);
 
-	if (dp->plat_data && (dp->plat_data->dev_type == ROCKCHIP_DP))
+	if (dp->plat_data && is_rockchip(dp->plat_data->dev_type))
 		reg = RK_VID_CAP_FUNC_EN_N | RK_VID_FIFO_FUNC_EN_N |
 			SW_FUNC_EN_N;
 	else
@@ -238,7 +234,7 @@ void analogix_dp_set_pll_power_down(struct analogix_dp_device *dp, bool enable)
 	u32 mask = DP_PLL_PD;
 	u32 pd_addr = ANALOGIX_DP_PLL_CTL;
 
-	if (dp->plat_data && (dp->plat_data->dev_type == ROCKCHIP_DP)) {
+	if (dp->plat_data && is_rockchip(dp->plat_data->dev_type)) {
 		pd_addr = ANALOGIX_DP_PD;
 		mask = RK_PLL_PD;
 	}
@@ -259,21 +255,21 @@ void analogix_dp_set_analog_power_down(struct analogix_dp_device *dp,
 	u32 phy_pd_addr = ANALOGIX_DP_PHY_PD;
 	u32 mask;
 
-	if (dp->plat_data && (dp->plat_data->dev_type == ROCKCHIP_DP))
+	if (dp->plat_data && is_rockchip(dp->plat_data->dev_type))
 		phy_pd_addr = ANALOGIX_DP_PD;
 
 	switch (block) {
 	case AUX_BLOCK:
-		if (dp->plat_data && (dp->plat_data->dev_type == ROCKCHIP_DP))
+		if (dp->plat_data && is_rockchip(dp->plat_data->dev_type))
 			mask = RK_AUX_PD;
 		else
 			mask = AUX_PD;
 
 		reg = readl(dp->reg_base + phy_pd_addr);
 		if (enable)
-				reg |= mask;
+			reg |= mask;
 		else
-				reg &= ~mask;
+			reg &= ~mask;
 		writel(reg, dp->reg_base + phy_pd_addr);
 		break;
 	case CH0_BLOCK:
@@ -322,18 +318,19 @@ void analogix_dp_set_analog_power_down(struct analogix_dp_device *dp,
 		 * to power off everything instead of DP_PHY_PD in
 		 * Rockchip
 		 */
-		if (dp->plat_data && (dp->plat_data->dev_type == ROCKCHIP_DP))
+		if (dp->plat_data && is_rockchip(dp->plat_data->dev_type))
 			mask = DP_INC_BG;
 		else
 			mask = DP_PHY_PD;
 
 		reg = readl(dp->reg_base + phy_pd_addr);
 		if (enable)
-				reg |= mask;
+			reg |= mask;
 		else
-				reg &= ~mask;
+			reg &= ~mask;
+
 		writel(reg, dp->reg_base + phy_pd_addr);
-		if (dp->plat_data && (dp->plat_data->dev_type == ROCKCHIP_DP))
+		if (dp->plat_data && is_rockchip(dp->plat_data->dev_type))
 			usleep_range(10, 15);
 		break;
 	case POWER_ALL:
@@ -396,7 +393,7 @@ void analogix_dp_clear_hotplug_interrupts(struct analogix_dp_device *dp)
 {
 	u32 reg;
 
-	if (gpio_is_valid(dp->hpd_gpio))
+	if (dp->hpd_gpiod)
 		return;
 
 	reg = HOTPLUG_CHG | HPD_LOST | PLUG;
@@ -410,7 +407,7 @@ void analogix_dp_init_hpd(struct analogix_dp_device *dp)
 {
 	u32 reg;
 
-	if (gpio_is_valid(dp->hpd_gpio))
+	if (dp->hpd_gpiod)
 		return;
 
 	analogix_dp_clear_hotplug_interrupts(dp);
@@ -433,8 +430,8 @@ enum dp_irq_type analogix_dp_get_irq_type(struct analogix_dp_device *dp)
 {
 	u32 reg;
 
-	if (gpio_is_valid(dp->hpd_gpio)) {
-		reg = gpio_get_value(dp->hpd_gpio);
+	if (dp->hpd_gpiod) {
+		reg = gpiod_get_value(dp->hpd_gpiod);
 		if (reg)
 			return DP_IRQ_TYPE_HP_CABLE_IN;
 		else
@@ -481,10 +478,10 @@ void analogix_dp_init_aux(struct analogix_dp_device *dp)
 	analogix_dp_reset_aux(dp);
 
 	/* AUX_BIT_PERIOD_EXPECTED_DELAY doesn't apply to Rockchip IP */
-	if (dp->plat_data && (dp->plat_data->dev_type != ROCKCHIP_DP))
-		reg = AUX_BIT_PERIOD_EXPECTED_DELAY(3);
-	else
+	if (dp->plat_data && is_rockchip(dp->plat_data->dev_type))
 		reg = 0;
+	else
+		reg = AUX_BIT_PERIOD_EXPECTED_DELAY(3);
 
 	/* Disable AUX transaction H/W retry */
 	reg |= AUX_HW_RETRY_COUNT_SEL(0) |
@@ -506,8 +503,8 @@ int analogix_dp_get_plug_in_status(struct analogix_dp_device *dp)
 {
 	u32 reg;
 
-	if (gpio_is_valid(dp->hpd_gpio)) {
-		if (gpio_get_value(dp->hpd_gpio))
+	if (dp->hpd_gpiod) {
+		if (gpiod_get_value(dp->hpd_gpiod))
 			return 0;
 	} else {
 		reg = readl(dp->reg_base + ANALOGIX_DP_SYS_CTL_3);
@@ -779,34 +776,22 @@ void analogix_dp_set_lane3_link_training(struct analogix_dp_device *dp,
 
 u32 analogix_dp_get_lane0_link_training(struct analogix_dp_device *dp)
 {
-	u32 reg;
-
-	reg = readl(dp->reg_base + ANALOGIX_DP_LN0_LINK_TRAINING_CTL);
-	return reg;
+	return readl(dp->reg_base + ANALOGIX_DP_LN0_LINK_TRAINING_CTL);
 }
 
 u32 analogix_dp_get_lane1_link_training(struct analogix_dp_device *dp)
 {
-	u32 reg;
-
-	reg = readl(dp->reg_base + ANALOGIX_DP_LN1_LINK_TRAINING_CTL);
-	return reg;
+	return readl(dp->reg_base + ANALOGIX_DP_LN1_LINK_TRAINING_CTL);
 }
 
 u32 analogix_dp_get_lane2_link_training(struct analogix_dp_device *dp)
 {
-	u32 reg;
-
-	reg = readl(dp->reg_base + ANALOGIX_DP_LN2_LINK_TRAINING_CTL);
-	return reg;
+	return readl(dp->reg_base + ANALOGIX_DP_LN2_LINK_TRAINING_CTL);
 }
 
 u32 analogix_dp_get_lane3_link_training(struct analogix_dp_device *dp)
 {
-	u32 reg;
-
-	reg = readl(dp->reg_base + ANALOGIX_DP_LN3_LINK_TRAINING_CTL);
-	return reg;
+	return readl(dp->reg_base + ANALOGIX_DP_LN3_LINK_TRAINING_CTL);
 }
 
 void analogix_dp_reset_macro(struct analogix_dp_device *dp)
@@ -988,7 +973,7 @@ void analogix_dp_config_video_slave_mode(struct analogix_dp_device *dp)
 	u32 reg;
 
 	reg = readl(dp->reg_base + ANALOGIX_DP_FUNC_EN_1);
-	if (dp->plat_data && (dp->plat_data->dev_type == ROCKCHIP_DP)) {
+	if (dp->plat_data && is_rockchip(dp->plat_data->dev_type)) {
 		reg &= ~(RK_VID_CAP_FUNC_EN_N | RK_VID_FIFO_FUNC_EN_N);
 	} else {
 		reg &= ~(MASTER_VID_FUNC_EN_N | SLAVE_VID_FUNC_EN_N);
@@ -1038,53 +1023,25 @@ void analogix_dp_enable_psr_crc(struct analogix_dp_device *dp)
 	writel(PSR_VID_CRC_ENABLE, dp->reg_base + ANALOGIX_DP_CRC_CON);
 }
 
-static int analogix_dp_get_psr_status(struct analogix_dp_device *dp,
-				      int status)
+static ssize_t analogix_dp_get_psr_status(struct analogix_dp_device *dp)
 {
 	ssize_t val;
-	u8 reg, store = 0;
-	int cnt = 0;
+	u8 status;
 
-	/* About 3ms for a loop */
-	while (cnt < 100) {
-		/* Read operation would takes 900us */
-		val = drm_dp_dpcd_readb(&dp->aux, DP_PSR_STATUS, &reg);
-		if (val < 0) {
-			dev_err(dp->dev, "PSR_STATUS read failed ret=%zd", val);
-			return val;
-		}
-
-		/*
-		 * Ensure the PSR_STATE should go to DP_PSR_SINK_ACTIVE_RFB
-		 * from DP_PSR_SINK_ACTIVE_SINK_SYNCED or
-		 * DP_PSR_SINK_ACTIVE_SRC_SYNCED.
-		 * Otherwise, if we get DP_PSR_SINK_ACTIVE_RFB twice in
-		 * succession, it show the Panel is stable PSR enabled state.
-		 */
-		if (status == DP_PSR_SINK_ACTIVE_RFB) {
-			if ((reg == DP_PSR_SINK_ACTIVE_RFB) &&
-			    ((store == DP_PSR_SINK_ACTIVE_SINK_SYNCED) ||
-			     (store == DP_PSR_SINK_ACTIVE_SRC_SYNCED) ||
-			     (store == DP_PSR_SINK_ACTIVE_RFB)))
-				return 0;
-			else
-				store = reg;
-		} else {
-			if (reg == status)
-				return 0;
-		}
-
-		usleep_range(2100, 2200);
-		cnt ++;
+	val = drm_dp_dpcd_readb(&dp->aux, DP_PSR_STATUS, &status);
+	if (val < 0) {
+		dev_err(dp->dev, "PSR_STATUS read failed ret=%zd", val);
+		return val;
 	}
-
-	return -ETIMEDOUT;
+	return status;
 }
 
 int analogix_dp_send_psr_spd(struct analogix_dp_device *dp,
-			     struct edp_vsc_psr *vsc, bool blocking)
+			     struct dp_sdp *vsc, bool blocking)
 {
 	unsigned int val;
+	int ret;
+	ssize_t psr_status;
 
 	/* don't send info frame */
 	val = readl(dp->reg_base + ANALOGIX_DP_PKT_SEND_CTL);
@@ -1108,8 +1065,8 @@ int analogix_dp_send_psr_spd(struct analogix_dp_device *dp,
 	writel(0x5D, dp->reg_base + ANALOGIX_DP_SPD_PB3);
 
 	/* configure DB0 / DB1 values */
-	writel(vsc->DB0, dp->reg_base + ANALOGIX_DP_VSC_SHADOW_DB0);
-	writel(vsc->DB1, dp->reg_base + ANALOGIX_DP_VSC_SHADOW_DB1);
+	writel(vsc->db[0], dp->reg_base + ANALOGIX_DP_VSC_SHADOW_DB0);
+	writel(vsc->db[1], dp->reg_base + ANALOGIX_DP_VSC_SHADOW_DB1);
 
 	/* set reuse spd inforframe */
 	val = readl(dp->reg_base + ANALOGIX_DP_VIDEO_CTL_3);
@@ -1129,10 +1086,16 @@ int analogix_dp_send_psr_spd(struct analogix_dp_device *dp,
 	if (!blocking)
 		return 0;
 
-	if (vsc->DB1)
-		return analogix_dp_get_psr_status(dp, DP_PSR_SINK_ACTIVE_RFB);
-	else
-		return analogix_dp_get_psr_status(dp, DP_PSR_SINK_INACTIVE);
+	ret = readx_poll_timeout(analogix_dp_get_psr_status, dp, psr_status,
+		psr_status >= 0 &&
+		((vsc->db[1] && psr_status == DP_PSR_SINK_ACTIVE_RFB) ||
+		(!vsc->db[1] && psr_status == DP_PSR_SINK_INACTIVE)), 1500,
+		DP_TIMEOUT_PSR_LOOP_MS * 1000);
+	if (ret) {
+		dev_warn(dp->dev, "Failed to apply PSR %d\n", ret);
+		return ret;
+	}
+	return 0;
 }
 
 ssize_t analogix_dp_transfer(struct analogix_dp_device *dp,
@@ -1259,7 +1222,7 @@ ssize_t analogix_dp_transfer(struct analogix_dp_device *dp,
 		 (msg->request & ~DP_AUX_I2C_MOT) == DP_AUX_NATIVE_READ)
 		msg->reply = DP_AUX_NATIVE_REPLY_ACK;
 
-	return (num_transferred == msg->size) ? num_transferred : -EBUSY;
+	return num_transferred > 0 ? num_transferred : -EBUSY;
 
 aux_error:
 	/* if aux err happen, reset aux */

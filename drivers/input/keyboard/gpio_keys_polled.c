@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Driver for buttons on GPIO lines not capable of generating interrupts
  *
@@ -9,10 +10,6 @@
  *
  *  also was based on: /drivers/input/keyboard/gpio_keys.c
  *	Copyright 2005 Phil Blundell
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -34,7 +31,6 @@ struct gpio_keys_button_data {
 	int last_state;
 	int count;
 	int threshold;
-	int can_sleep;
 };
 
 struct gpio_keys_polled_dev {
@@ -76,16 +72,17 @@ static void gpio_keys_polled_check_state(struct input_polled_dev *dev,
 {
 	int state;
 
-	if (bdata->can_sleep)
-		state = !!gpiod_get_value_cansleep(bdata->gpiod);
-	else
-		state = !!gpiod_get_value(bdata->gpiod);
+	state = gpiod_get_value_cansleep(bdata->gpiod);
+	if (state < 0) {
+		dev_err(dev->input->dev.parent,
+			"failed to get gpio state: %d\n", state);
+	} else {
+		gpio_keys_button_event(dev, button, state);
 
-	gpio_keys_button_event(dev, button, state);
-
-	if (state != bdata->last_state) {
-		bdata->count = 0;
-		bdata->last_state = state;
+		if (state != bdata->last_state) {
+			bdata->count = 0;
+			bdata->last_state = state;
+		}
 	}
 }
 
@@ -168,6 +165,8 @@ gpio_keys_polled_get_devtree_pdata(struct device *dev)
 	pdata->rep = device_property_present(dev, "autorepeat");
 	device_property_read_u32(dev, "poll-interval", &pdata->poll_interval);
 
+	device_property_read_string(dev, "label", &pdata->name);
+
 	device_for_each_child_node(dev, child) {
 		if (fwnode_property_read_u32(child, "linux,code",
 					     &button->code)) {
@@ -235,7 +234,6 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 	struct gpio_keys_polled_dev *bdev;
 	struct input_polled_dev *poll_dev;
 	struct input_dev *input;
-	size_t size;
 	int error;
 	int i;
 
@@ -250,15 +248,14 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	size = sizeof(struct gpio_keys_polled_dev) +
-			pdata->nbuttons * sizeof(struct gpio_keys_button_data);
-	bdev = devm_kzalloc(&pdev->dev, size, GFP_KERNEL);
+	bdev = devm_kzalloc(dev, struct_size(bdev, data, pdata->nbuttons),
+			    GFP_KERNEL);
 	if (!bdev) {
 		dev_err(dev, "no memory for private data\n");
 		return -ENOMEM;
 	}
 
-	poll_dev = devm_input_allocate_polled_device(&pdev->dev);
+	poll_dev = devm_input_allocate_polled_device(dev);
 	if (!poll_dev) {
 		dev_err(dev, "no memory for polled device\n");
 		return -ENOMEM;
@@ -272,7 +269,7 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 
 	input = poll_dev->input;
 
-	input->name = pdev->name;
+	input->name = pdata->name ?: pdev->name;
 	input->phys = DRV_NAME"/input0";
 
 	input->id.bustype = BUS_HOST;
@@ -303,22 +300,16 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 				return -EINVAL;
 			}
 
-			bdata->gpiod = devm_get_gpiod_from_child(dev, NULL,
-								 child);
+			bdata->gpiod = devm_fwnode_get_gpiod_from_child(dev,
+								NULL, child,
+								GPIOD_IN,
+								button->desc);
 			if (IS_ERR(bdata->gpiod)) {
 				error = PTR_ERR(bdata->gpiod);
 				if (error != -EPROBE_DEFER)
 					dev_err(dev,
 						"failed to get gpio: %d\n",
 						error);
-				fwnode_handle_put(child);
-				return error;
-			}
-
-			error = gpiod_direction_input(bdata->gpiod);
-			if (error) {
-				dev_err(dev, "Failed to configure GPIO %d as input: %d\n",
-					desc_to_gpio(bdata->gpiod), error);
 				fwnode_handle_put(child);
 				return error;
 			}
@@ -332,7 +323,7 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 			if (button->active_low)
 				flags |= GPIOF_ACTIVE_LOW;
 
-			error = devm_gpio_request_one(&pdev->dev, button->gpio,
+			error = devm_gpio_request_one(dev, button->gpio,
 					flags, button->desc ? : DRV_NAME);
 			if (error) {
 				dev_err(dev,
@@ -350,7 +341,6 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 			}
 		}
 
-		bdata->can_sleep = gpiod_cansleep(bdata->gpiod);
 		bdata->last_state = -1;
 		bdata->threshold = DIV_ROUND_UP(button->debounce_interval,
 						pdata->poll_interval);
@@ -366,7 +356,6 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 	bdev->poll_dev = poll_dev;
 	bdev->dev = dev;
 	bdev->pdata = pdata;
-	platform_set_drvdata(pdev, bdev);
 
 	error = input_register_polled_device(poll_dev);
 	if (error) {

@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2012 Broadcom Corporation
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 /* FWIL is the Firmware Interface Layer. In this module the support functions
@@ -107,26 +96,33 @@ static s32
 brcmf_fil_cmd_data(struct brcmf_if *ifp, u32 cmd, void *data, u32 len, bool set)
 {
 	struct brcmf_pub *drvr = ifp->drvr;
-	s32 err;
+	s32 err, fwerr;
 
 	if (drvr->bus_if->state != BRCMF_BUS_UP) {
-		brcmf_err("bus is down. we have nothing to do.\n");
+		bphy_err(drvr, "bus is down. we have nothing to do.\n");
 		return -EIO;
 	}
 
 	if (data != NULL)
 		len = min_t(uint, len, BRCMF_DCMD_MAXLEN);
 	if (set)
-		err = brcmf_proto_set_dcmd(drvr, ifp->ifidx, cmd, data, len);
+		err = brcmf_proto_set_dcmd(drvr, ifp->ifidx, cmd,
+					   data, len, &fwerr);
 	else
-		err = brcmf_proto_query_dcmd(drvr, ifp->ifidx, cmd, data, len);
+		err = brcmf_proto_query_dcmd(drvr, ifp->ifidx, cmd,
+					     data, len, &fwerr);
 
-	if (err >= 0)
-		return 0;
+	if (err) {
+		brcmf_dbg(FIL, "Failed: error=%d\n", err);
+	} else if (fwerr < 0) {
+		brcmf_dbg(FIL, "Firmware error: %s (%d)\n",
+			  brcmf_fil_get_errstr((u32)(-fwerr)), fwerr);
+		err = -EBADE;
+	}
+	if (ifp->fwil_fwerr)
+		return fwerr;
 
-	brcmf_dbg(FIL, "Failed: %s (%d)\n",
-		  brcmf_fil_get_errstr((u32)(-err)), err);
-	return -EBADE;
+	return err;
 }
 
 s32
@@ -235,7 +231,7 @@ brcmf_fil_iovar_data_set(struct brcmf_if *ifp, char *name, const void *data,
 					 buflen, true);
 	} else {
 		err = -EPERM;
-		brcmf_err("Creating iovar failed\n");
+		bphy_err(drvr, "Creating iovar failed\n");
 	}
 
 	mutex_unlock(&drvr->proto_block);
@@ -261,7 +257,7 @@ brcmf_fil_iovar_data_get(struct brcmf_if *ifp, char *name, void *data,
 			memcpy(data, drvr->proto_buf, len);
 	} else {
 		err = -EPERM;
-		brcmf_err("Creating iovar failed\n");
+		bphy_err(drvr, "Creating iovar failed\n");
 	}
 
 	brcmf_dbg(FIL, "ifidx=%d, name=%s, len=%d\n", ifp->ifidx, name, len);
@@ -293,22 +289,22 @@ brcmf_fil_iovar_int_get(struct brcmf_if *ifp, char *name, u32 *data)
 }
 
 static u32
-brcmf_create_bsscfg(s32 bssidx, char *name, char *data, u32 datalen, char *buf,
-		    u32 buflen)
+brcmf_create_bsscfg(s32 bsscfgidx, char *name, char *data, u32 datalen,
+		    char *buf, u32 buflen)
 {
 	const s8 *prefix = "bsscfg:";
 	s8 *p;
 	u32 prefixlen;
 	u32 namelen;
 	u32 iolen;
-	__le32 bssidx_le;
+	__le32 bsscfgidx_le;
 
-	if (bssidx == 0)
+	if (bsscfgidx == 0)
 		return brcmf_create_iovar(name, data, datalen, buf, buflen);
 
 	prefixlen = strlen(prefix);
-	namelen = strlen(name) + 1; /* lengh of iovar  name + null */
-	iolen = prefixlen + namelen + sizeof(bssidx_le) + datalen;
+	namelen = strlen(name) + 1; /* length of iovar  name + null */
+	iolen = prefixlen + namelen + sizeof(bsscfgidx_le) + datalen;
 
 	if (buflen < iolen) {
 		brcmf_err("buffer is too short\n");
@@ -326,9 +322,9 @@ brcmf_create_bsscfg(s32 bssidx, char *name, char *data, u32 datalen, char *buf,
 	p += namelen;
 
 	/* bss config index as first data */
-	bssidx_le = cpu_to_le32(bssidx);
-	memcpy(p, &bssidx_le, sizeof(bssidx_le));
-	p += sizeof(bssidx_le);
+	bsscfgidx_le = cpu_to_le32(bsscfgidx);
+	memcpy(p, &bsscfgidx_le, sizeof(bsscfgidx_le));
+	p += sizeof(bsscfgidx_le);
 
 	/* parameter buffer follows */
 	if (datalen)
@@ -347,19 +343,19 @@ brcmf_fil_bsscfg_data_set(struct brcmf_if *ifp, char *name,
 
 	mutex_lock(&drvr->proto_block);
 
-	brcmf_dbg(FIL, "ifidx=%d, bssidx=%d, name=%s, len=%d\n", ifp->ifidx,
-		  ifp->bssidx, name, len);
+	brcmf_dbg(FIL, "ifidx=%d, bsscfgidx=%d, name=%s, len=%d\n", ifp->ifidx,
+		  ifp->bsscfgidx, name, len);
 	brcmf_dbg_hex_dump(BRCMF_FIL_ON(), data,
 			   min_t(uint, len, MAX_HEX_DUMP_LEN), "data\n");
 
-	buflen = brcmf_create_bsscfg(ifp->bssidx, name, data, len,
+	buflen = brcmf_create_bsscfg(ifp->bsscfgidx, name, data, len,
 				     drvr->proto_buf, sizeof(drvr->proto_buf));
 	if (buflen) {
 		err = brcmf_fil_cmd_data(ifp, BRCMF_C_SET_VAR, drvr->proto_buf,
 					 buflen, true);
 	} else {
 		err = -EPERM;
-		brcmf_err("Creating bsscfg failed\n");
+		bphy_err(drvr, "Creating bsscfg failed\n");
 	}
 
 	mutex_unlock(&drvr->proto_block);
@@ -376,7 +372,7 @@ brcmf_fil_bsscfg_data_get(struct brcmf_if *ifp, char *name,
 
 	mutex_lock(&drvr->proto_block);
 
-	buflen = brcmf_create_bsscfg(ifp->bssidx, name, data, len,
+	buflen = brcmf_create_bsscfg(ifp->bsscfgidx, name, data, len,
 				     drvr->proto_buf, sizeof(drvr->proto_buf));
 	if (buflen) {
 		err = brcmf_fil_cmd_data(ifp, BRCMF_C_GET_VAR, drvr->proto_buf,
@@ -385,10 +381,10 @@ brcmf_fil_bsscfg_data_get(struct brcmf_if *ifp, char *name,
 			memcpy(data, drvr->proto_buf, len);
 	} else {
 		err = -EPERM;
-		brcmf_err("Creating bsscfg failed\n");
+		bphy_err(drvr, "Creating bsscfg failed\n");
 	}
-	brcmf_dbg(FIL, "ifidx=%d, bssidx=%d, name=%s, len=%d\n", ifp->ifidx,
-		  ifp->bssidx, name, len);
+	brcmf_dbg(FIL, "ifidx=%d, bsscfgidx=%d, name=%s, len=%d\n", ifp->ifidx,
+		  ifp->bsscfgidx, name, len);
 	brcmf_dbg_hex_dump(BRCMF_FIL_ON(), data,
 			   min_t(uint, len, MAX_HEX_DUMP_LEN), "data\n");
 

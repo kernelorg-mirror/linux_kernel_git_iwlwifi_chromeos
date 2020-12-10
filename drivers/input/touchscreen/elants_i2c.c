@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Elan Microelectronics touch panels with I2C interface
  *
@@ -10,7 +11,6 @@
  *  Copyright (c) 2010-2012 Benjamin Tissoires <benjamin.tissoires@gmail.com>
  *  Copyright (c) 2010-2012 Ecole Nationale de l'Aviation Civile, France
  *
- *
  * This code is partly based on i2c-hid.c:
  *
  * Copyright (c) 2012 Benjamin Tissoires <benjamin.tissoires@gmail.com>
@@ -18,11 +18,6 @@
  * Copyright (c) 2012 Red Hat, Inc
  */
 
-/*
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- */
 
 #include <linux/module.h>
 #include <linux/input.h>
@@ -45,7 +40,6 @@
 
 /* Device, Driver information */
 #define DEVICE_NAME	"elants_i2c"
-#define DRV_VERSION	"1.0.9"
 
 /* Convert from rows or columns into resolution */
 #define ELAN_TS_RESOLUTION(n, m)   (((n) - 1) * (m))
@@ -91,7 +85,6 @@
 /* FW read command, 0x53 0x?? 0x0, 0x01 */
 #define E_ELAN_INFO_FW_VER	0x00
 #define E_ELAN_INFO_BC_VER	0x10
-#define E_ELAN_INFO_REK		0xE0
 #define E_ELAN_INFO_TEST_VER	0xE0
 #define E_ELAN_INFO_FW_ID	0xF0
 #define E_INFO_OSR		0xD6
@@ -149,10 +142,12 @@ struct elants_data {
 	u8 cmd_resp[HEADER_SIZE];
 	struct completion cmd_done;
 
-	u8 buf[MAX_PACKET_SIZE];
-
 	bool wake_irq_enabled;
 	bool keep_power_in_suspend;
+
+	/* Must be last to be used for DMA operations */
+	u8 buf[MAX_PACKET_SIZE] ____cacheline_aligned;
+
 	bool unbinding;
 };
 
@@ -735,15 +730,9 @@ static int elants_i2c_fw_update(struct elants_data *ts)
 	error = request_firmware(&fw, fw_name, &client->dev);
 	kfree(fw_name);
 	if (error) {
-		dev_info(&client->dev, "failed to request firmware: %d\n",
+		dev_err(&client->dev, "failed to request firmware: %d\n",
 			error);
-		dev_info(&client->dev, "Falling back to 'elants_i2c.bin' instead\n");
-		error = request_firmware(&fw, "elants_i2c.bin", &client->dev);
-		if (error) {
-			dev_info(&client->dev, "failed to request firmware: %d\n",
-				error);
-			return error;
-		}
+		return error;
 	}
 
 	if (fw->size % ELAN_FW_PAGESIZE) {
@@ -872,7 +861,7 @@ static irqreturn_t elants_i2c_irq(int irq, void *_dev)
 	int i;
 	int len;
 
-	len = i2c_master_recv(client, ts->buf, sizeof(ts->buf));
+	len = i2c_master_recv_dmasafe(client, ts->buf, sizeof(ts->buf));
 	if (len < 0) {
 		dev_err(&client->dev, "%s: failed to read data: %d\n",
 			__func__, len);
@@ -962,7 +951,7 @@ out:
  */
 static ssize_t calibrate_store(struct device *dev,
 			       struct device_attribute *attr,
-			       const char *buf, size_t count)
+			      const char *buf, size_t count)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct elants_data *ts = i2c_get_clientdata(client);
@@ -1008,32 +997,8 @@ static ssize_t show_iap_mode(struct device *dev,
 				"Normal" : "Recovery");
 }
 
-static ssize_t show_calibration_count(struct device *dev,
-				      struct device_attribute *attr, char *buf)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	const u8 cmd[] = { CMD_HEADER_READ, E_ELAN_INFO_REK, 0x00, 0x01 };
-	u8 resp[HEADER_SIZE];
-	u16 rek_count;
-	int error;
-
-	error = elants_i2c_execute_command(client, cmd, sizeof(cmd),
-						resp, sizeof(resp));
-	if (error) {
-		dev_err(&client->dev,
-			"read ReK status error=%d, buf=%*phC\n",
-			error, (int)sizeof(resp), resp);
-		return sprintf(buf, "%d\n", error);
-	}
-
-	rek_count = get_unaligned_be16(&resp[2]);
-
-	return sprintf(buf, "0x%04x\n", rek_count);
-}
-
 static DEVICE_ATTR_WO(calibrate);
 static DEVICE_ATTR(iap_mode, S_IRUGO, show_iap_mode, NULL);
-static DEVICE_ATTR(calibration_count, S_IRUGO, show_calibration_count, NULL);
 static DEVICE_ATTR(update_fw, S_IWUSR, NULL, write_update_fw);
 
 struct elants_version_attribute {
@@ -1089,7 +1054,6 @@ static struct attribute *elants_attributes[] = {
 	&dev_attr_calibrate.attr,
 	&dev_attr_update_fw.attr,
 	&dev_attr_iap_mode.attr,
-	&dev_attr_calibration_count.attr,
 
 	&elants_ver_attr_fw_version.dattr.attr,
 	&elants_ver_attr_hw_version.dattr.attr,
@@ -1100,16 +1064,9 @@ static struct attribute *elants_attributes[] = {
 	NULL
 };
 
-static struct attribute_group elants_attribute_group = {
+static const struct attribute_group elants_attribute_group = {
 	.attrs = elants_attributes,
 };
-
-static void elants_i2c_remove_sysfs_group(void *_data)
-{
-	struct elants_data *ts = _data;
-
-	sysfs_remove_group(&ts->client->dev.kobj, &elants_attribute_group);
-}
 
 static int elants_i2c_power_on(struct elants_data *ts)
 {
@@ -1300,8 +1257,6 @@ static int elants_i2c_probe(struct i2c_client *client,
 	input_abs_set_res(ts->input, ABS_MT_POSITION_X, ts->x_res);
 	input_abs_set_res(ts->input, ABS_MT_POSITION_Y, ts->y_res);
 
-	input_set_drvdata(ts->input, ts);
-
 	error = input_register_device(ts->input);
 	if (error) {
 		dev_err(&client->dev,
@@ -1334,19 +1289,9 @@ static int elants_i2c_probe(struct i2c_client *client,
 	if (!client->dev.of_node)
 		device_init_wakeup(&client->dev, true);
 
-	error = sysfs_create_group(&client->dev.kobj, &elants_attribute_group);
+	error = devm_device_add_group(&client->dev, &elants_attribute_group);
 	if (error) {
 		dev_err(&client->dev, "failed to create sysfs attributes: %d\n",
-			error);
-		return error;
-	}
-
-	error = devm_add_action(&client->dev,
-				elants_i2c_remove_sysfs_group, ts);
-	if (error) {
-		elants_i2c_remove_sysfs_group(ts);
-		dev_err(&client->dev,
-			"Failed to add sysfs cleanup action: %d\n",
 			error);
 		return error;
 	}
@@ -1478,5 +1423,4 @@ module_i2c_driver(elants_i2c_driver);
 
 MODULE_AUTHOR("Scott Liu <scott.liu@emc.com.tw>");
 MODULE_DESCRIPTION("Elan I2c Touchscreen driver");
-MODULE_VERSION(DRV_VERSION);
 MODULE_LICENSE("GPL");

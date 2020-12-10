@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/input/tablet/wacom_sys.c
  *
@@ -5,10 +6,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include "wacom_wac.h"
@@ -303,7 +300,7 @@ static void wacom_feature_mapping(struct hid_device *hdev,
 	unsigned int equivalent_usage = wacom_equivalent_usage(usage->hid);
 	u8 *data;
 	int ret;
-	int n;
+	u32 n;
 
 	wacom_hid_usage_quirk(hdev, field, usage);
 
@@ -574,7 +571,7 @@ static int wacom_set_device_mode(struct hid_device *hdev,
 	u8 *rep_data;
 	struct hid_report *r;
 	struct hid_report_enum *re;
-	int length;
+	u32 length;
 	int error = -ENOMEM, limit = 0;
 
 	if (wacom_wac->mode_report < 0)
@@ -750,18 +747,6 @@ struct wacom_hdev_data {
 static LIST_HEAD(wacom_udev_list);
 static DEFINE_MUTEX(wacom_udev_list_lock);
 
-static bool compare_device_paths(struct hid_device *hdev_a,
-		struct hid_device *hdev_b, char separator)
-{
-	int n1 = strrchr(hdev_a->phys, separator) - hdev_a->phys;
-	int n2 = strrchr(hdev_b->phys, separator) - hdev_b->phys;
-
-	if (n1 != n2 || n1 <= 0 || n2 <= 0)
-		return false;
-
-	return !strncmp(hdev_a->phys, hdev_b->phys, n1);
-}
-
 static bool wacom_are_sibling(struct hid_device *hdev,
 		struct hid_device *sibling)
 {
@@ -784,10 +769,10 @@ static bool wacom_are_sibling(struct hid_device *hdev,
 	 * the same physical parent device path.
 	 */
 	if (hdev->vendor == sibling->vendor && hdev->product == sibling->product) {
-		if (!compare_device_paths(hdev, sibling, '/'))
+		if (!hid_compare_device_paths(hdev, sibling, '/'))
 			return false;
 	} else {
-		if (!compare_device_paths(hdev, sibling, '.'))
+		if (!hid_compare_device_paths(hdev, sibling, '.'))
 			return false;
 	}
 
@@ -834,7 +819,7 @@ static struct wacom_hdev_data *wacom_get_hdev_data(struct hid_device *hdev)
 
 	/* Try to find an already-probed interface from the same device */
 	list_for_each_entry(data, &wacom_udev_list, list) {
-		if (compare_device_paths(hdev, data->dev, '/')) {
+		if (hid_compare_device_paths(hdev, data->dev, '/')) {
 			kref_get(&data->kref);
 			return data;
 		}
@@ -1051,7 +1036,7 @@ out:
 static ssize_t wacom_led_select_store(struct device *dev, int set_id,
 				      const char *buf, size_t count)
 {
-	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
+	struct hid_device *hdev = to_hid_device(dev);
 	struct wacom *wacom = hid_get_drvdata(hdev);
 	unsigned int id;
 	int err;
@@ -1079,7 +1064,7 @@ static ssize_t wacom_led##SET_ID##_select_store(struct device *dev,	\
 static ssize_t wacom_led##SET_ID##_select_show(struct device *dev,	\
 	struct device_attribute *attr, char *buf)			\
 {									\
-	struct hid_device *hdev = container_of(dev, struct hid_device, dev);\
+	struct hid_device *hdev = to_hid_device(dev);\
 	struct wacom *wacom = hid_get_drvdata(hdev);			\
 	return scnprintf(buf, PAGE_SIZE, "%d\n",			\
 			 wacom->led.groups[SET_ID].select);		\
@@ -1115,7 +1100,7 @@ static ssize_t wacom_luminance_store(struct wacom *wacom, u8 *dest,
 static ssize_t wacom_##name##_luminance_store(struct device *dev,	\
 	struct device_attribute *attr, const char *buf, size_t count)	\
 {									\
-	struct hid_device *hdev = container_of(dev, struct hid_device, dev);\
+	struct hid_device *hdev = to_hid_device(dev);\
 	struct wacom *wacom = hid_get_drvdata(hdev);			\
 									\
 	return wacom_luminance_store(wacom, &wacom->led.field,		\
@@ -1138,7 +1123,7 @@ DEVICE_LUMINANCE_ATTR(buttons, img_lum);
 static ssize_t wacom_button_image_store(struct device *dev, int button_id,
 					const char *buf, size_t count)
 {
-	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
+	struct hid_device *hdev = to_hid_device(dev);
 	struct wacom *wacom = hid_get_drvdata(hdev);
 	int err;
 	unsigned len;
@@ -1418,7 +1403,7 @@ static int wacom_led_groups_alloc_and_register_one(struct device *dev,
 	if (!devres_open_group(dev, &wacom->led.groups[group_id], GFP_KERNEL))
 		return -ENOMEM;
 
-	leds = devm_kzalloc(dev, sizeof(struct wacom_led) * count, GFP_KERNEL);
+	leds = devm_kcalloc(dev, count, sizeof(struct wacom_led), GFP_KERNEL);
 	if (!leds) {
 		error = -ENOMEM;
 		goto err;
@@ -1518,7 +1503,7 @@ static int wacom_led_groups_allocate(struct wacom *wacom, int count)
 	struct wacom_group_leds *groups;
 	int error;
 
-	groups = devm_kzalloc(dev, sizeof(struct wacom_group_leds) * count,
+	groups = devm_kcalloc(dev, count, sizeof(struct wacom_group_leds),
 			      GFP_KERNEL);
 	if (!groups)
 		return -ENOMEM;
@@ -1805,7 +1790,7 @@ static ssize_t wacom_show_speed(struct device *dev,
 				struct device_attribute
 				*attr, char *buf)
 {
-	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
+	struct hid_device *hdev = to_hid_device(dev);
 	struct wacom *wacom = hid_get_drvdata(hdev);
 
 	return snprintf(buf, PAGE_SIZE, "%i\n", wacom->wacom_wac.bt_high_speed);
@@ -1815,7 +1800,7 @@ static ssize_t wacom_store_speed(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
 {
-	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
+	struct hid_device *hdev = to_hid_device(dev);
 	struct wacom *wacom = hid_get_drvdata(hdev);
 	u8 new_speed;
 
@@ -1838,8 +1823,8 @@ static ssize_t wacom_show_remote_mode(struct kobject *kobj,
 				      struct kobj_attribute *kattr,
 				      char *buf, int index)
 {
-	struct device *dev = container_of(kobj->parent, struct device, kobj);
-	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
+	struct device *dev = kobj_to_dev(kobj->parent);
+	struct hid_device *hdev = to_hid_device(dev);
 	struct wacom *wacom = hid_get_drvdata(hdev);
 	u8 mode;
 
@@ -1922,8 +1907,8 @@ static ssize_t wacom_store_unpair_remote(struct kobject *kobj,
 					 const char *buf, size_t count)
 {
 	unsigned char selector = 0;
-	struct device *dev = container_of(kobj->parent, struct device, kobj);
-	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
+	struct device *dev = kobj_to_dev(kobj->parent);
+	struct hid_device *hdev = to_hid_device(dev);
 	struct wacom *wacom = hid_get_drvdata(hdev);
 	int err;
 
@@ -2844,4 +2829,4 @@ module_hid_driver(wacom_driver);
 MODULE_VERSION(DRIVER_VERSION);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_LICENSE(DRIVER_LICENSE);
+MODULE_LICENSE("GPL");

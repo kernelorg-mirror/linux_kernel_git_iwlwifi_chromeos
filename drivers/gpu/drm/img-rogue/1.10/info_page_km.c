@@ -80,7 +80,7 @@ PVRSRV_ERROR InfoPageCreate(PVRSRV_DATA *psData)
                                         (void **) &psData->psInfoPagePMR);
     PVR_LOGG_IF_ERROR(eError, "DevmemLocalGetImportHandle", e0);
 
-    eError = OSLockCreate(&psData->hInfoPageLock, LOCK_TYPE_PASSIVE);
+    eError = OSLockCreate(&psData->hInfoPageLock);
     PVR_LOGG_IF_ERROR(eError, "OSLockCreate", e0);
 
     return PVRSRV_OK;

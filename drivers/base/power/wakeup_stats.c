@@ -40,8 +40,7 @@ static ssize_t active_time_ms_show(struct device *dev,
 {
 	struct wakeup_source *ws = dev_get_drvdata(dev);
 	ktime_t active_time =
-		ws->active ? ktime_sub(ktime_get(), ws->last_time)
-			   : ktime_set(0, 0);
+		ws->active ? ktime_sub(ktime_get(), ws->last_time) : 0;
 
 	return sprintf(buf, "%lld\n", ktime_to_ms(active_time));
 }
@@ -71,7 +70,7 @@ static ssize_t max_time_ms_show(struct device *dev,
 
 	if (ws->active) {
 		active_time = ktime_sub(ktime_get(), ws->last_time);
-		if (active_time.tv64 > max_time.tv64)
+		if (active_time > max_time)
 			max_time = active_time;
 	}
 	return sprintf(buf, "%lld\n", ktime_to_ms(max_time));
@@ -150,6 +149,7 @@ static struct device *wakeup_source_device_create(struct device *parent,
 	dev->groups = wakeup_source_groups;
 	dev->release = device_create_release;
 	dev_set_drvdata(dev, ws);
+	device_set_pm_not_required(dev);
 
 	retval = kobject_set_name(&dev->kobj, "wakeup%d", ws->id);
 	if (retval)

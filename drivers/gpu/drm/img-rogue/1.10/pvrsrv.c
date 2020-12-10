@@ -74,8 +74,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "lists.h"
 #include "dllist.h"
-#include "syscommon.h"
-#include "sysvalidation.h"
+#include "system/syscommon.h"
+#include "system/sysvalidation.h"
 
 #include "physmem_lma.h"
 #include "physmem_osmem.h"
@@ -123,14 +123,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "oskm_apphint.h"
 #include "pvrsrv_apphint.h"
 
-#include "rgx_bvnc_defs_km.h"
+#include "km/rgx_bvnc_defs_km.h"
 
 #include "pvrsrv_tlstreams.h"
 #include "tlstream.h"
-
-#if defined (SUPPORT_GPUTRACE_EVENTS)
-#include "pvr_gputrace.h"
-#endif
 
 #if defined(SUPPORT_PHYSMEM_TEST)
 #include "physmem_test.h"
@@ -359,7 +355,7 @@ static PVRSRV_ERROR _CleanupThreadPrepare(PVRSRV_DATA *psPVRSRVData)
 
 	/* initialise the mutex and linked list required for the cleanup thread work list */
 
-	eError = OSLockCreate(&psPVRSRVData->hCleanupThreadWorkListLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psPVRSRVData->hCleanupThreadWorkListLock);
 	PVR_LOGG_IF_ERROR(eError, "OSLockCreate", Exit);
 
 	dllist_init(&psPVRSRVData->sCleanupThreadWorkList);
@@ -1175,7 +1171,7 @@ PVRSRVDriverInit(void)
 		goto Error;
 	}
 
-	eError = OSLockCreate(&gpsPVRSRVData->hProcessHandleBase_Lock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&gpsPVRSRVData->hProcessHandleBase_Lock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,
@@ -1220,14 +1216,6 @@ PVRSRVDriverInit(void)
 		goto Error;
 	}
 
-#if defined (SUPPORT_GPUTRACE_EVENTS)
-	eError = PVRGpuTraceSupportInit();
-	if (eError != PVRSRV_OK)
-	{
-		goto Error;
-	}
-#endif
-
 #if defined(SUPPORT_RGX)
 	RGXHWPerfClientInitAppHintCallbacks();
 #endif
@@ -1252,7 +1240,7 @@ PVRSRVDriverInit(void)
 	}
 
 	dllist_init(&psPVRSRVData->sConnections);
-	eError = OSLockCreate(&psPVRSRVData->hConnectionsLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psPVRSRVData->hConnectionsLock);
 	PVR_LOGG_IF_ERROR(eError, "OSLockCreate", Error);
 
 	return 0;
@@ -1355,10 +1343,6 @@ PVRSRVDriverDeInit(void)
 	/* HTB De-init happens in device de-registration currently */
 	eError = HTBDeInit();
 	PVR_LOG_IF_ERROR(eError, "HTBDeInit");
-
-#if defined (SUPPORT_GPUTRACE_EVENTS)
-	PVRGpuTraceSupportDeInit();
-#endif
 
 	/* Tear down CacheOp framework information page first */
 	CacheOpDeInit2();
@@ -1718,7 +1702,7 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVDeviceCreate(void *pvOSDevice,
 		goto ErrorSysVzDevDeInit;
 	}
 
-	eError = OSLockCreate(&psDeviceNode->hPowerLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psDeviceNode->hPowerLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto ErrorUnregisterDbgTable;
@@ -2049,7 +2033,7 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVDeviceCreate(void *pvOSDevice,
 #endif
 
 #if defined(SUPPORT_VALIDATION) && !defined(PVRSRV_USE_BRIDGE_LOCK)
-	OSLockCreateNoStats(&psDeviceNode->hValidationLock, LOCK_TYPE_PASSIVE);
+	OSLockCreateNoStats(&psDeviceNode->hValidationLock);
 #endif
 
 	return PVRSRV_OK;

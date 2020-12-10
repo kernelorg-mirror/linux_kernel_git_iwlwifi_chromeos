@@ -19,6 +19,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/sched/mm.h>
 #include <linux/security.h>
 
 #include "utils.h"

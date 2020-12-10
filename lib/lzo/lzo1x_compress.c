@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  LZO1X Compressor from LZO
  *
@@ -20,7 +21,8 @@
 static noinline size_t
 lzo1x_1_do_compress(const unsigned char *in, size_t in_len,
 		    unsigned char *out, size_t *out_len,
-		    size_t ti, void *wrkmem, signed char *state_offset)
+		    size_t ti, void *wrkmem, signed char *state_offset,
+		    const unsigned char bitstream_version)
 {
 	const unsigned char *ip;
 	unsigned char *op;
@@ -35,7 +37,7 @@ lzo1x_1_do_compress(const unsigned char *in, size_t in_len,
 	ip += ti < 4 ? 4 - ti : 0;
 
 	for (;;) {
-		const unsigned char *m_pos;
+		const unsigned char *m_pos = NULL;
 		size_t t, m_len, m_off;
 		u32 dv;
 		u32 run_length = 0;
@@ -46,7 +48,7 @@ next:
 			break;
 		dv = get_unaligned_le32(ip);
 
-		if (dv == 0) {
+		if (dv == 0 && bitstream_version) {
 			const unsigned char *ir = ip + 4;
 			const unsigned char *limit = ip_end
 				< (ip + MAX_ZERO_RUN_LENGTH + 1)
@@ -81,17 +83,19 @@ next:
 					ALIGN((uintptr_t)ir, 4)) &&
 					(ir < limit) && (*ir == 0))
 				ir++;
-			for (; (ir + 4) <= limit; ir += 4) {
-				dv = *((u32 *)ir);
-				if (dv) {
+			if (IS_ALIGNED((uintptr_t)ir, 4)) {
+				for (; (ir + 4) <= limit; ir += 4) {
+					dv = *((u32 *)ir);
+					if (dv) {
 #  if defined(__LITTLE_ENDIAN)
-					ir += __builtin_ctz(dv) >> 3;
+						ir += __builtin_ctz(dv) >> 3;
 #  elif defined(__BIG_ENDIAN)
-					ir += __builtin_clz(dv) >> 3;
+						ir += __builtin_clz(dv) >> 3;
 #  else
 #    error "missing endian definition"
 #  endif
-					break;
+						break;
+					}
 				}
 			}
 #endif
@@ -118,7 +122,8 @@ next:
 				op += t;
 			} else if (t <= 16) {
 				*op++ = (t - 3);
-				COPY16(op, ii);
+				COPY8(op, ii);
+				COPY8(op + 8, ii + 8);
 				op += t;
 			} else {
 				if (t <= 18) {
@@ -133,7 +138,8 @@ next:
 					*op++ = tt;
 				}
 				do {
-					COPY16(op, ii);
+					COPY8(op, ii);
+					COPY8(op + 8, ii + 8);
 					op += 16;
 					ii += 16;
 					t -= 16;
@@ -262,6 +268,19 @@ m_len_done:
 				*op++ = (M4_MARKER | ((m_off >> 11) & 8)
 						| (m_len - 2));
 			else {
+				if (unlikely(((m_off & 0x403f) == 0x403f)
+						&& (m_len >= 261)
+						&& (m_len <= 264))
+						&& likely(bitstream_version)) {
+					// Under lzo-rle, block copies
+					// for 261 <= length <= 264 and
+					// (distance & 0x80f3) == 0x80f3
+					// can result in ambiguous
+					// output. Adjust length
+					// to 260 to prevent ambiguity.
+					ip -= m_len - 260;
+					m_len = 260;
+				}
 				m_len -= M4_MAX_LEN;
 				*op++ = (M4_MARKER | ((m_off >> 11) & 8));
 				while (unlikely(m_len > 255)) {
@@ -282,30 +301,39 @@ finished_writing_instruction:
 	return in_end - (ii - ti);
 }
 
-int lzo1x_1_compress(const unsigned char *in, size_t in_len,
+int lzogeneric1x_1_compress(const unsigned char *in, size_t in_len,
 		     unsigned char *out, size_t *out_len,
-		     void *wrkmem)
+		     void *wrkmem, const unsigned char bitstream_version)
 {
 	const unsigned char *ip = in;
 	unsigned char *op = out;
+	unsigned char *data_start;
 	size_t l = in_len;
 	size_t t = 0;
 	signed char state_offset = -2;
+	unsigned int m4_max_offset;
 
-	// LZO v0 will never write 17 as first byte,
-	// so this is used to version the bitstream
-	*op++ = 17;
-	*op++ = LZO_VERSION;
+	// LZO v0 will never write 17 as first byte (except for zero-length
+	// input), so this is used to version the bitstream
+	if (bitstream_version > 0) {
+		*op++ = 17;
+		*op++ = bitstream_version;
+		m4_max_offset = M4_MAX_OFFSET_V1;
+	} else {
+		m4_max_offset = M4_MAX_OFFSET_V0;
+	}
+
+	data_start = op;
 
 	while (l > 20) {
-		size_t ll = l <= (M4_MAX_OFFSET + 1) ? l : (M4_MAX_OFFSET + 1);
+		size_t ll = l <= (m4_max_offset + 1) ? l : (m4_max_offset + 1);
 		uintptr_t ll_end = (uintptr_t) ip + ll;
 		if ((ll_end + ((t + ll) >> 5)) <= ll_end)
 			break;
 		BUILD_BUG_ON(D_SIZE * sizeof(lzo_dict_t) > LZO1X_1_MEM_COMPRESS);
 		memset(wrkmem, 0, D_SIZE * sizeof(lzo_dict_t));
-		t = lzo1x_1_do_compress(ip, ll, op, out_len,
-					t, wrkmem, &state_offset);
+		t = lzo1x_1_do_compress(ip, ll, op, out_len, t, wrkmem,
+					&state_offset, bitstream_version);
 		ip += ll;
 		op += *out_len;
 		l  -= ll;
@@ -315,7 +343,7 @@ int lzo1x_1_compress(const unsigned char *in, size_t in_len,
 	if (t > 0) {
 		const unsigned char *ii = in + in_len - t;
 
-		if (op == out && t <= 238) {
+		if (op == data_start && t <= 238) {
 			*op++ = (17 + t);
 		} else if (t <= 3) {
 			op[state_offset] |= t;
@@ -331,7 +359,8 @@ int lzo1x_1_compress(const unsigned char *in, size_t in_len,
 			*op++ = tt;
 		}
 		if (t >= 16) do {
-			COPY16(op, ii);
+			COPY8(op, ii);
+			COPY8(op + 8, ii + 8);
 			op += 16;
 			ii += 16;
 			t -= 16;
@@ -348,7 +377,24 @@ int lzo1x_1_compress(const unsigned char *in, size_t in_len,
 	*out_len = op - out;
 	return LZO_E_OK;
 }
+
+int lzo1x_1_compress(const unsigned char *in, size_t in_len,
+		     unsigned char *out, size_t *out_len,
+		     void *wrkmem)
+{
+	return lzogeneric1x_1_compress(in, in_len, out, out_len, wrkmem, 0);
+}
+
+int lzorle1x_1_compress(const unsigned char *in, size_t in_len,
+		     unsigned char *out, size_t *out_len,
+		     void *wrkmem)
+{
+	return lzogeneric1x_1_compress(in, in_len, out, out_len,
+				       wrkmem, LZO_VERSION);
+}
+
 EXPORT_SYMBOL_GPL(lzo1x_1_compress);
+EXPORT_SYMBOL_GPL(lzorle1x_1_compress);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("LZO1X-1 Compressor");

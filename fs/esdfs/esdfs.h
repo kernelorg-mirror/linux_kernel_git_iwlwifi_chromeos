@@ -17,9 +17,11 @@
 #include <linux/dcache.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/iversion.h>
 #include <linux/aio.h>
 #include <linux/mm.h>
 #include <linux/mount.h>
+#include <uapi/linux/mount.h>
 #include <linux/namei.h>
 #include <linux/seq_file.h>
 #include <linux/statfs.h>
@@ -32,6 +34,8 @@
 #include <linux/uidgid.h>
 #include <linux/user_namespace.h>
 #include <linux/pkglist.h>
+
+#include "../internal.h"
 
 /* the file system name */
 #define ESDFS_NAME "esdfs"
@@ -341,7 +345,10 @@ static inline void esdfs_set_lower_stub_path(const struct dentry *dent,
 static inline void esdfs_put_reset_lower_paths(const struct dentry *dent)
 {
 	struct path lower_path;
-	struct path lower_stub_path = { NULL, NULL };
+	struct path lower_stub_path = {
+		.mnt = NULL,
+		.dentry = NULL,
+	};
 
 	spin_lock(&ESDFS_D(dent)->lock);
 	pathcpy(&lower_path, &ESDFS_D(dent)->lower_path);
@@ -410,13 +417,13 @@ static inline struct dentry *lock_parent(struct dentry *dentry)
 {
 	struct dentry *dir = dget_parent(dentry);
 
-	mutex_lock_nested(&dir->d_inode->i_mutex, I_MUTEX_PARENT);
+	inode_lock_nested(dir->d_inode, I_MUTEX_PARENT);
 	return dir;
 }
 
 static inline void unlock_dir(struct dentry *dir)
 {
-	mutex_unlock(&dir->d_inode->i_mutex);
+	inode_unlock(dir->d_inode);
 	dput(dir);
 }
 

@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AT and PS/2 keyboard driver
  *
  * Copyright (c) 1999-2002 Vojtech Pavlik
  */
 
-/*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- */
 
 /*
  * This driver can handle standard AT keyboards and PS/2 keyboards in
@@ -28,6 +24,7 @@
 #include <linux/libps2.h>
 #include <linux/mutex.h>
 #include <linux/dmi.h>
+#include <linux/property.h>
 
 #define DRIVER_DESC	"AT and PS/2 keyboard driver"
 
@@ -66,6 +63,11 @@ MODULE_PARM_DESC(extra, "Enable extra LEDs and keys on IBM RapidAcces, EzKey and
 static bool atkbd_terminal;
 module_param_named(terminal, atkbd_terminal, bool, 0);
 MODULE_PARM_DESC(terminal, "Enable break codes on an IBM Terminal keyboard connected via AT/PS2");
+
+#define MAX_FUNCTION_ROW_KEYS	24
+
+#define SCANCODE(keymap)	((keymap >> 16) & 0xFFFF)
+#define KEYCODE(keymap)		(keymap & 0xFFFF)
 
 /*
  * Scancode to keycode tables. These are just the default setting, and
@@ -234,6 +236,9 @@ struct atkbd {
 
 	/* Serializes reconnect(), attr->set() and event work */
 	struct mutex mutex;
+
+	u32 function_row_physmap[MAX_FUNCTION_ROW_KEYS];
+	int num_function_row_keys;
 };
 
 /*
@@ -287,6 +292,7 @@ static struct device_attribute atkbd_attr_##_name =				\
 	__ATTR(_name, S_IRUGO, atkbd_do_show_##_name, NULL);
 
 ATKBD_DEFINE_RO_ATTR(err_count);
+ATKBD_DEFINE_RO_ATTR(function_row_physmap);
 
 static struct attribute *atkbd_attributes[] = {
 	&atkbd_attr_extra.attr,
@@ -296,11 +302,42 @@ static struct attribute *atkbd_attributes[] = {
 	&atkbd_attr_softrepeat.attr,
 	&atkbd_attr_softraw.attr,
 	&atkbd_attr_err_count.attr,
+	&atkbd_attr_function_row_physmap.attr,
 	NULL
 };
 
+static ssize_t atkbd_show_function_row_physmap(struct atkbd *atkbd, char *buf)
+{
+	ssize_t size = 0;
+	int i;
+
+	if (!atkbd->num_function_row_keys)
+		return 0;
+
+	for (i = 0; i < atkbd->num_function_row_keys; i++)
+		size += scnprintf(buf + size, PAGE_SIZE - size, "%02X ",
+				  atkbd->function_row_physmap[i]);
+	size += scnprintf(buf + size, PAGE_SIZE - size, "\n");
+	return size;
+}
+
+static umode_t atkbd_attr_is_visible(struct kobject *kobj,
+				struct attribute *attr, int i)
+{
+	struct device *dev = container_of(kobj, struct device, kobj);
+	struct serio *serio = to_serio_port(dev);
+	struct atkbd *atkbd = serio_get_drvdata(serio);
+
+	if (attr == &atkbd_attr_function_row_physmap.attr &&
+	    !atkbd->num_function_row_keys)
+		return 0;
+
+	return attr->mode;
+}
+
 static struct attribute_group atkbd_attribute_group = {
 	.attrs	= atkbd_attributes,
+	.is_visible = atkbd_attr_is_visible,
 };
 
 static const unsigned int xl_table[] = {
@@ -727,7 +764,6 @@ static int atkbd_probe(struct atkbd *atkbd)
 {
 	struct ps2dev *ps2dev = &atkbd->ps2dev;
 	unsigned char param[2];
-	int getid_attempts_left = 5;
 
 /*
  * Some systems, where the bit-twiddling when testing the io-lines of the
@@ -748,19 +784,8 @@ static int atkbd_probe(struct atkbd *atkbd)
  * should make sure we don't try to set the LEDs on it.
  */
 
-/* Chrome OS workaround only: we have a bug in the EC that causes keystrokes to
- * be enabled too early, so we may read scancodes instead of the GETID
- * response.  In that case, instead of failing, retry a few times on i8042 KBD
- * port only.
- */
-	if (ps2dev->serio && strcmp(ps2dev->serio->name, "i8042 KBD port"))
-		getid_attempts_left = 1;
-
-getid_retry:
-	getid_attempts_left--;
 	param[0] = param[1] = 0xa5;	/* initialize with invalid values */
 	if (ps2_command(ps2dev, param, ATKBD_CMD_GETID)) {
-		dev_warn(&ps2dev->serio->dev, "GETID failed");
 
 /*
  * If the get ID command failed, we check if we can at least set the LEDs on
@@ -768,30 +793,14 @@ getid_retry:
  * the LEDs off, which we want anyway.
  */
 		param[0] = 0;
-		if (ps2_command(ps2dev, param, ATKBD_CMD_SETLEDS)) {
-			dev_warn(&ps2dev->serio->dev, "atkbd: SETLEDS failed");
-			if (getid_attempts_left <= 0)
-				return -1;
-			else {
-				ps2_drain(ps2dev, 6, 1);
-				ps2_command(ps2dev, NULL, ATKBD_CMD_ENABLE);
-				goto getid_retry;
-			}
-		}
+		if (ps2_command(ps2dev, param, ATKBD_CMD_SETLEDS))
+			return -1;
 		atkbd->id = 0xabba;
 		return 0;
 	}
 
-	if (!ps2_is_keyboard_id(param[0])) {
-		dev_warn(&ps2dev->serio->dev, "bad keyboard id %d", param[0]);
-		if (getid_attempts_left <= 0)
-			return -1;
-		else {
-			ps2_drain(ps2dev, 6, 1);
-			ps2_command(ps2dev, NULL, ATKBD_CMD_ENABLE);
-			goto getid_retry;
-		}
-	}
+	if (!ps2_is_keyboard_id(param[0]))
+		return -1;
 
 	atkbd->id = (param[0] << 8) | param[1];
 
@@ -871,7 +880,7 @@ static int atkbd_select_set(struct atkbd *atkbd, int target_set, int allow_extra
 	if (param[0] != 3) {
 		param[0] = 2;
 		if (ps2_command(ps2dev, param, ATKBD_CMD_SSCANSET))
-		return 2;
+			return 2;
 	}
 
 	ps2_command(ps2dev, param, ATKBD_CMD_SETALL_MBR);
@@ -1026,6 +1035,39 @@ static unsigned int atkbd_oqo_01plus_scancode_fixup(struct atkbd *atkbd,
 	return code;
 }
 
+static int atkbd_get_keymap_from_fwnode(struct atkbd *atkbd)
+{
+	struct device *dev = &atkbd->ps2dev.serio->dev;
+	int i, n;
+	u32 *ptr;
+	u16 scancode, keycode;
+
+	/* Parse "linux,keymap" property */
+	n = device_property_count_u32(dev, "linux,keymap");
+	if (n <= 0 || n > ATKBD_KEYMAP_SIZE)
+		return -ENXIO;
+
+	ptr = kcalloc(n, sizeof(u32), GFP_KERNEL);
+	if (!ptr)
+		return -ENOMEM;
+
+	if (device_property_read_u32_array(dev, "linux,keymap", ptr, n)) {
+		dev_err(dev, "problem parsing FW keymap property\n");
+		kfree(ptr);
+		return -EINVAL;
+	}
+
+	memset(atkbd->keycode, 0, sizeof(atkbd->keycode));
+	for (i = 0; i < n; i++) {
+		scancode = SCANCODE(ptr[i]);
+		keycode = KEYCODE(ptr[i]);
+		atkbd->keycode[scancode] = keycode;
+	}
+
+	kfree(ptr);
+	return 0;
+}
+
 /*
  * atkbd_set_keycode_table() initializes keyboard's keycode table
  * according to the selected scancode set
@@ -1033,13 +1075,16 @@ static unsigned int atkbd_oqo_01plus_scancode_fixup(struct atkbd *atkbd,
 
 static void atkbd_set_keycode_table(struct atkbd *atkbd)
 {
+	struct device *dev = &atkbd->ps2dev.serio->dev;
 	unsigned int scancode;
 	int i, j;
 
 	memset(atkbd->keycode, 0, sizeof(atkbd->keycode));
 	bitmap_zero(atkbd->force_release_mask, ATKBD_KEYMAP_SIZE);
 
-	if (atkbd->translated) {
+	if (!atkbd_get_keymap_from_fwnode(atkbd)) {
+		dev_dbg(dev, "Using FW keymap\n");
+	} else if (atkbd->translated) {
 		for (i = 0; i < 128; i++) {
 			scancode = atkbd_unxlate_table[i];
 			atkbd->keycode[i] = atkbd_set2_keycode[scancode];
@@ -1153,6 +1198,22 @@ static void atkbd_set_device_attrs(struct atkbd *atkbd)
 	}
 }
 
+static void atkbd_parse_fwnode_data(struct serio *serio)
+{
+	struct atkbd *atkbd = serio_get_drvdata(serio);
+	struct device *dev = &serio->dev;
+	int n;
+
+	/* Parse "function-row-physmap" property */
+	n = device_property_count_u32(dev, "function-row-physmap");
+	if (n > 0 && n <= MAX_FUNCTION_ROW_KEYS &&
+	    !device_property_read_u32_array(dev, "function-row-physmap",
+					    atkbd->function_row_physmap, n)) {
+		atkbd->num_function_row_keys = n;
+		dev_dbg(dev, "FW reported %d function-row key locations\n", n);
+	}
+}
+
 /*
  * atkbd_connect() is called when the serio module finds an interface
  * that isn't handled yet by an appropriate device driver. We check if
@@ -1204,7 +1265,6 @@ static int atkbd_connect(struct serio *serio, struct serio_driver *drv)
 	if (atkbd->write) {
 
 		if (atkbd_probe(atkbd)) {
-			dev_err(&serio->dev, "probe failed");
 			err = -ENODEV;
 			goto fail3;
 		}
@@ -1216,6 +1276,8 @@ static int atkbd_connect(struct serio *serio, struct serio_driver *drv)
 		atkbd->set = 2;
 		atkbd->id = 0xab00;
 	}
+
+	atkbd_parse_fwnode_data(serio);
 
 	atkbd_set_keycode_table(atkbd);
 	atkbd_set_device_attrs(atkbd);
@@ -1261,16 +1323,11 @@ static int atkbd_reconnect(struct serio *serio)
 
 	mutex_lock(&atkbd->mutex);
 
-	if (atkbd->write)
-		atkbd_deactivate(atkbd);
-
 	atkbd_disable(atkbd);
 
 	if (atkbd->write) {
-		if (atkbd_probe(atkbd)) {
-			dev_err(&serio->dev, "reconnect: probe failed");
+		if (atkbd_probe(atkbd))
 			goto out;
-		}
 
 		if (atkbd->set != atkbd_select_set(atkbd, atkbd->set, atkbd->extra))
 			goto out;
@@ -1306,7 +1363,7 @@ static int atkbd_reconnect(struct serio *serio)
 	return retval;
 }
 
-static struct serio_device_id atkbd_serio_ids[] = {
+static const struct serio_device_id atkbd_serio_ids[] = {
 	{
 		.type	= SERIO_8042,
 		.proto	= SERIO_ANY,

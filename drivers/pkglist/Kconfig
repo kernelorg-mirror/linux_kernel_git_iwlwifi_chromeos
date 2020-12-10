@@ -1,6 +1,5 @@
 config PKGLIST
 	tristate "Package list for emulated 'SD card' file system for Android"
-	default ANDROID
 	depends on CONFIGFS_FS || !CONFIGFS_FS
 	help
 	  Pkglist presents an interface for Android's emulated sdcard layer.

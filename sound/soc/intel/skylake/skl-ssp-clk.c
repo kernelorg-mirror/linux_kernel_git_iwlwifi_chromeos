@@ -1,23 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright(c) 2015-17 Intel Corporation
+
 /*
  *  skl-ssp-clk.c - ASoC skylake ssp clock driver
- *
- *  Copyright (C) 2017 Intel Corp
- *  Author: Jaikrishna Nemallapudi <jaikrishnax.nemallapudi@intel.com>
- *  Author: Subhransu S. Prusty <subhransu.s.prusty@intel.com>
- *
- *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
  */
 
 #include <linux/kernel.h>
@@ -26,6 +11,7 @@
 #include <linux/platform_device.h>
 #include <linux/clk-provider.h>
 #include <linux/clkdev.h>
+#include <sound/intel-nhlt.h>
 #include "skl.h"
 #include "skl-ssp-clk.h"
 #include "skl-topology.h"
@@ -116,7 +102,7 @@ static void skl_fill_clk_ipc(struct skl_clk_rate_cfg_table *rcfg, u8 clk_type)
 }
 
 /* Sends dma control IPC to turn the clock ON/OFF */
-static int skl_send_clk_dma_control(struct skl *skl,
+static int skl_send_clk_dma_control(struct skl_dev *skl,
 				struct skl_clk_rate_cfg_table *rcfg,
 				u32 vbus_id, u8 clk_type,
 				bool enable)
@@ -167,7 +153,7 @@ static int skl_send_clk_dma_control(struct skl *skl,
 	memcpy(i2s_config + sp_cfg->size, data, size);
 
 	node_id = ((SKL_DMA_I2S_LINK_INPUT_CLASS << 8) | (vbus_id << 4));
-	ret = skl_dsp_set_dma_control(skl->skl_sst, (u32 *)i2s_config,
+	ret = skl_dsp_set_dma_control(skl, (u32 *)i2s_config,
 					i2s_config_size, node_id);
 	kfree(i2s_config);
 
@@ -215,18 +201,12 @@ static int skl_clk_prepare(struct clk_hw *hw)
 {
 	struct skl_clk *clkdev = to_skl_clk(hw);
 
-	if (!clkdev)
-		return -ENODEV;
-
 	return skl_clk_change_status(clkdev, true);
 }
 
 static void skl_clk_unprepare(struct clk_hw *hw)
 {
 	struct skl_clk *clkdev = to_skl_clk(hw);
-
-	if (!clkdev)
-		return;
 
 	skl_clk_change_status(clkdev, false);
 }
@@ -237,9 +217,6 @@ static int skl_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 	struct skl_clk *clkdev = to_skl_clk(hw);
 	struct skl_clk_rate_cfg_table *rcfg;
 	int clk_type;
-
-	if (!clkdev)
-		return -ENODEV;
 
 	if (!rate)
 		return -EINVAL;
@@ -263,33 +240,16 @@ static unsigned long skl_clk_recalc_rate(struct clk_hw *hw,
 				unsigned long parent_rate)
 {
 	struct skl_clk *clkdev = to_skl_clk(hw);
-	struct skl_clk_rate_cfg_table *rcfg;
-	int clk_type;
-
-	if (!clkdev)
-		return 0;
 
 	if (clkdev->rate)
 		return clkdev->rate;
 
-	rcfg = skl_get_rate_cfg(clkdev->pdata->ssp_clks[clkdev->id].rate_cfg,
-					parent_rate);
-	if (!rcfg)
-		return 0;
-
-	clk_type = skl_get_clk_type(clkdev->id);
-	if (clk_type < 0)
-		return 0;
-
-	skl_fill_clk_ipc(rcfg, clk_type);
-	clkdev->rate = rcfg->rate;
-
-	return clkdev->rate;
+	return 0;
 }
 
 /* Not supported by clk driver. Implemented to satisfy clk fw */
-long skl_clk_round_rate(struct clk_hw *hw, unsigned long rate,
-				unsigned long *parent_rate)
+static long skl_clk_round_rate(struct clk_hw *hw, unsigned long rate,
+			       unsigned long *parent_rate)
 {
 	return rate;
 }
@@ -317,10 +277,8 @@ static void unregister_parent_src_clk(struct skl_clk_parent *pclk,
 
 static void unregister_src_clk(struct skl_clk_data *dclk)
 {
-	u8 cnt = dclk->avail_clk_cnt;
-
-	while (cnt--)
-		clkdev_drop(dclk->clk[cnt]->lookup);
+	while (dclk->avail_clk_cnt--)
+		clkdev_drop(dclk->clk[dclk->avail_clk_cnt]->lookup);
 }
 
 static int skl_register_parent_clks(struct device *dev,
@@ -369,7 +327,7 @@ static struct skl_clk *register_skl_clk(struct device *dev,
 
 	init.name = clk->name;
 	init.ops = &skl_clk_ops;
-	init.flags = 0;
+	init.flags = CLK_SET_RATE_GATE;
 	init.parent_names = &clk->parent_name;
 	init.num_parents = 1;
 	clkdev->hw.init = &init;
@@ -422,9 +380,11 @@ static int skl_clk_dev_probe(struct platform_device *pdev)
 		if (clks[i].rate_cfg[0].rate == 0)
 			continue;
 
-		data->clk[i] = register_skl_clk(dev, &clks[i], clk_pdata, i);
-		if (IS_ERR(data->clk[i])) {
-			ret = PTR_ERR(data->clk[i]);
+		data->clk[data->avail_clk_cnt] = register_skl_clk(dev,
+				&clks[i], clk_pdata, i);
+
+		if (IS_ERR(data->clk[data->avail_clk_cnt])) {
+			ret = PTR_ERR(data->clk[data->avail_clk_cnt]);
 			goto err_unreg_skl_clk;
 		}
 

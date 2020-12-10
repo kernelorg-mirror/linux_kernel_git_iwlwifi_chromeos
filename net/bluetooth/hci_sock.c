@@ -337,7 +337,7 @@ void hci_send_to_monitor(struct hci_dev *hdev, struct sk_buff *skb)
 		return;
 
 	/* Put header before the data */
-	hdr = (void *)skb_push(skb_copy, HCI_MON_HDR_SIZE);
+	hdr = skb_push(skb_copy, HCI_MON_HDR_SIZE);
 	hdr->opcode = opcode;
 	hdr->index = cpu_to_le16(hdev->id);
 	hdr->len = cpu_to_le16(skb->len);
@@ -384,11 +384,11 @@ void hci_send_monitor_ctrl_event(struct hci_dev *hdev, u16 event,
 		put_unaligned_le16(event, skb_put(skb, 2));
 
 		if (data)
-			memcpy(skb_put(skb, data_len), data, data_len);
+			skb_put_data(skb, data, data_len);
 
 		skb->tstamp = tstamp;
 
-		hdr = (void *)skb_push(skb, HCI_MON_HDR_SIZE);
+		hdr = skb_push(skb, HCI_MON_HDR_SIZE);
 		hdr->opcode = cpu_to_le16(HCI_MON_CTRL_EVENT);
 		hdr->index = index;
 		hdr->len = cpu_to_le16(skb->len - HCI_MON_HDR_SIZE);
@@ -415,7 +415,7 @@ static struct sk_buff *create_monitor_event(struct hci_dev *hdev, int event)
 		if (!skb)
 			return NULL;
 
-		ni = (void *)skb_put(skb, HCI_MON_NEW_INDEX_SIZE);
+		ni = skb_put(skb, HCI_MON_NEW_INDEX_SIZE);
 		ni->type = hdev->dev_type;
 		ni->bus = hdev->bus;
 		bacpy(&ni->bdaddr, &hdev->bdaddr);
@@ -443,7 +443,7 @@ static struct sk_buff *create_monitor_event(struct hci_dev *hdev, int event)
 		if (!skb)
 			return NULL;
 
-		ii = (void *)skb_put(skb, HCI_MON_INDEX_INFO_SIZE);
+		ii = skb_put(skb, HCI_MON_INDEX_INFO_SIZE);
 		bacpy(&ii->bdaddr, &hdev->bdaddr);
 		ii->manufacturer = cpu_to_le16(hdev->manufacturer);
 
@@ -472,7 +472,7 @@ static struct sk_buff *create_monitor_event(struct hci_dev *hdev, int event)
 
 	__net_timestamp(skb);
 
-	hdr = (void *)skb_push(skb, HCI_MON_HDR_SIZE);
+	hdr = skb_push(skb, HCI_MON_HDR_SIZE);
 	hdr->opcode = opcode;
 	hdr->index = cpu_to_le16(hdev->id);
 	hdr->len = cpu_to_le16(skb->len - HCI_MON_HDR_SIZE);
@@ -520,14 +520,14 @@ static struct sk_buff *create_monitor_ctrl_open(struct sock *sk)
 
 	put_unaligned_le32(hci_pi(sk)->cookie, skb_put(skb, 4));
 	put_unaligned_le16(format, skb_put(skb, 2));
-	memcpy(skb_put(skb, sizeof(ver)), ver, sizeof(ver));
+	skb_put_data(skb, ver, sizeof(ver));
 	put_unaligned_le32(flags, skb_put(skb, 4));
-	*skb_put(skb, 1) = TASK_COMM_LEN;
-	memcpy(skb_put(skb, TASK_COMM_LEN), hci_pi(sk)->comm, TASK_COMM_LEN);
+	skb_put_u8(skb, TASK_COMM_LEN);
+	skb_put_data(skb, hci_pi(sk)->comm, TASK_COMM_LEN);
 
 	__net_timestamp(skb);
 
-	hdr = (void *)skb_push(skb, HCI_MON_HDR_SIZE);
+	hdr = skb_push(skb, HCI_MON_HDR_SIZE);
 	hdr->opcode = cpu_to_le16(HCI_MON_CTRL_OPEN);
 	if (hci_pi(sk)->hdev)
 		hdr->index = cpu_to_le16(hci_pi(sk)->hdev->id);
@@ -565,7 +565,7 @@ static struct sk_buff *create_monitor_ctrl_close(struct sock *sk)
 
 	__net_timestamp(skb);
 
-	hdr = (void *)skb_push(skb, HCI_MON_HDR_SIZE);
+	hdr = skb_push(skb, HCI_MON_HDR_SIZE);
 	hdr->opcode = cpu_to_le16(HCI_MON_CTRL_CLOSE);
 	if (hci_pi(sk)->hdev)
 		hdr->index = cpu_to_le16(hci_pi(sk)->hdev->id);
@@ -591,11 +591,11 @@ static struct sk_buff *create_monitor_ctrl_command(struct sock *sk, u16 index,
 	put_unaligned_le16(opcode, skb_put(skb, 2));
 
 	if (buf)
-		memcpy(skb_put(skb, len), buf, len);
+		skb_put_data(skb, buf, len);
 
 	__net_timestamp(skb);
 
-	hdr = (void *)skb_push(skb, HCI_MON_HDR_SIZE);
+	hdr = skb_push(skb, HCI_MON_HDR_SIZE);
 	hdr->opcode = cpu_to_le16(HCI_MON_CTRL_COMMAND);
 	hdr->index = cpu_to_le16(index);
 	hdr->len = cpu_to_le16(skb->len - HCI_MON_HDR_SIZE);
@@ -621,7 +621,7 @@ send_monitor_note(struct sock *sk, const char *fmt, ...)
 
 	va_start(args, fmt);
 	vsprintf(skb_put(skb, len), fmt, args);
-	*skb_put(skb, 1) = 0;
+	*(u8 *)skb_put(skb, 1) = 0;
 	va_end(args);
 
 	__net_timestamp(skb);
@@ -708,11 +708,11 @@ static void hci_si_event(struct hci_dev *hdev, int type, int dlen, void *data)
 	if (!skb)
 		return;
 
-	hdr = (void *)skb_put(skb, HCI_EVENT_HDR_SIZE);
+	hdr = skb_put(skb, HCI_EVENT_HDR_SIZE);
 	hdr->evt  = HCI_EV_STACK_INTERNAL;
 	hdr->plen = sizeof(*ev) + dlen;
 
-	ev  = (void *)skb_put(skb, sizeof(*ev) + dlen);
+	ev = skb_put(skb, sizeof(*ev) + dlen);
 	ev->type = type;
 	memcpy(ev->data, data, dlen);
 
@@ -831,6 +831,8 @@ static int hci_sock_release(struct socket *sock)
 	if (!sk)
 		return 0;
 
+	lock_sock(sk);
+
 	switch (hci_pi(sk)->channel) {
 	case HCI_CHANNEL_MONITOR:
 		atomic_dec(&monitor_promisc);
@@ -855,7 +857,7 @@ static int hci_sock_release(struct socket *sock)
 	hdev = hci_pi(sk)->hdev;
 	if (hdev) {
 		if (hci_pi(sk)->channel == HCI_CHANNEL_USER) {
-			/* When releasing an user channel exclusive access,
+			/* When releasing a user channel exclusive access,
 			 * call hci_dev_do_close directly instead of calling
 			 * hci_dev_close to ensure the exclusive access will
 			 * be released and the controller brought back down.
@@ -878,6 +880,7 @@ static int hci_sock_release(struct socket *sock)
 	skb_queue_purge(&sk->sk_receive_queue);
 	skb_queue_purge(&sk->sk_write_queue);
 
+	release_sock(sk);
 	sock_put(sk);
 	return 0;
 }
@@ -1176,7 +1179,7 @@ static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,
 				/* In case the transport is already up and
 				 * running, clear the error here.
 				 *
-				 * This can happen when opening an user
+				 * This can happen when opening a user
 				 * channel and HCI_AUTO_OFF grace period
 				 * is still active.
 				 */
@@ -1194,7 +1197,7 @@ static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,
 		if (!hci_sock_gen_cookie(sk)) {
 			/* In the case when a cookie has already been assigned,
 			 * this socket will transition from a raw socket into
-			 * an user channel socket. For a clean transition, send
+			 * a user channel socket. For a clean transition, send
 			 * the close notification first.
 			 */
 			skb = create_monitor_ctrl_close(sk);
@@ -1339,7 +1342,7 @@ done:
 }
 
 static int hci_sock_getname(struct socket *sock, struct sockaddr *addr,
-			    int *addr_len, int peer)
+			    int peer)
 {
 	struct sockaddr_hci *haddr = (struct sockaddr_hci *)addr;
 	struct sock *sk = sock->sk;
@@ -1359,10 +1362,10 @@ static int hci_sock_getname(struct socket *sock, struct sockaddr *addr,
 		goto done;
 	}
 
-	*addr_len = sizeof(*haddr);
 	haddr->hci_family = AF_BLUETOOTH;
 	haddr->hci_dev    = hdev->id;
 	haddr->hci_channel= hci_pi(sk)->channel;
+	err = sizeof(*haddr);
 
 done:
 	release_sock(sk);
@@ -1382,9 +1385,9 @@ static void hci_sock_cmsg(struct sock *sk, struct msghdr *msg,
 
 	if (mask & HCI_CMSG_TSTAMP) {
 #ifdef CONFIG_COMPAT
-		struct compat_timeval ctv;
+		struct old_timeval32 ctv;
 #endif
-		struct timeval tv;
+		struct __kernel_old_timeval tv;
 		void *data;
 		int len;
 

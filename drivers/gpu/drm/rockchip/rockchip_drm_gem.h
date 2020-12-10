@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) Fuzhou Rockchip Electronics Co.Ltd
  * Author:Mark Yao <mark.yao@rock-chips.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef _ROCKCHIP_DRM_GEM_H
@@ -23,9 +15,8 @@ struct rockchip_gem_object {
 
 	void *kvaddr;
 	dma_addr_t dma_addr;
-
 	/* Used when IOMMU is disabled */
-	struct dma_attrs dma_attrs;
+	unsigned long dma_attrs;
 
 	/* Used when IOMMU is enabled */
 	struct drm_mm_node mm;
@@ -59,11 +50,7 @@ void rockchip_gem_free_object(struct drm_gem_object *obj);
 int rockchip_gem_dumb_create(struct drm_file *file_priv,
 			     struct drm_device *dev,
 			     struct drm_mode_create_dumb *args);
-int rockchip_gem_dumb_map_offset(struct drm_file *file_priv,
-				 struct drm_device *dev, uint32_t handle,
-				 uint64_t *offset);
-int rockchip_gem_map_offset_ioctl(struct drm_device *drm, void *data,
-				  struct drm_file *file_priv);
+
 /*
  * request gem object creation and buffer allocation as the size
  * that it is calculated with framebuffer information such as width,

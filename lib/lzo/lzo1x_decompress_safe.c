@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  LZO1X Decompressor from LZO
  *
@@ -54,11 +55,9 @@ int lzo1x_decompress_safe(const unsigned char *in, size_t in_len,
 	if (unlikely(in_len < 3))
 		goto input_overrun;
 
-	if (likely(*ip == 17)) {
+	if (likely(in_len >= 5) && likely(*ip == 17)) {
 		bitstream_version = ip[1];
 		ip += 2;
-		if (unlikely(in_len < 5))
-			goto input_overrun;
 	} else {
 		bitstream_version = 0;
 	}
@@ -98,9 +97,12 @@ copy_literal_run:
 					const unsigned char *ie = ip + t;
 					unsigned char *oe = op + t;
 					do {
-						COPY16(op, ip);
-						op += 16;
-						ip += 16;
+						COPY8(op, ip);
+						op += 8;
+						ip += 8;
+						COPY8(op, ip);
+						op += 8;
+						ip += 8;
 					} while (ip < ie);
 					ip = ie;
 					op = oe;
@@ -213,9 +215,12 @@ copy_literal_run:
 			unsigned char *oe = op + t;
 			if (likely(HAVE_OP(t + 15))) {
 				do {
-					COPY16(op, m_pos);
-					op += 16;
-					m_pos += 16;
+					COPY8(op, m_pos);
+					op += 8;
+					m_pos += 8;
+					COPY8(op, m_pos);
+					op += 8;
+					m_pos += 8;
 				} while (op < oe);
 				op = oe;
 				if (HAVE_IP(6)) {

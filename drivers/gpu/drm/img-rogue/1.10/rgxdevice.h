@@ -465,9 +465,7 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	IMG_BOOL    bWarnedPktOrdinalBroke;
 #endif
 
-#if defined(SUPPORT_GPUTRACE_EVENTS)
 	void        *pvGpuFtraceData;
-#endif
 
 	/* Poll data for detecting firmware fatal errors */
 	IMG_UINT32				aui32CrLastPollAddr[RGXFW_THREAD_NUM];

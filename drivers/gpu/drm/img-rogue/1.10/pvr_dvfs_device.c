@@ -44,9 +44,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #if !defined(NO_HARDWARE)
 
 #include <linux/devfreq.h>
-#if defined(CONFIG_DEVFREQ_THERMAL)
 #include <linux/devfreq_cooling.h>
-#endif
 #include <linux/version.h>
 #include <linux/device.h>
 
@@ -58,7 +56,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxinit.h"
 #include "sofunc_rgx.h"
 
-#include "syscommon.h"
+#include "system/syscommon.h"
 
 #include "pvr_dvfs_device.h"
 
@@ -478,7 +476,9 @@ PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		goto err_exit;
 	}
 
-#if	defined(CHROMIUMOS_KERNEL) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
+#if defined(CHROMIUMOS_KERNEL) && \
+  ((LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)) &&	\
+   (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)))
 	psDVFSDevice->psDevFreq->policy.user.min_freq = min_freq;
 	psDVFSDevice->psDevFreq->policy.user.max_freq = max_freq;
 #else

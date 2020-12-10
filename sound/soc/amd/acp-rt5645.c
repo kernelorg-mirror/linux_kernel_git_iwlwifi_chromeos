@@ -40,6 +40,7 @@
 #include "../codecs/rt5645.h"
 
 #define CZ_PLAT_CLK 24000000
+#define DUAL_CHANNEL		2
 
 static struct snd_soc_jack cz_jack;
 
@@ -48,7 +49,7 @@ static int cz_aif1_hw_params(struct snd_pcm_substream *substream,
 {
 	int ret = 0;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 
 	ret = snd_soc_dai_set_pll(codec_dai, 0, RT5645_PLL1_S_MCLK,
 				  CZ_PLAT_CLK, params_rate(params) * 512);
@@ -71,9 +72,9 @@ static int cz_init(struct snd_soc_pcm_runtime *rtd)
 {
 	int ret;
 	struct snd_soc_card *card;
-	struct snd_soc_codec *codec;
+	struct snd_soc_component *codec;
 
-	codec = rtd->codec;
+	codec = asoc_rtd_to_codec(rtd, 0)->component;
 	card = rtd->card;
 
 	ret = snd_soc_card_jack_new(card, "Headset Jack",
@@ -91,33 +92,80 @@ static int cz_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
-static struct snd_soc_ops cz_aif1_ops = {
+static const unsigned int channels[] = {
+	DUAL_CHANNEL,
+};
+
+static const unsigned int rates[] = {
+	48000,
+};
+
+static const struct snd_pcm_hw_constraint_list constraints_rates = {
+	.count = ARRAY_SIZE(rates),
+	.list  = rates,
+	.mask = 0,
+};
+
+static const struct snd_pcm_hw_constraint_list constraints_channels = {
+	.count = ARRAY_SIZE(channels),
+	.list = channels,
+	.mask = 0,
+};
+
+static int cz_fe_startup(struct snd_pcm_substream *substream)
+{
+	struct snd_pcm_runtime *runtime = substream->runtime;
+
+	/*
+	 * On this platform for PCM device we support stereo
+	 */
+
+	runtime->hw.channels_max = DUAL_CHANNEL;
+	snd_pcm_hw_constraint_list(runtime, 0, SNDRV_PCM_HW_PARAM_CHANNELS,
+				   &constraints_channels);
+	snd_pcm_hw_constraint_list(runtime, 0, SNDRV_PCM_HW_PARAM_RATE,
+				   &constraints_rates);
+
+	return 0;
+}
+
+static struct snd_soc_ops cz_aif1_play_ops = {
 	.hw_params = cz_aif1_hw_params,
 };
+
+static struct snd_soc_ops cz_aif1_cap_ops = {
+	.hw_params = cz_aif1_hw_params,
+	.startup = cz_fe_startup,
+};
+
+SND_SOC_DAILINK_DEF(designware1,
+	DAILINK_COMP_ARRAY(COMP_CPU("designware-i2s.1.auto")));
+SND_SOC_DAILINK_DEF(designware2,
+	DAILINK_COMP_ARRAY(COMP_CPU("designware-i2s.2.auto")));
+
+SND_SOC_DAILINK_DEF(codec,
+	DAILINK_COMP_ARRAY(COMP_CODEC("i2c-10EC5650:00", "rt5645-aif1")));
+
+SND_SOC_DAILINK_DEF(platform,
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("acp_audio_dma.0.auto")));
 
 static struct snd_soc_dai_link cz_dai_rt5650[] = {
 	{
 		.name = "amd-rt5645-play",
 		.stream_name = "RT5645_AIF1",
-		.platform_name = "acp_audio_dma.0.auto",
-		.cpu_dai_name = "designware-i2s.1.auto",
-		.codec_dai_name = "rt5645-aif1",
-		.codec_name = "i2c-10EC5650:00",
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
 				| SND_SOC_DAIFMT_CBM_CFM,
 		.init = cz_init,
-		.ops = &cz_aif1_ops,
+		.ops = &cz_aif1_play_ops,
+		SND_SOC_DAILINK_REG(designware1, codec, platform),
 	},
 	{
 		.name = "amd-rt5645-cap",
 		.stream_name = "RT5645_AIF1",
-		.platform_name = "acp_audio_dma.0.auto",
-		.cpu_dai_name = "designware-i2s.2.auto",
-		.codec_dai_name = "rt5645-aif1",
-		.codec_name = "i2c-10EC5650:00",
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
 				| SND_SOC_DAIFMT_CBM_CFM,
-		.ops = &cz_aif1_ops,
+		.ops = &cz_aif1_cap_ops,
+		SND_SOC_DAILINK_REG(designware2, codec, platform),
 	},
 };
 

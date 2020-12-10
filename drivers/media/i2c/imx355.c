@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Copyright (C) 2017 - 2018 Intel Corporation
+// Copyright (C) 2018 Intel Corporation
 
 #include <asm/unaligned.h>
 #include <linux/acpi.h>
@@ -195,7 +195,7 @@ static const struct imx355_reg mode_3268x2448_regs[] = {
 	{ 0x0342, 0x0e },
 	{ 0x0343, 0x58 },
 	{ 0x0340, 0x0a },
-	{ 0x0341, 0x36 },
+	{ 0x0341, 0x37 },
 	{ 0x0344, 0x00 },
 	{ 0x0345, 0x08 },
 	{ 0x0346, 0x00 },
@@ -244,7 +244,7 @@ static const struct imx355_reg mode_3264x2448_regs[] = {
 	{ 0x0342, 0x0e },
 	{ 0x0343, 0x58 },
 	{ 0x0340, 0x0a },
-	{ 0x0341, 0x36 },
+	{ 0x0341, 0x37 },
 	{ 0x0344, 0x00 },
 	{ 0x0345, 0x08 },
 	{ 0x0346, 0x00 },
@@ -293,7 +293,7 @@ static const struct imx355_reg mode_3280x2464_regs[] = {
 	{ 0x0342, 0x0e },
 	{ 0x0343, 0x58 },
 	{ 0x0340, 0x0a },
-	{ 0x0341, 0x36 },
+	{ 0x0341, 0x37 },
 	{ 0x0344, 0x00 },
 	{ 0x0345, 0x00 },
 	{ 0x0346, 0x00 },
@@ -892,9 +892,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 3280,
 		.height = 2464,
-		.fll_def = 0xa36,
-		.fll_min = 0xa36,
-		.llp = 0xe58,
+		.fll_def = 2615,
+		.fll_min = 2615,
+		.llp = 3672,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_3280x2464_regs),
@@ -904,9 +904,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 3268,
 		.height = 2448,
-		.fll_def = 0xa36,
-		.fll_min = 0xa36,
-		.llp = 0xe58,
+		.fll_def = 2615,
+		.fll_min = 2615,
+		.llp = 3672,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_3268x2448_regs),
@@ -916,9 +916,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 3264,
 		.height = 2448,
-		.fll_def = 0xa36,
-		.fll_min = 0xa36,
-		.llp = 0xe58,
+		.fll_def = 2615,
+		.fll_min = 2615,
+		.llp = 3672,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_3264x2448_regs),
@@ -928,9 +928,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1940,
 		.height = 1096,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0xe58,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 3672,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1940x1096_regs),
@@ -940,9 +940,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1936,
 		.height = 1096,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0xe58,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 3672,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1936x1096_regs),
@@ -952,9 +952,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1924,
 		.height = 1080,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0xe58,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 3672,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1924x1080_regs),
@@ -964,9 +964,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1920,
 		.height = 1080,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0xe58,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 3672,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1920x1080_regs),
@@ -976,9 +976,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1640,
 		.height = 1232,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0x72c,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 1836,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1640x1232_regs),
@@ -988,9 +988,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1640,
 		.height = 922,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0x72c,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 1836,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1640x922_regs),
@@ -1000,9 +1000,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1300,
 		.height = 736,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0x72c,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 1836,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1300x736_regs),
@@ -1012,9 +1012,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1296,
 		.height = 736,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0x72c,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 1836,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1296x736_regs),
@@ -1024,9 +1024,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1284,
 		.height = 720,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0x72c,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 1836,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1284x720_regs),
@@ -1036,9 +1036,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 1280,
 		.height = 720,
-		.fll_def = 0x51a,
-		.fll_min = 0x51a,
-		.llp = 0x72c,
+		.fll_def = 1306,
+		.fll_min = 1306,
+		.llp = 1836,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_1280x720_regs),
@@ -1048,9 +1048,9 @@ static const struct imx355_mode supported_modes[] = {
 	{
 		.width = 820,
 		.height = 616,
-		.fll_def = 0x28c,
-		.fll_min = 0x28c,
-		.llp = 0xe58,
+		.fll_def = 652,
+		.fll_min = 652,
+		.llp = 3672,
 		.link_freq_index = IMX355_LINK_FREQ_INDEX,
 		.reg_list = {
 			.num_of_regs = ARRAY_SIZE(mode_820x616_regs),
@@ -1656,7 +1656,9 @@ error:
 static struct imx355_hwcfg *imx355_get_hwcfg(struct device *dev)
 {
 	struct imx355_hwcfg *cfg;
-	struct v4l2_fwnode_endpoint *bus_cfg;
+	struct v4l2_fwnode_endpoint bus_cfg = {
+		.bus_type = V4L2_MBUS_CSI2_DPHY
+	};
 	struct fwnode_handle *ep;
 	struct fwnode_handle *fwnode = dev_fwnode(dev);
 	unsigned int i;
@@ -1669,8 +1671,8 @@ static struct imx355_hwcfg *imx355_get_hwcfg(struct device *dev)
 	if (!ep)
 		return NULL;
 
-	bus_cfg = v4l2_fwnode_endpoint_alloc_parse(ep);
-	if (IS_ERR(bus_cfg))
+	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &bus_cfg);
+	if (ret)
 		goto out_err;
 
 	cfg = devm_kzalloc(dev, sizeof(*cfg), GFP_KERNEL);
@@ -1691,30 +1693,30 @@ static struct imx355_hwcfg *imx355_get_hwcfg(struct device *dev)
 		goto out_err;
 	}
 
-	dev_dbg(dev, "num of link freqs: %d", bus_cfg->nr_of_link_frequencies);
-	if (!bus_cfg->nr_of_link_frequencies) {
+	dev_dbg(dev, "num of link freqs: %d", bus_cfg.nr_of_link_frequencies);
+	if (!bus_cfg.nr_of_link_frequencies) {
 		dev_warn(dev, "no link frequencies defined");
 		goto out_err;
 	}
 
-	cfg->nr_of_link_freqs = bus_cfg->nr_of_link_frequencies;
-	cfg->link_freqs = devm_kcalloc(
-		dev, bus_cfg->nr_of_link_frequencies + 1,
-		sizeof(*cfg->link_freqs), GFP_KERNEL);
+	cfg->nr_of_link_freqs = bus_cfg.nr_of_link_frequencies;
+	cfg->link_freqs = devm_kcalloc(dev,
+				       bus_cfg.nr_of_link_frequencies + 1,
+				       sizeof(*cfg->link_freqs), GFP_KERNEL);
 	if (!cfg->link_freqs)
 		goto out_err;
 
-	for (i = 0; i < bus_cfg->nr_of_link_frequencies; i++) {
-		cfg->link_freqs[i] = bus_cfg->link_frequencies[i];
+	for (i = 0; i < bus_cfg.nr_of_link_frequencies; i++) {
+		cfg->link_freqs[i] = bus_cfg.link_frequencies[i];
 		dev_dbg(dev, "link_freq[%d] = %lld", i, cfg->link_freqs[i]);
 	}
 
-	v4l2_fwnode_endpoint_free(bus_cfg);
+	v4l2_fwnode_endpoint_free(&bus_cfg);
 	fwnode_handle_put(ep);
 	return cfg;
 
 out_err:
-	v4l2_fwnode_endpoint_free(bus_cfg);
+	v4l2_fwnode_endpoint_free(&bus_cfg);
 	fwnode_handle_put(ep);
 	return NULL;
 }
@@ -1756,10 +1758,11 @@ static int imx355_probe(struct i2c_client *client)
 		}
 	}
 
-	if (i == imx355->hwcfg->nr_of_link_freqs)
-		dev_warn(&client->dev,
-			 "no link frequency supported, use default %lld",
-			 imx355->link_def_freq);
+	if (i == imx355->hwcfg->nr_of_link_freqs) {
+		dev_err(&client->dev, "no link frequency supported");
+		ret = -EINVAL;
+		goto error_probe;
+	}
 
 	/* Set default mode to max resolution */
 	imx355->cur_mode = &supported_modes[0];
@@ -1775,11 +1778,11 @@ static int imx355_probe(struct i2c_client *client)
 	imx355->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
 		V4L2_SUBDEV_FL_HAS_EVENTS;
 	imx355->sd.entity.ops = &imx355_subdev_entity_ops;
-	imx355->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
+	imx355->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 
 	/* Initialize source pad */
 	imx355->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_init(&imx355->sd.entity, 1, &imx355->pad, 0);
+	ret = media_entity_pads_init(&imx355->sd.entity, 1, &imx355->pad);
 	if (ret) {
 		dev_err(&client->dev, "failed to init entity pads: %d", ret);
 		goto error_handler_free;
@@ -1832,13 +1835,11 @@ static const struct dev_pm_ops imx355_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(imx355_suspend, imx355_resume)
 };
 
-#ifdef CONFIG_ACPI
 static const struct acpi_device_id imx355_acpi_ids[] = {
 	{ "SONY355A" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(acpi, imx355_acpi_ids);
-#endif
 
 static struct i2c_driver imx355_i2c_driver = {
 	.driver = {

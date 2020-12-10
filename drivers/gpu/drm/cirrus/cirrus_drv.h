@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright 2012 Red Hat
- *
- * This file is subject to the terms and conditions of the GNU General
- * Public License version 2. See the file COPYING in the main
- * directory of this archive for more details.
  *
  * Authors: Matthew Garrett
  *          Dave Airlie
@@ -50,17 +47,6 @@
 		WREG8(SEQ_DATA, v);				\
 	} while (0)						\
 
-#define PAL_ADDR 8
-#define PAL_DATA 9
-
-#define WREG_PAL(addr, r, g, b)					\
-	do {							\
-		WREG8(PAL_ADDR, addr);				\
-		WREG8(PAL_DATA, r);				\
-		WREG8(PAL_DATA, g);				\
-		WREG8(PAL_DATA, b);				\
-	} while (0)						\
-
 #define CRT_INDEX 0x14
 #define CRT_DATA 0x15
 
@@ -103,18 +89,15 @@
 
 #define to_cirrus_crtc(x) container_of(x, struct cirrus_crtc, base)
 #define to_cirrus_encoder(x) container_of(x, struct cirrus_encoder, base)
-#define to_cirrus_framebuffer(x) container_of(x, struct cirrus_framebuffer, base)
 
 struct cirrus_crtc {
 	struct drm_crtc			base;
-	u8				lut_r[256], lut_g[256], lut_b[256];
 	int				last_dpms;
 	bool				enabled;
 };
 
 struct cirrus_fbdev;
 struct cirrus_mode_info {
-	bool				mode_config_initialized;
 	struct cirrus_crtc		*crtc;
 	/* pointer to fbdev info structure */
 	struct cirrus_fbdev		*gfbdev;
@@ -127,11 +110,6 @@ struct cirrus_encoder {
 
 struct cirrus_connector {
 	struct drm_connector		base;
-};
-
-struct cirrus_framebuffer {
-	struct drm_framebuffer		base;
-	struct drm_gem_object *obj;
 };
 
 struct cirrus_mc {
@@ -148,16 +126,12 @@ struct cirrus_device {
 	void __iomem			*rmmio;
 
 	struct cirrus_mc			mc;
-	resource_size_t			cursor_ram_size;
-	void __iomem			*cursor_iomem;
 	struct cirrus_mode_info		mode_info;
 
 	int				num_crtc;
 	int fb_mtrr;
 
 	struct {
-		struct drm_global_reference mem_global_ref;
-		struct ttm_bo_global_ref bo_global_ref;
 		struct ttm_bo_device bdev;
 	} ttm;
 	bool mm_inited;
@@ -165,8 +139,8 @@ struct cirrus_device {
 
 
 struct cirrus_fbdev {
-	struct drm_fb_helper helper;
-	struct cirrus_framebuffer gfb;
+	struct drm_fb_helper helper; /* must be first */
+	struct drm_framebuffer *gfb;
 	void *sysram;
 	int size;
 	int x1, y1, x2, y2; /* dirty rect */
@@ -177,7 +151,6 @@ struct cirrus_bo {
 	struct ttm_buffer_object bo;
 	struct ttm_placement placement;
 	struct ttm_bo_kmap_obj kmap;
-	struct ttm_bo_kmap_obj dma_buf_vmap;
 	struct drm_gem_object gem;
 	struct ttm_place placements[3];
 	int pin_count;
@@ -192,14 +165,6 @@ cirrus_bo(struct ttm_buffer_object *bo)
 
 
 #define to_cirrus_obj(x) container_of(x, struct cirrus_gem_object, base)
-#define DRM_FILE_PAGE_OFFSET (0x100000000ULL >> PAGE_SHIFT)
-
-				/* cirrus_mode.c */
-void cirrus_crtc_fb_gamma_set(struct drm_crtc *crtc, u16 red, u16 green,
-			     u16 blue, int regno);
-void cirrus_crtc_fb_gamma_get(struct drm_crtc *crtc, u16 *red, u16 *green,
-			     u16 *blue, int regno);
-
 
 				/* cirrus_main.c */
 int cirrus_device_init(struct cirrus_device *cdev,
@@ -220,7 +185,7 @@ int cirrus_dumb_create(struct drm_file *file,
 		       struct drm_mode_create_dumb *args);
 
 int cirrus_framebuffer_init(struct drm_device *dev,
-			   struct cirrus_framebuffer *gfb,
+			    struct drm_framebuffer *gfb,
 			    const struct drm_mode_fb_cmd2 *mode_cmd,
 			    struct drm_gem_object *obj);
 
@@ -245,7 +210,7 @@ irqreturn_t cirrus_driver_irq_handler(int irq, void *arg);
 
 				/* cirrus_kms.c */
 int cirrus_driver_load(struct drm_device *dev, unsigned long flags);
-int cirrus_driver_unload(struct drm_device *dev);
+void cirrus_driver_unload(struct drm_device *dev);
 extern struct drm_ioctl_desc cirrus_ioctls[];
 extern int cirrus_max_ioctl;
 
@@ -260,7 +225,7 @@ static inline int cirrus_bo_reserve(struct cirrus_bo *bo, bool no_wait)
 {
 	int ret;
 
-	ret = ttm_bo_reserve(&bo->bo, true, no_wait, false, NULL);
+	ret = ttm_bo_reserve(&bo->bo, true, no_wait, NULL);
 	if (ret) {
 		if (ret != -ERESTARTSYS && ret != -EBUSY)
 			DRM_ERROR("reserve failed %p\n", bo);
@@ -276,14 +241,6 @@ static inline void cirrus_bo_unreserve(struct cirrus_bo *bo)
 
 int cirrus_bo_push_sysram(struct cirrus_bo *bo);
 int cirrus_bo_pin(struct cirrus_bo *bo, u32 pl_flag, u64 *gpu_addr);
-
-struct sg_table *cirrus_gem_prime_get_sg_table(struct drm_gem_object *obj);
-void *cirrus_gem_prime_vmap(struct drm_gem_object *obj);
-void cirrus_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr);
-int cirrus_gem_prime_pin(struct drm_gem_object *obj);
-
-int cirrus_gem_prime_mmap(struct drm_gem_object *obj,
-			  struct vm_area_struct *vma);
 
 extern int cirrus_bpp;
 

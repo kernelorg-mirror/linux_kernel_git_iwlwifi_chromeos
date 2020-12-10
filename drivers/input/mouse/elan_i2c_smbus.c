@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Elan I2C/SMBus Touchpad driver - SMBus interface
  *
@@ -8,10 +9,6 @@
  * Based on cyapa driver:
  * copyright (c) 2011-2012 Cypress Semiconductor, Inc.
  * copyright (c) 2011-2012 Google, Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  *
  * Trademarks are the property of their respective owners.
  */
@@ -170,7 +167,8 @@ static int elan_smbus_get_version(struct i2c_client *client,
 }
 
 static int elan_smbus_get_sm_version(struct i2c_client *client,
-				     u16 *ic_type, u8 *version)
+				     u16 *ic_type, u8 *version,
+				     u8 *clickpad)
 {
 	int error;
 	u8 val[I2C_SMBUS_BLOCK_MAX] = {0};
@@ -184,6 +182,7 @@ static int elan_smbus_get_sm_version(struct i2c_client *client,
 
 	*version = val[0];
 	*ic_type = val[1];
+	*clickpad = val[0] & 0x10;
 	return 0;
 }
 
@@ -226,11 +225,13 @@ static int elan_smbus_get_checksum(struct i2c_client *client,
 static int elan_smbus_get_max(struct i2c_client *client,
 			      unsigned int *max_x, unsigned int *max_y)
 {
+	int ret;
 	int error;
 	u8 val[I2C_SMBUS_BLOCK_MAX] = {0};
 
-	error = i2c_smbus_read_block_data(client, ETP_SMBUS_RANGE_CMD, val);
-	if (error) {
+	ret = i2c_smbus_read_block_data(client, ETP_SMBUS_RANGE_CMD, val);
+	if (ret != 3) {
+		error = ret < 0 ? ret : -EIO;
 		dev_err(&client->dev, "failed to get dimensions: %d\n", error);
 		return error;
 	}
@@ -244,12 +245,13 @@ static int elan_smbus_get_max(struct i2c_client *client,
 static int elan_smbus_get_resolution(struct i2c_client *client,
 				     u8 *hw_res_x, u8 *hw_res_y)
 {
+	int ret;
 	int error;
 	u8 val[I2C_SMBUS_BLOCK_MAX] = {0};
 
-	error = i2c_smbus_read_block_data(client,
-					  ETP_SMBUS_RESOLUTION_CMD, val);
-	if (error) {
+	ret = i2c_smbus_read_block_data(client, ETP_SMBUS_RESOLUTION_CMD, val);
+	if (ret != 3) {
+		error = ret < 0 ? ret : -EIO;
 		dev_err(&client->dev, "failed to get resolution: %d\n", error);
 		return error;
 	}
@@ -264,12 +266,13 @@ static int elan_smbus_get_num_traces(struct i2c_client *client,
 				     unsigned int *x_traces,
 				     unsigned int *y_traces)
 {
+	int ret;
 	int error;
 	u8 val[I2C_SMBUS_BLOCK_MAX] = {0};
 
-	error = i2c_smbus_read_block_data(client,
-					  ETP_SMBUS_XY_TRACENUM_CMD, val);
-	if (error) {
+	ret = i2c_smbus_read_block_data(client, ETP_SMBUS_XY_TRACENUM_CMD, val);
+	if (ret != 3) {
+		error = ret < 0 ? ret : -EIO;
 		dev_err(&client->dev, "failed to get trace info: %d\n", error);
 		return error;
 	}
@@ -337,7 +340,8 @@ static int elan_smbus_set_flash_key(struct i2c_client *client)
 	return 0;
 }
 
-static int elan_smbus_prepare_fw_update(struct i2c_client *client)
+static int elan_smbus_prepare_fw_update(struct i2c_client *client, u16 ic_type,
+					u8 iap_version)
 {
 	struct device *dev = &client->dev;
 	int len;
@@ -381,7 +385,7 @@ static int elan_smbus_prepare_fw_update(struct i2c_client *client)
 		len = i2c_smbus_read_block_data(client,
 						ETP_SMBUS_IAP_PASSWORD_READ,
 						val);
-		if (len < sizeof(u16)) {
+		if (len < (int)sizeof(u16)) {
 			error = len < 0 ? len : -EIO;
 			dev_err(dev, "failed to read iap password: %d\n",
 				error);
@@ -411,7 +415,7 @@ static int elan_smbus_prepare_fw_update(struct i2c_client *client)
 }
 
 
-static int elan_smbus_write_fw_block(struct i2c_client *client,
+static int elan_smbus_write_fw_block(struct i2c_client *client, u16 fw_page_size,
 				     const u8 *page, u16 checksum, int idx)
 {
 	struct device *dev = &client->dev;
@@ -426,7 +430,7 @@ static int elan_smbus_write_fw_block(struct i2c_client *client,
 	 */
 	error = i2c_smbus_write_block_data(client,
 					   ETP_SMBUS_WRITE_FW_BLOCK,
-					   ETP_FW_PAGE_SIZE / 2,
+					   fw_page_size / 2,
 					   page);
 	if (error) {
 		dev_err(dev, "Failed to write page %d (part %d): %d\n",
@@ -436,8 +440,8 @@ static int elan_smbus_write_fw_block(struct i2c_client *client,
 
 	error = i2c_smbus_write_block_data(client,
 					   ETP_SMBUS_WRITE_FW_BLOCK,
-					   ETP_FW_PAGE_SIZE / 2,
-					   page + ETP_FW_PAGE_SIZE / 2);
+					   fw_page_size / 2,
+					   page + fw_page_size / 2);
 	if (error) {
 		dev_err(dev, "Failed to write page %d (part %d): %d\n",
 			idx, 2, error);

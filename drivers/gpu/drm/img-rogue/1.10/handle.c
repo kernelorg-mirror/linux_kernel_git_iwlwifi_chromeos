@@ -2382,7 +2382,7 @@ PVRSRV_ERROR PVRSRVHandleInit(void)
 	PVR_ASSERT(gpsHandleFuncs == NULL);
 	PVR_ASSERT(!gbLockInitialised);
 
-	eError = OSLockCreate(&gHandleLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&gHandleLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,

@@ -1071,11 +1071,11 @@ PVRSRVStatsInitialise(void)
 	PVR_ASSERT(bProcessStatsInitialised == IMG_FALSE);
 
 	/* We need a lock to protect the linked lists... */
-	error = OSLockCreate(&g_psLinkedListLock, LOCK_TYPE_NONE);
+	error =  OSLockCreate(&g_psLinkedListLock);
 	if (error == PVRSRV_OK)
 	{
 		/* We also need a lock to protect the hash table used for size tracking.. */
-		error = OSLockCreate(&gpsSizeTrackingHashTableLock, LOCK_TYPE_NONE);
+		error = OSLockCreate(&gpsSizeTrackingHashTableLock);
 
 		if (error != PVRSRV_OK)
 		{
@@ -1083,7 +1083,7 @@ PVRSRVStatsInitialise(void)
 		}
 
 		/* We also need a lock to protect the GlobalStat counters */
-		error = OSLockCreate(&gsGlobalStats.hGlobalStatsLock, LOCK_TYPE_NONE);
+		error = OSLockCreate(&gsGlobalStats.hGlobalStatsLock);
 		if (error != PVRSRV_OK)
 		{
 			goto e1;
@@ -1447,7 +1447,7 @@ _RegisterProcess(IMG_HANDLE *phProcessStats, IMG_PID ownerPid)
 	psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_CONNECTIONS]     = 1;
 	psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_MAX_CONNECTIONS] = 1;
 
-	eError = OSLockCreateNoStats(&psProcessStats->hLock ,LOCK_TYPE_NONE);
+	eError = OSLockCreateNoStats(&psProcessStats->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto e0;
@@ -1724,7 +1724,7 @@ _PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_CONNECTIONS]     = 1;
 		psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_MAX_CONNECTIONS] = 1;
 
-		eError = OSLockCreateNoStats(&psProcessStats->hLock ,LOCK_TYPE_NONE);
+		eError = OSLockCreateNoStats(&psProcessStats->hLock);
 		if (eError != PVRSRV_OK)
 		{
 			goto e0;
@@ -2322,7 +2322,7 @@ PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 			psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_CONNECTIONS]     = 1;
 			psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_MAX_CONNECTIONS] = 1;
 
-			eError = OSLockCreateNoStats(&psProcessStats->hLock ,LOCK_TYPE_NONE);
+			eError = OSLockCreateNoStats(&psProcessStats->hLock);
 			if (eError != PVRSRV_OK)
 			{
 				OSFreeMemNoStats(psProcessStats);

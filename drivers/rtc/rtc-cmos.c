@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * RTC class driver for "CMOS RTC":  PCs, ACPI, etc
  *
  * Copyright (C) 1996 Paul Gortmaker (drivers/char/rtc.c)
  * Copyright (C) 2006 David Brownell (convert to new framework)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 /*
@@ -48,8 +44,9 @@
 #endif
 
 /* this is for "generic access to PC-style RTC" using CMOS_READ/CMOS_WRITE */
-#include <asm-generic/rtc.h>
+#include <linux/mc146818rtc.h>
 
+#ifdef CONFIG_ACPI
 /*
  * Use ACPI SCI to replace HPET interrupt for RTC Alarm event
  *
@@ -60,6 +57,18 @@
 
 static bool use_acpi_alarm;
 module_param(use_acpi_alarm, bool, 0444);
+
+static inline int cmos_use_acpi_alarm(void)
+{
+	return use_acpi_alarm;
+}
+#else /* !CONFIG_ACPI */
+
+static inline int cmos_use_acpi_alarm(void)
+{
+	return 0;
+}
+#endif
 
 struct cmos_rtc {
 	struct rtc_device	*rtc;
@@ -167,9 +176,9 @@ static inline int hpet_unregister_irq_handler(irq_handler_t handler)
 #endif
 
 /* Don't use HPET for RTC Alarm event if ACPI Fixed event is used */
-static int use_hpet_alarm(void)
+static inline int use_hpet_alarm(void)
 {
-	return is_hpet_enabled() && !use_acpi_alarm;
+	return is_hpet_enabled() && !cmos_use_acpi_alarm();
 }
 
 /*----------------------------------------------------------------*/
@@ -213,11 +222,18 @@ static inline void cmos_write_bank2(unsigned char val, unsigned char addr)
 
 static int cmos_read_time(struct device *dev, struct rtc_time *t)
 {
+	/*
+	 * If pm_trace abused the RTC for storage, set the timespec to 0,
+	 * which tells the caller that this RTC value is unusable.
+	 */
+	if (!pm_trace_rtc_valid())
+		return -EIO;
+
 	/* REVISIT:  if the clock has a "century" register, use
-	 * that instead of the heuristic in get_rtc_time().
+	 * that instead of the heuristic in mc146818_get_time().
 	 * That'll make Y3K compatility (year > 2070) easy!
 	 */
-	get_rtc_time(t);
+	mc146818_get_time(t);
 	return 0;
 }
 
@@ -229,7 +245,7 @@ static int cmos_set_time(struct device *dev, struct rtc_time *t)
 	 * takes effect exactly 500ms after we write the register.
 	 * (Also queueing and other delays before we get this far.)
 	 */
-	return set_rtc_time(t);
+	return mc146818_set_time(t);
 }
 
 static int cmos_read_alarm(struct device *dev, struct rtc_wkalrm *t)
@@ -237,6 +253,7 @@ static int cmos_read_alarm(struct device *dev, struct rtc_wkalrm *t)
 	struct cmos_rtc	*cmos = dev_get_drvdata(dev);
 	unsigned char	rtc_control;
 
+	/* This not only a rtc_op, but also called directly */
 	if (!is_valid_irq(cmos->irq))
 		return -EIO;
 
@@ -244,8 +261,6 @@ static int cmos_read_alarm(struct device *dev, struct rtc_wkalrm *t)
 	 * Some also support day and month, for alarms up to a year in
 	 * the future.
 	 */
-	t->time.tm_mday = -1;
-	t->time.tm_mon = -1;
 
 	spin_lock_irq(&rtc_lock);
 	t->time.tm_sec = CMOS_READ(RTC_SECONDS_ALARM);
@@ -296,7 +311,6 @@ static int cmos_read_alarm(struct device *dev, struct rtc_wkalrm *t)
 			}
 		}
 	}
-	t->time.tm_year = -1;
 
 	t->enabled = !!(rtc_control & RTC_AIE);
 	t->pending = 0;
@@ -336,7 +350,7 @@ static void cmos_irq_enable(struct cmos_rtc *cmos, unsigned char mask)
 	if (use_hpet_alarm())
 		hpet_set_rtc_irq_bit(mask);
 
-	if ((mask & RTC_AIE) && use_acpi_alarm) {
+	if ((mask & RTC_AIE) && cmos_use_acpi_alarm()) {
 		if (cmos->wake_on)
 			cmos->wake_on(cmos->dev);
 	}
@@ -354,7 +368,7 @@ static void cmos_irq_disable(struct cmos_rtc *cmos, unsigned char mask)
 	if (use_hpet_alarm())
 		hpet_mask_rtc_irq_bit(mask);
 
-	if ((mask & RTC_AIE) && use_acpi_alarm) {
+	if ((mask & RTC_AIE) && cmos_use_acpi_alarm()) {
 		if (cmos->wake_off)
 			cmos->wake_off(cmos->dev);
 	}
@@ -435,6 +449,7 @@ static int cmos_set_alarm(struct device *dev, struct rtc_wkalrm *t)
 	unsigned char mon, mday, hrs, min, sec, rtc_control;
 	int ret;
 
+	/* This not only a rtc_op, but also called directly */
 	if (!is_valid_irq(cmos->irq))
 		return -EIO;
 
@@ -499,9 +514,6 @@ static int cmos_alarm_irq_enable(struct device *dev, unsigned int enabled)
 	struct cmos_rtc	*cmos = dev_get_drvdata(dev);
 	unsigned long	flags;
 
-	if (!is_valid_irq(cmos->irq))
-		return -EINVAL;
-
 	spin_lock_irqsave(&rtc_lock, flags);
 
 	if (enabled)
@@ -513,7 +525,7 @@ static int cmos_alarm_irq_enable(struct device *dev, unsigned int enabled)
 	return 0;
 }
 
-#if defined(CONFIG_RTC_INTF_PROC) || defined(CONFIG_RTC_INTF_PROC_MODULE)
+#if IS_ENABLED(CONFIG_RTC_INTF_PROC)
 
 static int cmos_procfs(struct device *dev, struct seq_file *seq)
 {
@@ -562,6 +574,12 @@ static const struct rtc_class_ops cmos_rtc_ops = {
 	.alarm_irq_enable	= cmos_alarm_irq_enable,
 };
 
+static const struct rtc_class_ops cmos_rtc_ops_no_alarm = {
+	.read_time		= cmos_read_time,
+	.set_time		= cmos_set_time,
+	.proc			= cmos_procfs,
+};
+
 /*----------------------------------------------------------------*/
 
 /*
@@ -572,11 +590,10 @@ static const struct rtc_class_ops cmos_rtc_ops = {
 
 #define NVRAM_OFFSET	(RTC_REG_D + 1)
 
-static ssize_t
-cmos_nvram_read(struct file *filp, struct kobject *kobj,
-		struct bin_attribute *attr,
-		char *buf, loff_t off, size_t count)
+static int cmos_nvram_read(void *priv, unsigned int off, void *val,
+			   size_t count)
 {
+	unsigned char *buf = val;
 	int	retval;
 
 	off += NVRAM_OFFSET;
@@ -594,15 +611,12 @@ cmos_nvram_read(struct file *filp, struct kobject *kobj,
 	return retval;
 }
 
-static ssize_t
-cmos_nvram_write(struct file *filp, struct kobject *kobj,
-		struct bin_attribute *attr,
-		char *buf, loff_t off, size_t count)
+static int cmos_nvram_write(void *priv, unsigned int off, void *val,
+			    size_t count)
 {
-	struct cmos_rtc	*cmos;
+	struct cmos_rtc	*cmos = priv;
+	unsigned char	*buf = val;
 	int		retval;
-
-	cmos = dev_get_drvdata(container_of(kobj, struct device, kobj));
 
 	/* NOTE:  on at least PCs and Ataris, the boot firmware uses a
 	 * checksum on part of the NVRAM data.  That's currently ignored
@@ -628,17 +642,6 @@ cmos_nvram_write(struct file *filp, struct kobject *kobj,
 
 	return retval;
 }
-
-static struct bin_attribute nvram = {
-	.attr = {
-		.name	= "nvram",
-		.mode	= S_IRUGO | S_IWUSR,
-	},
-
-	.read	= cmos_nvram_read,
-	.write	= cmos_nvram_write,
-	/* size gets set up later */
-};
 
 /*----------------------------------------------------------------*/
 
@@ -707,6 +710,14 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 	unsigned char			rtc_control;
 	unsigned			address_space;
 	u32				flags = 0;
+	struct nvmem_config nvmem_cfg = {
+		.name = "cmos_nvram",
+		.word_size = 1,
+		.stride = 1,
+		.reg_read = cmos_nvram_read,
+		.reg_write = cmos_nvram_write,
+		.priv = &cmos_rtc,
+	};
 
 	/* there can be only one ... */
 	if (cmos_rtc.dev)
@@ -783,8 +794,7 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 	cmos_rtc.dev = dev;
 	dev_set_drvdata(dev, &cmos_rtc);
 
-	cmos_rtc.rtc = rtc_device_register(driver_name, dev,
-				&cmos_rtc_ops, THIS_MODULE);
+	cmos_rtc.rtc = devm_rtc_allocate_device(dev);
 	if (IS_ERR(cmos_rtc.rtc)) {
 		retval = PTR_ERR(cmos_rtc.rtc);
 		goto cleanup0;
@@ -815,9 +825,6 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 
 	spin_unlock_irq(&rtc_lock);
 
-	/* FIXME:
-	 * <asm-generic/rtc.h> doesn't know 12-hour mode either.
-	 */
 	if (is_valid_irq(rtc_irq) && !(rtc_control & RTC_24H)) {
 		dev_warn(dev, "only 24-hr supported\n");
 		retval = -ENXIO;
@@ -834,6 +841,7 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 			rtc_cmos_int_handler = hpet_rtc_interrupt;
 			retval = hpet_register_irq_handler(cmos_interrupt);
 			if (retval) {
+				hpet_mask_rtc_irq_bit(RTC_IRQMASK);
 				dev_warn(dev, "hpet_register_irq_handler "
 						" failed in rtc_init().");
 				goto cleanup1;
@@ -848,27 +856,30 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 			dev_dbg(dev, "IRQ %d is already in use\n", rtc_irq);
 			goto cleanup1;
 		}
+
+		cmos_rtc.rtc->ops = &cmos_rtc_ops;
+	} else {
+		cmos_rtc.rtc->ops = &cmos_rtc_ops_no_alarm;
 	}
 
-	if (use_hpet_alarm())
-		hpet_rtc_timer_init();
+	cmos_rtc.rtc->nvram_old_abi = true;
+	retval = rtc_register_device(cmos_rtc.rtc);
+	if (retval)
+		goto cleanup2;
 
 	/* export at least the first block of NVRAM */
-	nvram.size = address_space - NVRAM_OFFSET;
-	retval = sysfs_create_bin_file(&dev->kobj, &nvram);
-	if (retval < 0) {
-		dev_dbg(dev, "can't create nvram file? %d\n", retval);
-		goto cleanup2;
-	}
+	nvmem_cfg.size = address_space - NVRAM_OFFSET;
+	if (rtc_nvmem_register(cmos_rtc.rtc, &nvmem_cfg))
+		dev_err(dev, "nvmem registration failed\n");
 
-	dev_info(dev, "%s%s, %zd bytes nvram%s\n",
-		!is_valid_irq(rtc_irq) ? "no alarms" :
-			cmos_rtc.mon_alrm ? "alarms up to one year" :
-			cmos_rtc.day_alrm ? "alarms up to one month" :
-			"alarms up to one day",
-		cmos_rtc.century ? ", y3k" : "",
-		nvram.size,
-		use_hpet_alarm() ? ", hpet irqs" : "");
+	dev_info(dev, "%s%s, %d bytes nvram%s\n",
+		 !is_valid_irq(rtc_irq) ? "no alarms" :
+		 cmos_rtc.mon_alrm ? "alarms up to one year" :
+		 cmos_rtc.day_alrm ? "alarms up to one month" :
+		 "alarms up to one day",
+		 cmos_rtc.century ? ", y3k" : "",
+		 nvmem_cfg.size,
+		 use_hpet_alarm() ? ", hpet irqs" : "");
 
 	return 0;
 
@@ -877,7 +888,6 @@ cleanup2:
 		free_irq(rtc_irq, cmos_rtc.rtc);
 cleanup1:
 	cmos_rtc.dev = NULL;
-	rtc_device_unregister(cmos_rtc.rtc);
 cleanup0:
 	if (RTC_IOMAPPED)
 		release_region(ports->start, resource_size(ports));
@@ -894,14 +904,12 @@ static void cmos_do_shutdown(int rtc_irq)
 	spin_unlock_irq(&rtc_lock);
 }
 
-static void __exit cmos_do_remove(struct device *dev)
+static void cmos_do_remove(struct device *dev)
 {
 	struct cmos_rtc	*cmos = dev_get_drvdata(dev);
 	struct resource *ports;
 
 	cmos_do_shutdown(cmos->irq);
-
-	sysfs_remove_bin_file(&dev->kobj, &nvram);
 
 	if (is_valid_irq(cmos->irq)) {
 		free_irq(cmos->irq, cmos->rtc);
@@ -909,7 +917,6 @@ static void __exit cmos_do_remove(struct device *dev)
 			hpet_unregister_irq_handler(cmos_interrupt);
 	}
 
-	rtc_device_unregister(cmos->rtc);
 	cmos->rtc = NULL;
 
 	ports = cmos->iomem;
@@ -967,8 +974,6 @@ static int cmos_aie_poweroff(struct device *dev)
 	return retval;
 }
 
-#ifdef CONFIG_PM
-
 static int cmos_suspend(struct device *dev)
 {
 	struct cmos_rtc	*cmos = dev_get_drvdata(dev);
@@ -992,7 +997,7 @@ static int cmos_suspend(struct device *dev)
 	}
 	spin_unlock_irq(&rtc_lock);
 
-	if ((tmp & RTC_AIE) && !use_acpi_alarm) {
+	if ((tmp & RTC_AIE) && !cmos_use_acpi_alarm()) {
 		cmos->enabled_wake = 1;
 		if (cmos->wake_on)
 			cmos->wake_on(dev);
@@ -1000,6 +1005,7 @@ static int cmos_suspend(struct device *dev)
 			enable_irq_wake(cmos->irq);
 	}
 
+	memset(&cmos->saved_wkalrm, 0, sizeof(struct rtc_wkalrm));
 	cmos_read_alarm(dev, &cmos->saved_wkalrm);
 
 	dev_dbg(dev, "suspend%s, ctrl %02x\n",
@@ -1017,10 +1023,11 @@ static int cmos_suspend(struct device *dev)
  */
 static inline int cmos_poweroff(struct device *dev)
 {
+	if (!IS_ENABLED(CONFIG_PM))
+		return -ENOSYS;
+
 	return cmos_suspend(dev);
 }
-
-#ifdef	CONFIG_PM_SLEEP
 
 static void cmos_check_wkalrm(struct device *dev)
 {
@@ -1042,11 +1049,12 @@ static void cmos_check_wkalrm(struct device *dev)
 	 * ACPI RTC wake event is cleared after resume from STR,
 	 * ACK the rtc irq here
 	 */
-	if (t_now >= cmos->alarm_expires && use_acpi_alarm) {
+	if (t_now >= cmos->alarm_expires && cmos_use_acpi_alarm()) {
 		cmos_interrupt(0, (void *)cmos->rtc);
 		return;
 	}
 
+	memset(&current_alarm, 0, sizeof(struct rtc_wkalrm));
 	cmos_read_alarm(dev, &current_alarm);
 	t_current_expires = rtc_tm_to_time64(&current_alarm.time);
 	t_saved_expires = rtc_tm_to_time64(&cmos->saved_wkalrm.time);
@@ -1059,12 +1067,12 @@ static void cmos_check_wkalrm(struct device *dev)
 static void cmos_check_acpi_rtc_status(struct device *dev,
 				       unsigned char *rtc_control);
 
-static int cmos_resume(struct device *dev)
+static int __maybe_unused cmos_resume(struct device *dev)
 {
 	struct cmos_rtc	*cmos = dev_get_drvdata(dev);
 	unsigned char tmp;
 
-	if (cmos->enabled_wake && !use_acpi_alarm) {
+	if (cmos->enabled_wake && !cmos_use_acpi_alarm()) {
 		if (cmos->wake_off)
 			cmos->wake_off(dev);
 		else
@@ -1113,16 +1121,6 @@ static int cmos_resume(struct device *dev)
 	return 0;
 }
 
-#endif
-#else
-
-static inline int cmos_poweroff(struct device *dev)
-{
-	return -ENOSYS;
-}
-
-#endif
-
 static SIMPLE_DEV_PM_OPS(cmos_pm_ops, cmos_suspend, cmos_resume);
 
 /*----------------------------------------------------------------*/
@@ -1153,7 +1151,7 @@ static u32 rtc_handler(void *context)
 	 * Or else, ACPI SCI is enabled during suspend/resume only,
 	 * update rtc irq in that case.
 	 */
-	if (use_acpi_alarm)
+	if (cmos_use_acpi_alarm())
 		cmos_interrupt(0, (void *)cmos->rtc);
 	else {
 		/* Fix me: can we use cmos_interrupt() here as well? */
@@ -1169,7 +1167,7 @@ static u32 rtc_handler(void *context)
 		spin_unlock_irqrestore(&rtc_lock, flags);
 	}
 
-	pm_wakeup_event(dev, 0);
+	pm_wakeup_hard_event(dev);
 	acpi_clear_event(ACPI_EVENT_RTC);
 	acpi_disable_event(ACPI_EVENT_RTC, 0);
 	return ACPI_INTERRUPT_HANDLED;
@@ -1320,7 +1318,7 @@ static int cmos_pnp_probe(struct pnp_dev *pnp, const struct pnp_device_id *id)
 	}
 }
 
-static void __exit cmos_pnp_remove(struct pnp_dev *pnp)
+static void cmos_pnp_remove(struct pnp_dev *pnp)
 {
 	cmos_do_remove(&pnp->dev);
 }
@@ -1352,7 +1350,7 @@ static struct pnp_driver cmos_pnp_driver = {
 	.name		= (char *) driver_name,
 	.id_table	= rtc_ids,
 	.probe		= cmos_pnp_probe,
-	.remove		= __exit_p(cmos_pnp_remove),
+	.remove		= cmos_pnp_remove,
 	.shutdown	= cmos_pnp_shutdown,
 
 	/* flag ensures resume() gets called, and stops syslog spam */
@@ -1376,8 +1374,6 @@ MODULE_DEVICE_TABLE(of, of_cmos_match);
 static __init void cmos_of_init(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
-	struct rtc_time time;
-	int ret;
 	const __be32 *val;
 
 	if (!node)
@@ -1390,16 +1386,6 @@ static __init void cmos_of_init(struct platform_device *pdev)
 	val = of_get_property(node, "freq-reg", NULL);
 	if (val)
 		CMOS_WRITE(be32_to_cpup(val), RTC_FREQ_SELECT);
-
-	get_rtc_time(&time);
-	ret = rtc_valid_tm(&time);
-	if (ret) {
-		struct rtc_time def_time = {
-			.tm_year = 1,
-			.tm_mday = 1,
-		};
-		set_rtc_time(&def_time);
-	}
 }
 #else
 static inline void cmos_of_init(struct platform_device *pdev) {}
@@ -1429,7 +1415,7 @@ static int __init cmos_platform_probe(struct platform_device *pdev)
 	return cmos_do_probe(&pdev->dev, resource, irq);
 }
 
-static int __exit cmos_platform_remove(struct platform_device *pdev)
+static int cmos_platform_remove(struct platform_device *pdev)
 {
 	cmos_do_remove(&pdev->dev);
 	return 0;
@@ -1454,13 +1440,11 @@ static void cmos_platform_shutdown(struct platform_device *pdev)
 MODULE_ALIAS("platform:rtc_cmos");
 
 static struct platform_driver cmos_platform_driver = {
-	.remove		= __exit_p(cmos_platform_remove),
+	.remove		= cmos_platform_remove,
 	.shutdown	= cmos_platform_shutdown,
 	.driver = {
 		.name		= driver_name,
-#ifdef CONFIG_PM
 		.pm		= &cmos_pm_ops,
-#endif
 		.of_match_table = of_match_ptr(of_cmos_match),
 	}
 };

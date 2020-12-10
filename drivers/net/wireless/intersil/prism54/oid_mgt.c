@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2003,2004 Aurelien Alleaume <slts@free.fr>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, see <http://www.gnu.org/licenses/>.
- *
  */
 
 #include <linux/kernel.h>
@@ -244,7 +232,7 @@ mgt_init(islpci_private *priv)
 	/* Alloc the cache */
 	for (i = 0; i < OID_NUM_LAST; i++) {
 		if (isl_oid[i].flags & OID_FLAG_CACHED) {
-			priv->mib[i] = kzalloc(isl_oid[i].size *
+			priv->mib[i] = kcalloc(isl_oid[i].size,
 					       (isl_oid[i].range + 1),
 					       GFP_KERNEL);
 			if (!priv->mib[i])
@@ -424,7 +412,7 @@ mgt_set_request(islpci_private *priv, enum oid_num_t n, int extra, void *data)
 	void *cache, *_data = data;
 	u32 oid;
 
-	BUG_ON(OID_NUM_LAST <= n);
+	BUG_ON(n >= OID_NUM_LAST);
 	BUG_ON(extra > isl_oid[n].range);
 
 	if (!priv->mib)
@@ -485,7 +473,7 @@ mgt_set_varlen(islpci_private *priv, enum oid_num_t n, void *data, int extra_len
 	int dlen;
 	u32 oid;
 
-	BUG_ON(OID_NUM_LAST <= n);
+	BUG_ON(n >= OID_NUM_LAST);
 
 	dlen = isl_oid[n].size;
 	oid = isl_oid[n].oid;
@@ -524,7 +512,7 @@ mgt_get_request(islpci_private *priv, enum oid_num_t n, int extra, void *data,
 	void *cache, *_res = NULL;
 	u32 oid;
 
-	BUG_ON(OID_NUM_LAST <= n);
+	BUG_ON(n >= OID_NUM_LAST);
 	BUG_ON(extra > isl_oid[n].range);
 
 	res->ptr = NULL;
@@ -626,7 +614,7 @@ mgt_commit_list(islpci_private *priv, enum oid_num_t *l, int n)
 void
 mgt_set(islpci_private *priv, enum oid_num_t n, void *data)
 {
-	BUG_ON(OID_NUM_LAST <= n);
+	BUG_ON(n >= OID_NUM_LAST);
 	BUG_ON(priv->mib[n] == NULL);
 
 	memcpy(priv->mib[n], data, isl_oid[n].size);
@@ -636,7 +624,7 @@ mgt_set(islpci_private *priv, enum oid_num_t n, void *data)
 void
 mgt_get(islpci_private *priv, enum oid_num_t n, void *res)
 {
-	BUG_ON(OID_NUM_LAST <= n);
+	BUG_ON(n >= OID_NUM_LAST);
 	BUG_ON(priv->mib[n] == NULL);
 	BUG_ON(res == NULL);
 

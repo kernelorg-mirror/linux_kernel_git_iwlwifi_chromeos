@@ -15,6 +15,7 @@
 #include <linux/configfs.h>
 #include <linux/dcache.h>
 #include <linux/ctype.h>
+#include <linux/cred.h>
 
 #include <linux/pkglist.h>
 
@@ -81,7 +82,7 @@ struct hashtable_entry {
 static unsigned int full_name_case_hash(const unsigned char *name,
 					unsigned int len)
 {
-	unsigned long hash = init_name_hash();
+	unsigned long hash = init_name_hash(0);
 
 	while (len--)
 		hash = partial_name_hash(tolower(*name++), hash);
@@ -889,7 +890,6 @@ static struct packages pkglist_packages = {
 			.cg_item = {
 				.ci_type = &packages_type,
 			},
-			.default_groups = sd_default_groups,
 		},
 	},
 };
@@ -900,10 +900,12 @@ static int configfs_pkglist_init(void)
 	struct configfs_subsystem *subsys = &pkglist_packages.subsystem;
 	config_item_set_name(&pkglist_packages.subsystem.su_group.cg_item,
 						pkglist_config_location);
-
-	for (i = 0; sd_default_groups[i]; i++)
-		config_group_init(sd_default_groups[i]);
 	config_group_init(&subsys->su_group);
+
+	for (i = 0; sd_default_groups[i]; i++) {
+		config_group_init(sd_default_groups[i]);
+		configfs_add_default_group(sd_default_groups[i], &subsys->su_group);
+	}
 	mutex_init(&subsys->su_mutex);
 	ret = configfs_register_subsystem(subsys);
 	if (ret) {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Xilinx SPI controller driver (master mode only)
  *
@@ -8,9 +9,6 @@
  * Copyright (c) 2009 Intel Corporation
  * 2002-2007 (c) MontaVista Software, Inc.
 
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -352,9 +350,10 @@ static irqreturn_t xilinx_spi_irq(int irq, void *dev_id)
 
 	if (ipif_isr & XSPI_INTR_TX_EMPTY) {	/* Transmission completed */
 		complete(&xspi->done);
+		return IRQ_HANDLED;
 	}
 
-	return IRQ_HANDLED;
+	return IRQ_NONE;
 }
 
 static int xilinx_spi_find_buffer_size(struct xilinx_spi *xspi)
@@ -380,6 +379,7 @@ static int xilinx_spi_find_buffer_size(struct xilinx_spi *xspi)
 }
 
 static const struct of_device_id xilinx_spi_of_match[] = {
+	{ .compatible = "xlnx,axi-quad-spi-1.00.a", },
 	{ .compatible = "xlnx,xps-spi-2.00.a", },
 	{ .compatible = "xlnx,xps-spi-2.00.b", },
 	{}
@@ -466,7 +466,10 @@ static int xilinx_spi_probe(struct platform_device *pdev)
 	xspi->buffer_size = xilinx_spi_find_buffer_size(xspi);
 
 	xspi->irq = platform_get_irq(pdev, 0);
-	if (xspi->irq >= 0) {
+	if (xspi->irq < 0 && xspi->irq != -ENXIO) {
+		ret = xspi->irq;
+		goto put_master;
+	} else if (xspi->irq >= 0) {
 		/* Register for SPI Interrupt */
 		ret = devm_request_irq(&pdev->dev, xspi->irq, xilinx_spi_irq, 0,
 				dev_name(&pdev->dev), xspi);

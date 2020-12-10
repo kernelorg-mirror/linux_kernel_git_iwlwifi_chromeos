@@ -50,7 +50,7 @@ static inline struct dw9714_device *sd_to_dw9714_vcm(struct v4l2_subdev *subdev)
 static int dw9714_i2c_write(struct i2c_client *client, u16 data)
 {
 	int ret;
-	u16 val = cpu_to_be16(data);
+	__be16 val = cpu_to_be16(data);
 
 	ret = i2c_master_send(client, (const char *)&val, sizeof(val));
 	if (ret != sizeof(val)) {
@@ -152,11 +152,11 @@ static int dw9714_probe(struct i2c_client *client)
 	if (rval)
 		goto err_cleanup;
 
-	rval = media_entity_init(&dw9714_dev->sd.entity, 0, NULL, 0);
+	rval = media_entity_pads_init(&dw9714_dev->sd.entity, 0, NULL);
 	if (rval < 0)
 		goto err_cleanup;
 
-	dw9714_dev->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_LENS;
+	dw9714_dev->sd.entity.function = MEDIA_ENT_F_LENS;
 
 	rval = v4l2_async_register_subdev(&dw9714_dev->sd);
 	if (rval < 0)
@@ -171,7 +171,7 @@ static int dw9714_probe(struct i2c_client *client)
 err_cleanup:
 	v4l2_ctrl_handler_free(&dw9714_dev->ctrls_vcm);
 	media_entity_cleanup(&dw9714_dev->sd.entity);
-	dev_err(&client->dev, "Probe failed: %d\n", rval);
+
 	return rval;
 }
 
@@ -267,7 +267,7 @@ static struct i2c_driver dw9714_i2c_driver = {
 module_i2c_driver(dw9714_i2c_driver);
 
 MODULE_AUTHOR("Tianshu Qiu <tian.shu.qiu@intel.com>");
-MODULE_AUTHOR("Jian Xu Zheng <jian.xu.zheng@intel.com>");
+MODULE_AUTHOR("Jian Xu Zheng");
 MODULE_AUTHOR("Yuning Pu <yuning.pu@intel.com>");
 MODULE_AUTHOR("Jouni Ukkonen <jouni.ukkonen@intel.com>");
 MODULE_AUTHOR("Tommi Franttila <tommi.franttila@intel.com>");

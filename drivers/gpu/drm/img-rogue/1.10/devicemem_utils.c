@@ -388,19 +388,19 @@ PVRSRV_ERROR _DevmemMemDescAlloc(DEVMEM_MEMDESC **ppsMemDesc)
 		goto failAlloc;
 	}
 
-	eError = OSLockCreate(&psMemDesc->hLock, LOCK_TYPE_PASSIVE);
+	eError =  OSLockCreate(&psMemDesc->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto failMDLock;
 	}
 
-	eError = OSLockCreate(&psMemDesc->sDeviceMemDesc.hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psMemDesc->sDeviceMemDesc.hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto failDMDLock;
 	}
 
-	eError = OSLockCreate(&psMemDesc->sCPUMemDesc.hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psMemDesc->sCPUMemDesc.hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto failCMDLock;
@@ -587,7 +587,7 @@ PVRSRV_ERROR _DevmemImportStructAlloc(SHARED_DEV_CONNECTION hDevConnection,
 	psImport->sDeviceImport.psHeap = NULL;
 	psImport->sDeviceImport.bMapped = IMG_FALSE;
 
-	eError = OSLockCreate(&psImport->sDeviceImport.hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psImport->sDeviceImport.hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto failDIOSLockCreate;
@@ -596,7 +596,7 @@ PVRSRV_ERROR _DevmemImportStructAlloc(SHARED_DEV_CONNECTION hDevConnection,
 	psImport->sCPUImport.hOSMMapData = NULL;
 	psImport->sCPUImport.pvCPUVAddr = NULL;
 
-	eError = OSLockCreate(&psImport->sCPUImport.hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psImport->sCPUImport.hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto failCIOSLockCreate;
@@ -614,7 +614,7 @@ PVRSRV_ERROR _DevmemImportStructAlloc(SHARED_DEV_CONNECTION hDevConnection,
 	OSAtomicWrite(&psImport->hRefCount, 0);
 
 	/* Create the lock */
-	eError = OSLockCreate(&psImport->hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psImport->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto failILockAlloc;

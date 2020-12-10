@@ -77,7 +77,7 @@ int __init oprofile_arch_init(struct oprofile_operations *ops)
 	struct op_mips_model *lmodel = NULL;
 	int res;
 
-	switch (current_cpu_type()) {
+	switch (boot_cpu_type()) {
 	case CPU_5KC:
 	case CPU_M14KC:
 	case CPU_M14KEC:
@@ -104,10 +104,10 @@ int __init oprofile_arch_init(struct oprofile_operations *ops)
 		lmodel = &op_model_mipsxx_ops;
 		break;
 
-	case CPU_LOONGSON2:
+	case CPU_LOONGSON2EF:
 		lmodel = &op_model_loongson2_ops;
 		break;
-	case CPU_LOONGSON3:
+	case CPU_LOONGSON64:
 		lmodel = &op_model_loongson3_ops;
 		break;
 	};

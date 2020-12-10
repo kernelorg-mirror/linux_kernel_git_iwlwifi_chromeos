@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * mac80211 - channel management
  */
@@ -231,9 +232,6 @@ ieee80211_get_max_required_bw(struct ieee80211_sub_if_data *sdata)
 		    !(sta->sdata->bss && sta->sdata->bss == sdata->bss))
 			continue;
 
-		if (!sta->uploaded)
-			continue;
-
 		max_bw = max(max_bw, ieee80211_get_sta_bw(&sta->sta));
 	}
 	rcu_read_unlock();
@@ -344,8 +342,10 @@ static void ieee80211_change_chanctx(struct ieee80211_local *local,
 				     struct ieee80211_chanctx *ctx,
 				     const struct cfg80211_chan_def *chandef)
 {
-	if (cfg80211_chandef_identical(&ctx->conf.def, chandef))
+	if (cfg80211_chandef_identical(&ctx->conf.def, chandef)) {
+		ieee80211_recalc_chanctx_min_def(local, ctx);
 		return;
+	}
 
 	WARN_ON(!cfg80211_chandef_compatible(&ctx->conf.def, chandef));
 
@@ -1187,7 +1187,7 @@ static int ieee80211_chsw_switch_vifs(struct ieee80211_local *local,
 	lockdep_assert_held(&local->mtx);
 	lockdep_assert_held(&local->chanctx_mtx);
 
-	vif_chsw = kzalloc(sizeof(vif_chsw[0]) * n_vifs, GFP_KERNEL);
+	vif_chsw = kcalloc(n_vifs, sizeof(vif_chsw[0]), GFP_KERNEL);
 	if (!vif_chsw)
 		return -ENOMEM;
 
@@ -1268,7 +1268,7 @@ static int ieee80211_vif_use_reserved_switch(struct ieee80211_local *local)
 	struct ieee80211_sub_if_data *sdata, *sdata_tmp;
 	struct ieee80211_chanctx *ctx, *ctx_tmp, *old_ctx;
 	struct ieee80211_chanctx *new_ctx = NULL;
-	int i, err, n_assigned, n_reserved, n_ready;
+	int err, n_assigned, n_reserved, n_ready;
 	int n_ctx = 0, n_vifs_switch = 0, n_vifs_assign = 0, n_vifs_ctxless = 0;
 
 	lockdep_assert_held(&local->mtx);
@@ -1389,8 +1389,6 @@ static int ieee80211_vif_use_reserved_switch(struct ieee80211_local *local)
 	 * Update all structures, values and pointers to point to new channel
 	 * context(s).
 	 */
-
-	i = 0;
 	list_for_each_entry(ctx, &local->chanctx_list, list) {
 		if (ctx->replace_state != IEEE80211_CHANCTX_REPLACES_OTHER)
 			continue;

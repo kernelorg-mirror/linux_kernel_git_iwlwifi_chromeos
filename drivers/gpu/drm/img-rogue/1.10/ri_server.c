@@ -326,14 +326,14 @@ PVRSRV_ERROR RIInitKM(void)
 	PVR_LOG_IF_FALSE((iCharsWritten>0 && iCharsWritten<(IMG_INT32)RI_SYS_ALLOC_IMPORT_FRMT_SIZE), \
 			"OSSNPrintf failed to initialise g_szSysAllocImport");
 
-	eError = OSLockCreate(&g_hSysAllocPidListLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&g_hSysAllocPidListLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: OSLockCreate (g_hSysAllocPidListLock) failed (returned %d)",__func__,eError));
 	}
 	dllist_init(&(g_sSysAllocPidListHead));
 #if (USE_RI_LOCK == 1)
-	eError = OSLockCreate(&g_hRILock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&g_hRILock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: OSLockCreate (g_hRILock) failed (returned %d)",__func__,eError));
@@ -1432,6 +1432,7 @@ IMG_BOOL RIGetListEntryKM(IMG_PID pid,
 
 	default:
 		PVR_DPF((PVR_DBG_ERROR, "%s: Bad %d)",__func__, g_bNextGetState));
+		/* fall-through */
 
 	case RI_GET_STATE_END:
 		/* Reset state ready for the next ri_mem_area file to display */

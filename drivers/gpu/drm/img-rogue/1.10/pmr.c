@@ -365,7 +365,7 @@ _PMRCreate(PMR_SIZE_T uiLogicalSize,
 	psPMR = (PMR *) pvPMRLinAddr;
 	psMappingTable = (PMR_MAPPING_TABLE *) (((IMG_CHAR *) pvPMRLinAddr) + sizeof(*psPMR));
 
-	eError = OSLockCreate(&psPMR->hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&psPMR->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		OSFreeMem(psPMR);
@@ -3445,7 +3445,7 @@ PMRInit(void)
 		goto out;
 	}
 
-	eError = OSLockCreate(&_gsSingletonPMRContext.hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&_gsSingletonPMRContext.hLock);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Error: failed to create lock", __func__));

@@ -150,61 +150,61 @@ static VMM_PVZ_CONNECTION gsStubVmmPvz =
 {
 	.sHostFuncTab = {
 		/* pfnCreateDevConfig */
-		&StubVMMCreateDevConfig,
+		.pfnCreateDevConfig = &StubVMMCreateDevConfig,
 
 		/* pfnDestroyDevConfig */
-		&StubVMMDestroyDevConfig,
+		.pfnDestroyDevConfig = &StubVMMDestroyDevConfig,
 
 		/* pfnCreateDevPhysHeaps */
-		&StubVMMCreateDevPhysHeaps,
+		.pfnCreateDevPhysHeaps = &StubVMMCreateDevPhysHeaps,
 
 		/* pfnDestroyDevPhysHeaps */
-		&StubVMMDestroyDevPhysHeaps,
+		.pfnDestroyDevPhysHeaps = &StubVMMDestroyDevPhysHeaps,
 
 		/* pfnMapDevPhysHeap */
-		&StubVMMMapDevPhysHeap,
+		.pfnMapDevPhysHeap = &StubVMMMapDevPhysHeap,
 
 		/* pfnUnmapDevPhysHeap */
-		&StubVMMUnmapDevPhysHeap
+		.pfnUnmapDevPhysHeap = &StubVMMUnmapDevPhysHeap
 	},
 
 	.sGuestFuncTab = {
 		/* pfnCreateDevConfig */
-		&PvzServerCreateDevConfig,
+		.pfnCreateDevConfig = &PvzServerCreateDevConfig,
 
 		/* pfnDestroyDevConfig */
-		&PvzServerDestroyDevConfig,
+		.pfnDestroyDevConfig = &PvzServerDestroyDevConfig,
 
 		/* pfnCreateDevPhysHeaps */
-		&PvzServerCreateDevPhysHeaps,
+		.pfnCreateDevPhysHeaps = &PvzServerCreateDevPhysHeaps,
 
 		/* pfnDestroyDevPhysHeaps */
-		&PvzServerDestroyDevPhysHeaps,
+		.pfnDestroyDevPhysHeaps = &PvzServerDestroyDevPhysHeaps,
 
 		/* pfnMapDevPhysHeap */
-		&PvzServerMapDevPhysHeap,
+		.pfnMapDevPhysHeap = &PvzServerMapDevPhysHeap,
 
 		/* pfnUnmapDevPhysHeap */
-		&PvzServerUnmapDevPhysHeap
+		.pfnUnmapDevPhysHeap = &PvzServerUnmapDevPhysHeap
 	},
 
 	.sConfigFuncTab = {
 		/* pfnGetDevPhysHeapOrigin */
-		&StubVMMGetDevPhysHeapOrigin,
+		.pfnGetDevPhysHeapOrigin = &StubVMMGetDevPhysHeapOrigin,
 
 		/* pfnGetDevPhysHeapAddrSize */
-		&StubVMMGetDevPhysHeapAddrSize
+		.pfnGetDevPhysHeapAddrSize = &StubVMMGetDevPhysHeapAddrSize
 	},
 
 	.sVmmFuncTab = {
 		/* pfnOnVmOnline */
-		&PvzServerOnVmOnline,
+		.pfnOnVmOnline = &PvzServerOnVmOnline,
 
 		/* pfnOnVmOffline */
-		&PvzServerOnVmOffline,
+		.pfnOnVmOffline = &PvzServerOnVmOffline,
 
 		/* pfnVMMConfigure */
-		&PvzServerVMMConfigure
+		.pfnVMMConfigure = &PvzServerVMMConfigure
 	}
 };
 

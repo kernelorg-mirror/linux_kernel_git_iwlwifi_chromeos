@@ -33,7 +33,14 @@
 #include <drm/drm_modes.h>
 
 /* drm_fb_helper.c */
+#ifdef CONFIG_DRM_FBDEV_EMULATION
 int drm_fb_helper_modinit(void);
+#else
+static inline int drm_fb_helper_modinit(void)
+{
+	return 0;
+}
+#endif
 
 /* drm_dp_aux_dev.c */
 #ifdef CONFIG_DRM_DP_AUX_CHARDEV
@@ -68,3 +75,6 @@ enum drm_mode_status drm_encoder_mode_valid(struct drm_encoder *encoder,
 					    const struct drm_display_mode *mode);
 enum drm_mode_status drm_connector_mode_valid(struct drm_connector *connector,
 					      struct drm_display_mode *mode);
+
+struct drm_encoder *
+drm_connector_get_single_encoder(struct drm_connector *connector);

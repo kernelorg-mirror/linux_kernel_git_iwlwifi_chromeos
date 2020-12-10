@@ -79,6 +79,7 @@ class LxPs(gdb.Command):
                 pid=task["pid"],
                 comm=task["comm"].string()))
 
+
 LxPs()
 
 
@@ -116,3 +117,23 @@ variable."""
 
 
 LxThreadInfoFunc()
+
+
+class LxThreadInfoByPidFunc (gdb.Function):
+    """Calculate Linux thread_info from task variable found by pid
+
+$lx_thread_info_by_pid(PID): Given PID, return the corresponding thread_info
+variable."""
+
+    def __init__(self):
+        super(LxThreadInfoByPidFunc, self).__init__("lx_thread_info_by_pid")
+
+    def invoke(self, pid):
+        task = get_task_by_pid(pid)
+        if task:
+            return get_thread_info(task.dereference())
+        else:
+            raise gdb.GdbError("No task of PID " + str(pid))
+
+
+LxThreadInfoByPidFunc()

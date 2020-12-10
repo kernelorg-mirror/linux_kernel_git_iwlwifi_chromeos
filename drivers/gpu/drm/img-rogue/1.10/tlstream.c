@@ -309,13 +309,13 @@ TLStreamCreate(IMG_HANDLE *phStream,
 		goto e4;
 	}
 
-	eError = OSLockCreate (&psTmp->hStreamWLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate (&psTmp->hStreamWLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto e5;
 	}
 
-	eError = OSLockCreate (&psTmp->hReadLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate (&psTmp->hReadLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto e6;

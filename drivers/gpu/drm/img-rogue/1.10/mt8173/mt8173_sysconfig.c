@@ -55,7 +55,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "physheap.h"
 #include "pvrsrv_device.h"
 #include "rgxdevice.h"
-#include "syscommon.h"
+#include "system/syscommon.h"
 
 #include "mt8173_mfgsys.h"
 
@@ -274,7 +274,12 @@ static u32 interpolate(int value, const int *x, const unsigned int *y, int len)
 	return ret;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10, 0)
+static unsigned long mtk_mfg_get_static_power(struct devfreq *df,
+					      unsigned long voltage)
+#else
 static unsigned long mtk_mfg_get_static_power(unsigned long voltage)
+#endif
 {
 	struct mtk_mfg *mfg = gsDevice.hSysData;
 	struct thermal_zone_device *tz = mfg->tz;
@@ -328,8 +333,14 @@ static unsigned long mtk_mfg_get_static_power(unsigned long voltage)
 	return power;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10, 0)
+static unsigned long mtk_mfg_get_dynamic_power(struct devfreq *df,
+					       unsigned long freq,
+					       unsigned long voltage)
+#else
 static unsigned long mtk_mfg_get_dynamic_power(unsigned long freq,
 					       unsigned long voltage)
+#endif
 {
 	#define NUM_RANGE  ARRAY_SIZE(f_range)
 	/** Frequency and Power in Khz and mW respectively */

@@ -321,7 +321,7 @@ PVRSRV_ERROR PhysHeapInit(void)
 
 	g_psPhysHeapList = NULL;
 
-	eError = OSLockCreate(&g_hPhysHeapLock, LOCK_TYPE_NONE);
+	eError = OSLockCreate(&g_hPhysHeapLock);
 
 	if(eError != PVRSRV_OK)
 	{

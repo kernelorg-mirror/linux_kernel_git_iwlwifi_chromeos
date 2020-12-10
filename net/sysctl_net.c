@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* -*- linux-c -*-
  * sysctl_net.c: sysctl interface to net subsystem.
  *
@@ -27,9 +28,9 @@
 #endif
 
 static struct ctl_table_set *
-net_ctl_header_lookup(struct ctl_table_root *root, struct nsproxy *namespaces)
+net_ctl_header_lookup(struct ctl_table_root *root)
 {
-	return &namespaces->net_ns->sysctls;
+	return &current->nsproxy->net_ns->sysctls;
 }
 
 static int is_seen(struct ctl_table_set *set)
@@ -106,7 +107,6 @@ __init int net_sysctl_init(void)
 	ret = register_pernet_subsys(&sysctl_pernet_ops);
 	if (ret)
 		goto out1;
-	register_sysctl_root(&net_sysctl_root);
 out:
 	return ret;
 out1:

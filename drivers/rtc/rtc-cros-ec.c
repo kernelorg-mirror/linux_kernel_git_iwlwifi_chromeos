@@ -1,27 +1,16 @@
-/*
- * RTC driver for Chrome OS Embedded Controller
- *
- * Copyright (c) 2016, Google, Inc
- *
- * Author: Stephen Barber <smbarber@chromium.org>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- */
+// SPDX-License-Identifier: GPL-2.0
+// RTC driver for ChromeOS Embedded Controller.
+//
+// Copyright (C) 2017 Google, Inc.
+// Author: Stephen Barber <smbarber@chromium.org>
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/platform_data/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_proto.h>
 #include <linux/platform_device.h>
 #include <linux/rtc.h>
 #include <linux/slab.h>
-#include <linux/mfd/cros_ec.h>
-#include <linux/mfd/cros_ec_commands.h>
 
 #define DRV_NAME	"cros-ec-rtc"
 
@@ -54,7 +43,6 @@ static int cros_ec_rtc_get(struct cros_ec_device *cros_ec, u32 command,
 	msg.msg.insize = sizeof(msg.data);
 
 	ret = cros_ec_cmd_xfer_status(cros_ec, &msg.msg);
-
 	if (ret < 0) {
 		dev_err(cros_ec->dev,
 			"error getting %s from EC: %d\n",
@@ -83,10 +71,8 @@ static int cros_ec_rtc_set(struct cros_ec_device *cros_ec, u32 command,
 	msg.data.time = param;
 
 	ret = cros_ec_cmd_xfer_status(cros_ec, &msg.msg);
-
 	if (ret < 0) {
-		dev_err(cros_ec->dev,
-			"error setting %s on EC: %d\n",
+		dev_err(cros_ec->dev, "error setting %s on EC: %d\n",
 			command == EC_CMD_RTC_SET_VALUE ? "time" : "alarm",
 			ret);
 		return ret;
@@ -100,7 +86,7 @@ static int cros_ec_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
 	struct cros_ec_rtc *cros_ec_rtc = dev_get_drvdata(dev);
 	struct cros_ec_device *cros_ec = cros_ec_rtc->cros_ec;
-	int ret = 0;
+	int ret;
 	u32 time;
 
 	ret = cros_ec_rtc_get(cros_ec, EC_CMD_RTC_GET_VALUE, &time);
@@ -119,16 +105,14 @@ static int cros_ec_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
 	struct cros_ec_rtc *cros_ec_rtc = dev_get_drvdata(dev);
 	struct cros_ec_device *cros_ec = cros_ec_rtc->cros_ec;
-	int ret = 0;
+	int ret;
 	time64_t time;
 
 	time = rtc_tm_to_time64(tm);
-
 	if (time < 0 || time > U32_MAX)
 		return -EINVAL;
 
 	ret = cros_ec_rtc_set(cros_ec, EC_CMD_RTC_SET_VALUE, (u32)time);
-
 	if (ret < 0) {
 		dev_err(dev, "error setting time: %d\n", ret);
 		return ret;
@@ -142,23 +126,21 @@ static int cros_ec_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
 	struct cros_ec_rtc *cros_ec_rtc = dev_get_drvdata(dev);
 	struct cros_ec_device *cros_ec = cros_ec_rtc->cros_ec;
-	int ret = 0;
+	int ret;
 	u32 current_time, alarm_offset;
 
 	/*
-	 * The EC host command for getting the alarm is relative (i.e. 5 seconds
-	 * from now) whereas rtc_wkalrm is absolute. Get the current RTC time
-	 * first so we can calculate the relative time.
+	 * The EC host command for getting the alarm is relative (i.e. 5
+	 * seconds from now) whereas rtc_wkalrm is absolute. Get the current
+	 * RTC time first so we can calculate the relative time.
 	 */
 	ret = cros_ec_rtc_get(cros_ec, EC_CMD_RTC_GET_VALUE, &current_time);
-
 	if (ret < 0) {
 		dev_err(dev, "error getting time: %d\n", ret);
 		return ret;
 	}
 
 	ret = cros_ec_rtc_get(cros_ec, EC_CMD_RTC_GET_ALARM, &alarm_offset);
-
 	if (ret < 0) {
 		dev_err(dev, "error getting alarm: %d\n", ret);
 		return ret;
@@ -174,7 +156,7 @@ static int cros_ec_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
 	struct cros_ec_rtc *cros_ec_rtc = dev_get_drvdata(dev);
 	struct cros_ec_device *cros_ec = cros_ec_rtc->cros_ec;
-	int ret = 0;
+	int ret;
 	time64_t alarm_time;
 	u32 current_time, alarm_offset;
 
@@ -184,9 +166,7 @@ static int cros_ec_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	 * Get the current RTC time first so we can calculate the
 	 * relative time.
 	 */
-	ret = cros_ec_rtc_get(cros_ec, EC_CMD_RTC_GET_VALUE,
-			&current_time);
-
+	ret = cros_ec_rtc_get(cros_ec, EC_CMD_RTC_GET_VALUE, &current_time);
 	if (ret < 0) {
 		dev_err(dev, "error getting time: %d\n", ret);
 		return ret;
@@ -198,7 +178,10 @@ static int cros_ec_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 		return -EINVAL;
 
 	if (!alrm->enabled) {
-		/* If the alarm is being disabled, send an alarm clear command. */
+		/*
+		 * If the alarm is being disabled, send an alarm
+		 * clear command.
+		 */
 		alarm_offset = EC_RTC_ALARM_CLEAR;
 		cros_ec_rtc->saved_alarm = (u32)alarm_time;
 	} else {
@@ -210,7 +193,6 @@ static int cros_ec_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	}
 
 	ret = cros_ec_rtc_set(cros_ec, EC_CMD_RTC_SET_ALARM, alarm_offset);
-
 	if (ret < 0) {
 		dev_err(dev, "error setting alarm: %d\n", ret);
 		return ret;
@@ -224,11 +206,10 @@ static int cros_ec_rtc_alarm_irq_enable(struct device *dev,
 {
 	struct cros_ec_rtc *cros_ec_rtc = dev_get_drvdata(dev);
 	struct cros_ec_device *cros_ec = cros_ec_rtc->cros_ec;
-	int ret = 0;
+	int ret;
 	u32 current_time, alarm_offset, alarm_value;
 
 	ret = cros_ec_rtc_get(cros_ec, EC_CMD_RTC_GET_VALUE, &current_time);
-
 	if (ret < 0) {
 		dev_err(dev, "error getting time: %d\n", ret);
 		return ret;
@@ -243,7 +224,6 @@ static int cros_ec_rtc_alarm_irq_enable(struct device *dev,
 
 		ret = cros_ec_rtc_set(cros_ec, EC_CMD_RTC_SET_ALARM,
 				      alarm_offset);
-
 		if (ret < 0) {
 			dev_err(dev, "error restoring alarm: %d\n", ret);
 			return ret;
@@ -252,17 +232,17 @@ static int cros_ec_rtc_alarm_irq_enable(struct device *dev,
 		/* Disable alarm, saving the old alarm value. */
 		ret = cros_ec_rtc_get(cros_ec, EC_CMD_RTC_GET_ALARM,
 				      &alarm_offset);
-
-		alarm_value = current_time + alarm_offset;
-
 		if (ret < 0) {
 			dev_err(dev, "error saving alarm: %d\n", ret);
 			return ret;
 		}
 
+		alarm_value = current_time + alarm_offset;
+
 		/*
 		 * If the current EC alarm is already past, we don't want
-		 * to set an alarm when we go through the alarm irq enable path.
+		 * to set an alarm when we go through the alarm irq enable
+		 * path.
 		 */
 		if (alarm_value < current_time)
 			cros_ec_rtc->saved_alarm = EC_RTC_ALARM_CLEAR;
@@ -272,7 +252,6 @@ static int cros_ec_rtc_alarm_irq_enable(struct device *dev,
 		alarm_offset = EC_RTC_ALARM_CLEAR;
 		ret = cros_ec_rtc_set(cros_ec, EC_CMD_RTC_SET_ALARM,
 				      alarm_offset);
-
 		if (ret < 0) {
 			dev_err(dev, "error disabling alarm: %d\n", ret);
 			return ret;
@@ -283,7 +262,8 @@ static int cros_ec_rtc_alarm_irq_enable(struct device *dev,
 }
 
 static int cros_ec_rtc_event(struct notifier_block *nb,
-	unsigned long queued_during_suspend, void *_notify)
+			     unsigned long queued_during_suspend,
+			     void *_notify)
 {
 	struct cros_ec_rtc *cros_ec_rtc;
 	struct rtc_device *rtc;
@@ -295,7 +275,6 @@ static int cros_ec_rtc_event(struct notifier_block *nb,
 	cros_ec = cros_ec_rtc->cros_ec;
 
 	host_event = cros_ec_get_host_event(cros_ec);
-
 	if (host_event & EC_HOST_EVENT_MASK(EC_HOST_EVENT_RTC)) {
 		rtc_update_irq(rtc, 1, RTC_IRQF | RTC_AF);
 		return NOTIFY_OK;
@@ -319,7 +298,7 @@ static int cros_ec_rtc_suspend(struct device *dev)
 	struct cros_ec_rtc *cros_ec_rtc = dev_get_drvdata(&pdev->dev);
 
 	if (device_may_wakeup(dev))
-		enable_irq_wake(cros_ec_rtc->cros_ec->irq);
+		return enable_irq_wake(cros_ec_rtc->cros_ec->irq);
 
 	return 0;
 }
@@ -330,14 +309,14 @@ static int cros_ec_rtc_resume(struct device *dev)
 	struct cros_ec_rtc *cros_ec_rtc = dev_get_drvdata(&pdev->dev);
 
 	if (device_may_wakeup(dev))
-		disable_irq_wake(cros_ec_rtc->cros_ec->irq);
+		return disable_irq_wake(cros_ec_rtc->cros_ec->irq);
 
 	return 0;
 }
 #endif
 
-static SIMPLE_DEV_PM_OPS(cros_ec_rtc_pm_ops,
-	cros_ec_rtc_suspend, cros_ec_rtc_resume);
+static SIMPLE_DEV_PM_OPS(cros_ec_rtc_pm_ops, cros_ec_rtc_suspend,
+			 cros_ec_rtc_resume);
 
 static int cros_ec_rtc_probe(struct platform_device *pdev)
 {
@@ -355,26 +334,22 @@ static int cros_ec_rtc_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, cros_ec_rtc);
 	cros_ec_rtc->cros_ec = cros_ec;
 
-	/* Get initial time and check that it's sane. */
+	/* Get initial time */
 	ret = cros_ec_rtc_read_time(&pdev->dev, &tm);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to read RTC time\n");
 		return ret;
 	}
-	ret = rtc_valid_tm(&tm);
-	if (ret)
-		dev_err(&pdev->dev, "invalid date/time\n");
 
 	ret = device_init_wakeup(&pdev->dev, 1);
-
 	if (ret) {
 		dev_err(&pdev->dev, "failed to initialize wakeup\n");
 		return ret;
 	}
 
 	cros_ec_rtc->rtc = devm_rtc_device_register(&pdev->dev, DRV_NAME,
-						  &cros_ec_rtc_ops,
-						  THIS_MODULE);
+						    &cros_ec_rtc_ops,
+						    THIS_MODULE);
 	if (IS_ERR(cros_ec_rtc->rtc)) {
 		ret = PTR_ERR(cros_ec_rtc->rtc);
 		dev_err(&pdev->dev, "failed to register rtc device\n");
@@ -400,9 +375,8 @@ static int cros_ec_rtc_remove(struct platform_device *pdev)
 	int ret;
 
 	ret = blocking_notifier_chain_unregister(
-			&cros_ec_rtc->cros_ec->event_notifier,
-			&cros_ec_rtc->notifier);
-
+				&cros_ec_rtc->cros_ec->event_notifier,
+				&cros_ec_rtc->notifier);
 	if (ret) {
 		dev_err(dev, "failed to unregister notifier\n");
 		return ret;
@@ -413,7 +387,7 @@ static int cros_ec_rtc_remove(struct platform_device *pdev)
 
 static struct platform_driver cros_ec_rtc_driver = {
 	.probe = cros_ec_rtc_probe,
-	.remove  = cros_ec_rtc_remove,
+	.remove = cros_ec_rtc_remove,
 	.driver = {
 		.name = DRV_NAME,
 		.pm = &cros_ec_rtc_pm_ops,
@@ -424,5 +398,5 @@ module_platform_driver(cros_ec_rtc_driver);
 
 MODULE_DESCRIPTION("RTC driver for Chrome OS ECs");
 MODULE_AUTHOR("Stephen Barber <smbarber@chromium.org>");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:" DRV_NAME);

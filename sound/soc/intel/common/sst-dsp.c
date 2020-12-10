@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel Smart Sound Technology (SST) DSP Core Driver
  *
  * Copyright (C) 2013, Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/slab.h>
@@ -266,7 +257,7 @@ int sst_dsp_register_poll(struct sst_dsp *ctx, u32 offset, u32 mask,
 	 */
 
 	timeout = jiffies + msecs_to_jiffies(time);
-	while (((sst_dsp_shim_read_unlocked(ctx, offset) & mask) != target)
+	while ((((reg = sst_dsp_shim_read_unlocked(ctx, offset)) & mask) != target)
 		&& time_before(jiffies, timeout)) {
 		k++;
 		if (k > 10)
@@ -274,8 +265,6 @@ int sst_dsp_register_poll(struct sst_dsp *ctx, u32 offset, u32 mask,
 
 		usleep_range(s, 2*s);
 	}
-
-	reg = sst_dsp_shim_read_unlocked(ctx, offset);
 
 	if ((reg & mask) == target) {
 		dev_dbg(ctx->dev, "FW Poll Status: reg=%#x %s successful\n",
@@ -416,77 +405,6 @@ void sst_dsp_inbox_read(struct sst_dsp *sst, void *message, size_t bytes)
 		trace_sst_ipc_inbox_rdata(i, *(u32 *)(message + i));
 }
 EXPORT_SYMBOL_GPL(sst_dsp_inbox_read);
-
-#if IS_ENABLED(CONFIG_DW_DMAC_CORE)
-struct sst_dsp *sst_dsp_new(struct device *dev,
-	struct sst_dsp_device *sst_dev, struct sst_pdata *pdata)
-{
-	struct sst_dsp *sst;
-	int err;
-
-	dev_dbg(dev, "initialising audio DSP id 0x%x\n", pdata->id);
-
-	sst = devm_kzalloc(dev, sizeof(*sst), GFP_KERNEL);
-	if (sst == NULL)
-		return NULL;
-
-	spin_lock_init(&sst->spinlock);
-	mutex_init(&sst->mutex);
-	sst->dev = dev;
-	sst->dma_dev = pdata->dma_dev;
-	sst->thread_context = sst_dev->thread_context;
-	sst->sst_dev = sst_dev;
-	sst->id = pdata->id;
-	sst->irq = pdata->irq;
-	sst->ops = sst_dev->ops;
-	sst->pdata = pdata;
-	INIT_LIST_HEAD(&sst->used_block_list);
-	INIT_LIST_HEAD(&sst->free_block_list);
-	INIT_LIST_HEAD(&sst->module_list);
-	INIT_LIST_HEAD(&sst->fw_list);
-	INIT_LIST_HEAD(&sst->scratch_block_list);
-
-	/* Initialise SST Audio DSP */
-	if (sst->ops->init) {
-		err = sst->ops->init(sst, pdata);
-		if (err < 0)
-			return NULL;
-	}
-
-	/* Register the ISR */
-	err = request_threaded_irq(sst->irq, sst->ops->irq_handler,
-		sst_dev->thread, IRQF_SHARED, "AudioDSP", sst);
-	if (err)
-		goto irq_err;
-
-	err = sst_dma_new(sst);
-	if (err)  {
-		dev_err(dev, "sst_dma_new failed %d\n", err);
-		goto dma_err;
-	}
-
-	return sst;
-
-dma_err:
-	free_irq(sst->irq, sst);
-irq_err:
-	if (sst->ops->free)
-		sst->ops->free(sst);
-
-	return NULL;
-}
-EXPORT_SYMBOL_GPL(sst_dsp_new);
-
-void sst_dsp_free(struct sst_dsp *sst)
-{
-	free_irq(sst->irq, sst);
-	if (sst->ops->free)
-		sst->ops->free(sst);
-
-	sst_dma_free(sst->dma);
-}
-EXPORT_SYMBOL_GPL(sst_dsp_free);
-#endif
 
 /* Module information */
 MODULE_AUTHOR("Liam Girdwood");

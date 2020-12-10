@@ -61,7 +61,6 @@ failed:
 	entry->size = 0;
 	return err;
 }
-EXPORT_SYMBOL_GPL(arch_dup_sys_call_table);
 
 int arch_set_sys_call_table(struct alt_sys_call_table *entry)
 {
@@ -77,4 +76,3 @@ int arch_set_sys_call_table(struct alt_sys_call_table *entry)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(arch_set_sys_call_table);

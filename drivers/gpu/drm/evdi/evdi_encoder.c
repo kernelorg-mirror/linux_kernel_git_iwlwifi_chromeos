@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat
- * Copyright (c) 2015 - 2016 DisplayLink (UK) Ltd.
+ * Copyright (c) 2015 - 2018 DisplayLink (UK) Ltd.
  *
  * Based on parts on udlfb.c:
  * Copyright (C) 2009 its respective authors
@@ -22,19 +23,6 @@ static void evdi_enc_destroy(struct drm_encoder *encoder)
 	kfree(encoder);
 }
 
-static void evdi_encoder_enable(struct drm_encoder *encoder)
-{
-}
-
-static void evdi_encoder_disable(struct drm_encoder *encoder)
-{
-}
-
-static const struct drm_encoder_helper_funcs evdi_enc_helper_funcs = {
-	.enable = evdi_encoder_enable,
-	.disable = evdi_encoder_disable
-};
-
 static const struct drm_encoder_funcs evdi_enc_funcs = {
 	.destroy = evdi_enc_destroy,
 };
@@ -54,8 +42,6 @@ struct drm_encoder *evdi_encoder_init(struct drm_device *dev)
 		EVDI_ERROR("Failed to initialize encoder: %d\n", ret);
 		goto err_encoder;
 	}
-
-	drm_encoder_helper_add(encoder, &evdi_enc_helper_funcs);
 
 	encoder->possible_crtcs = 1;
 	return encoder;

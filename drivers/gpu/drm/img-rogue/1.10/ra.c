@@ -1023,7 +1023,7 @@ RA_Create (IMG_CHAR *name,
 		goto arena_fail;
 	}
 
-	eError = OSLockCreate(&pArena->hLock, LOCK_TYPE_PASSIVE);
+	eError = OSLockCreate(&pArena->hLock);
 	if (eError != PVRSRV_OK)
 	{
 		goto lock_fail;
