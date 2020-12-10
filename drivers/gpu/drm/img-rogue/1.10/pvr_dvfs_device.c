@@ -44,9 +44,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #if !defined(NO_HARDWARE)
 
 #include <linux/devfreq.h>
-#if defined(CONFIG_DEVFREQ_THERMAL)
 #include <linux/devfreq_cooling.h>
-#endif
 #include <linux/version.h>
 #include <linux/device.h>
 
@@ -58,7 +56,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxinit.h"
 #include "sofunc_rgx.h"
 
-#include "syscommon.h"
+#include "system/syscommon.h"
 
 #include "pvr_dvfs_device.h"
 

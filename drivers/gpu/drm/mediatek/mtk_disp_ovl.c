@@ -1,25 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
-#include <drm/drmP.h>
 #include <drm/drm_fourcc.h>
 
 #include <linux/clk.h>
 #include <linux/component.h>
+#include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
-#include <linux/pm_runtime.h>
 #include <linux/soc/mediatek/mtk-cmdq.h>
 
 #include "mtk_drm_crtc.h"
@@ -269,13 +260,11 @@ static void mtk_ovl_layer_config(struct mtk_ddp_comp *comp, unsigned int idx,
 	unsigned int src_size = (pending->height << 16) | pending->width;
 	unsigned int con;
 
-	if (!pending->enable) {
+	if (!pending->enable)
 		mtk_ovl_layer_off(comp, idx, cmdq_pkt);
-		return;
-	}
 
 	con = ovl_fmt_convert(ovl, fmt);
-	if (state->base.fb->format->has_alpha)
+	if (idx != 0)
 		con |= OVL_CON_AEN | OVL_CON_ALPHA;
 
 	if (pending->rotation & DRM_MODE_REFLECT_Y) {
@@ -299,7 +288,8 @@ static void mtk_ovl_layer_config(struct mtk_ddp_comp *comp, unsigned int idx,
 	mtk_ddp_write_relaxed(cmdq_pkt, addr, comp,
 			      DISP_REG_OVL_ADDR(ovl, idx));
 
-	mtk_ovl_layer_on(comp, idx, cmdq_pkt);
+	if (pending->enable)
+		mtk_ovl_layer_on(comp, idx, cmdq_pkt);
 }
 
 static void mtk_ovl_bgclr_in_on(struct mtk_ddp_comp *comp)
@@ -411,8 +401,6 @@ static int mtk_disp_ovl_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	pm_runtime_enable(dev);
-
 	ret = component_add(dev, &mtk_disp_ovl_component_ops);
 	if (ret)
 		dev_err(dev, "Failed to add component: %d\n", ret);
@@ -423,8 +411,6 @@ static int mtk_disp_ovl_probe(struct platform_device *pdev)
 static int mtk_disp_ovl_remove(struct platform_device *pdev)
 {
 	component_del(&pdev->dev, &mtk_disp_ovl_component_ops);
-
-	pm_runtime_disable(&pdev->dev);
 
 	return 0;
 }
@@ -443,29 +429,11 @@ static const struct mtk_disp_ovl_data mt8173_ovl_driver_data = {
 	.fmt_rgb565_is_0 = true,
 };
 
-static const struct mtk_disp_ovl_data mt8183_ovl_driver_data = {
-	.addr = DISP_REG_OVL_ADDR_MT8173,
-	.gmc_bits = 10,
-	.layer_nr = 4,
-	.fmt_rgb565_is_0 = true,
-};
-
-static const struct mtk_disp_ovl_data mt8183_ovl_2l_driver_data = {
-	.addr = DISP_REG_OVL_ADDR_MT8173,
-	.gmc_bits = 10,
-	.layer_nr = 2,
-	.fmt_rgb565_is_0 = true,
-};
-
 static const struct of_device_id mtk_disp_ovl_driver_dt_match[] = {
 	{ .compatible = "mediatek,mt2701-disp-ovl",
 	  .data = &mt2701_ovl_driver_data},
 	{ .compatible = "mediatek,mt8173-disp-ovl",
 	  .data = &mt8173_ovl_driver_data},
-	{ .compatible = "mediatek,mt8183-disp-ovl",
-	  .data = &mt8183_ovl_driver_data},
-	{ .compatible = "mediatek,mt8183-disp-ovl-2l",
-	  .data = &mt8183_ovl_2l_driver_data},
 	{},
 };
 MODULE_DEVICE_TABLE(of, mtk_disp_ovl_driver_dt_match);

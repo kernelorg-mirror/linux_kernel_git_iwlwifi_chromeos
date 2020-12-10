@@ -115,9 +115,12 @@ struct drm_dp_mst_port {
  * @rad: Relative Address to talk to this branch device.
  * @lct: Link count total to talk to this branch device.
  * @num_ports: number of ports on the branch.
+ * @msg_slots: one bit per transmitted msg slot.
  * @ports: linked list of ports on this branch.
  * @port_parent: pointer to the port parent, NULL if toplevel.
  * @mgr: topology manager for this branch device.
+ * @tx_slots: transmission slots for this device.
+ * @last_seqno: last sequence number used to talk to this.
  * @link_address_sent: if a link address message has been sent to this device yet.
  * @guid: guid for DP 1.2 branch device. port under this branch can be
  * identified by port #.
@@ -144,11 +147,16 @@ struct drm_dp_mst_branch {
 	u8 lct;
 	int num_ports;
 
+	int msg_slots;
 	struct list_head ports;
 
+	/* list of tx ops queue for this port */
 	struct drm_dp_mst_port *port_parent;
 	struct drm_dp_mst_topology_mgr *mgr;
 
+	/* slots are protected by mstb->mgr->qlock */
+	struct drm_dp_sideband_msg_tx *tx_slots[2];
+	int last_seqno;
 	bool link_address_sent;
 
 	/* global unique identifier to identify branch devices */
@@ -400,8 +408,15 @@ struct drm_dp_mst_topology_cbs {
 	void (*register_connector)(struct drm_connector *connector);
 	void (*destroy_connector)(struct drm_dp_mst_topology_mgr *mgr,
 				  struct drm_connector *connector);
-	void (*hotplug)(struct drm_dp_mst_topology_mgr *mgr);
-
+	/*
+	 * Checks for any pending MST interrupts, passing them to MST core for
+	 * processing, the same way an HPD IRQ pulse handler would do this.
+	 * If provided MST core calls this callback from a poll-waiting loop
+	 * when waiting for MST down message replies. The driver is expected
+	 * to guard against a race between this callback and the driver's HPD
+	 * IRQ pulse handler.
+	 */
+	void (*poll_hpd_irq)(struct drm_dp_mst_topology_mgr *mgr);
 };
 
 #define DP_MAX_PAYLOAD (sizeof(unsigned long) * 8)
@@ -475,11 +490,11 @@ struct drm_dp_mst_topology_mgr {
 	int conn_base_id;
 
 	/**
-	 * @down_rep_recv: Message receiver state for replies to down
-	 * requests.
+	 * @down_rep_recv: Message receiver state for down replies. This and
+	 * @up_req_recv are only ever access from the work item, which is
+	 * serialised.
 	 */
 	struct drm_dp_sideband_msg_rx down_rep_recv;
-
 	/**
 	 * @up_req_recv: Message receiver state for up requests. This and
 	 * @down_rep_recv are only ever access from the work item, which is
@@ -488,23 +503,15 @@ struct drm_dp_mst_topology_mgr {
 	struct drm_dp_sideband_msg_rx up_req_recv;
 
 	/**
-	 * @lock: protects @mst_state, @mst_primary, @dpcd, and
-	 * @payload_id_table_cleared.
+	 * @lock: protects mst state, primary, dpcd.
 	 */
 	struct mutex lock;
 
 	/**
-	 * @mst_state: If this manager is enabled for an MST capable port.
-	 * False if no MST sink/branch devices is connected.
+	 * @mst_state: If this manager is enabled for an MST capable port. False
+	 * if no MST sink/branch devices is connected.
 	 */
-	bool mst_state : 1;
-
-	/**
-	 * @payload_id_table_cleared: Whether or not we've cleared the payload
-	 * ID table for @mst_primary. Protected by @lock.
-	 */
-	bool payload_id_table_cleared : 1;
-
+	bool mst_state;
 	/**
 	 * @mst_primary: Pointer to the primary/first branch device.
 	 */
@@ -529,11 +536,12 @@ struct drm_dp_mst_topology_mgr {
 	const struct drm_private_state_funcs *funcs;
 
 	/**
-	 * @qlock: protects @tx_msg_downq and &drm_dp_sideband_msg_tx.state
+	 * @qlock: protects @tx_msg_downq, the &drm_dp_mst_branch.txslost and
+	 * &drm_dp_sideband_msg_tx.state once they are queued
 	 */
 	struct mutex qlock;
 	/**
-	 * @tx_msg_downq: List of pending down requests
+	 * @tx_msg_downq: List of pending down replies.
 	 */
 	struct list_head tx_msg_downq;
 
@@ -642,7 +650,19 @@ void drm_dp_mst_dump_topology(struct seq_file *m,
 			      struct drm_dp_mst_topology_mgr *mgr);
 
 void drm_dp_mst_topology_mgr_suspend(struct drm_dp_mst_topology_mgr *mgr);
-int drm_dp_mst_topology_mgr_resume(struct drm_dp_mst_topology_mgr *mgr);
+int __must_check
+drm_dp_mst_topology_mgr_resume(struct drm_dp_mst_topology_mgr *mgr);
+
+ssize_t drm_dp_mst_dpcd_read(struct drm_dp_aux *aux,
+			     unsigned int offset, void *buffer, size_t size);
+ssize_t drm_dp_mst_dpcd_write(struct drm_dp_aux *aux,
+			      unsigned int offset, void *buffer, size_t size);
+
+int drm_dp_mst_connector_late_register(struct drm_connector *connector,
+				       struct drm_dp_mst_port *port);
+void drm_dp_mst_connector_early_unregister(struct drm_connector *connector,
+					   struct drm_dp_mst_port *port);
+
 struct drm_dp_mst_topology_state *drm_atomic_get_mst_topology_state(struct drm_atomic_state *state,
 								    struct drm_dp_mst_topology_mgr *mgr);
 int __must_check

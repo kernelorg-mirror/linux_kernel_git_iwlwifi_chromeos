@@ -116,8 +116,10 @@ restart:
 				vfsmnt = &mnt->mnt;
 				continue;
 			}
-			if (!error)
-				error = is_mounted(vfsmnt) ? 1 : 2;
+			if (is_mounted(vfsmnt) && !is_anon_ns(mnt->mnt_ns))
+				error = 1;	// absolute root
+			else
+				error = 2;	// detached or not attached yet
 			break;
 		}
 		parent = dentry->d_parent;
@@ -204,7 +206,6 @@ char *d_absolute_path(const struct path *path,
 		return ERR_PTR(error);
 	return res;
 }
-EXPORT_SYMBOL(d_absolute_path);
 
 /*
  * same as __d_path but appends "(deleted)" for unlinked files.
@@ -317,7 +318,6 @@ char *simple_dname(struct dentry *dentry, char *buffer, int buflen)
 		end = ERR_PTR(-ENAMETOOLONG);
 	return end;
 }
-EXPORT_SYMBOL(simple_dname);
 
 /*
  * Write full pathname from the root of the filesystem into the buffer.

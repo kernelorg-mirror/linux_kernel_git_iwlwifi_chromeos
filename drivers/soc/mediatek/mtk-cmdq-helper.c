@@ -59,10 +59,7 @@ static void cmdq_client_timeout(struct timer_list *t)
 {
 	struct cmdq_client *client = from_timer(client, t, timer);
 
-	WARN_ONCE(1, "cmdq timeout!\n");
-#ifdef CONFIG_MTK_CMDQ_DEBUG
-	mbox_free_channel(client->chan);
-#endif
+	dev_err(client->client.dev, "cmdq timeout!\n");
 }
 
 struct cmdq_client *cmdq_mbox_create(struct device *dev, int index, u32 timeout)
@@ -81,8 +78,8 @@ struct cmdq_client *cmdq_mbox_create(struct device *dev, int index, u32 timeout)
 	client->pkt_cnt = 0;
 	client->client.dev = dev;
 	client->client.tx_block = false;
+	client->client.knows_txdone = true;
 	client->chan = mbox_request_channel(&client->client, index);
-	mutex_init(&client->mutex);
 
 	if (IS_ERR(client->chan)) {
 		long err;
@@ -354,11 +351,11 @@ int cmdq_pkt_flush_async(struct cmdq_pkt *pkt, cmdq_async_flush_cb cb,
 		spin_unlock_irqrestore(&client->lock, flags);
 	}
 
-	mutex_lock(&client->mutex);
-	mbox_send_message(client->chan, pkt);
+	err = mbox_send_message(client->chan, pkt);
+	if (err < 0)
+		return err;
 	/* We can send next packet immediately, so just call txdone. */
 	mbox_client_txdone(client->chan, 0);
-	mutex_unlock(&client->mutex);
 
 	return 0;
 }

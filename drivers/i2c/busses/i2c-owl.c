@@ -87,9 +87,6 @@
 
 #define OWL_I2C_MAX_RETRIES	50
 
-#define OWL_I2C_DEF_SPEED_HZ	100000
-#define OWL_I2C_MAX_SPEED_HZ	400000
-
 struct owl_i2c_dev {
 	struct i2c_adapter	adap;
 	struct i2c_msg		*msg;
@@ -419,11 +416,11 @@ static int owl_i2c_probe(struct platform_device *pdev)
 
 	if (of_property_read_u32(dev->of_node, "clock-frequency",
 				 &i2c_dev->bus_freq))
-		i2c_dev->bus_freq = OWL_I2C_DEF_SPEED_HZ;
+		i2c_dev->bus_freq = I2C_MAX_STANDARD_MODE_FREQ;
 
 	/* We support only frequencies of 100k and 400k for now */
-	if (i2c_dev->bus_freq != OWL_I2C_DEF_SPEED_HZ &&
-	    i2c_dev->bus_freq != OWL_I2C_MAX_SPEED_HZ) {
+	if (i2c_dev->bus_freq != I2C_MAX_STANDARD_MODE_FREQ &&
+	    i2c_dev->bus_freq != I2C_MAX_FAST_MODE_FREQ) {
 		dev_err(dev, "invalid clock-frequency %d\n", i2c_dev->bus_freq);
 		return -EINVAL;
 	}
@@ -475,6 +472,7 @@ disable_clk:
 }
 
 static const struct of_device_id owl_i2c_of_match[] = {
+	{ .compatible = "actions,s700-i2c" },
 	{ .compatible = "actions,s900-i2c" },
 	{ /* sentinel */ }
 };

@@ -11,6 +11,15 @@
 #include <asm/msr-index.h>
 
 /*
+ * This should be used immediately before a retpoline alternative. It tells
+ * objtool where the retpolines are so that it can make sense of the control
+ * flow by just reading the original instruction(s) and ignoring the
+ * alternatives.
+ */
+#define ANNOTATE_NOSPEC_ALTERNATIVE \
+	ANNOTATE_IGNORE_ALTERNATIVE
+
+/*
  * Fill the CPU return stack buffer.
  *
  * Each entry in the RSB, if used for a speculative 'ret', contains an
@@ -55,19 +64,6 @@
 	add	$(BITS_PER_LONG/8) * nr, sp;
 
 #ifdef __ASSEMBLY__
-
-/*
- * This should be used immediately before a retpoline alternative.  It tells
- * objtool where the retpolines are so that it can make sense of the control
- * flow by just reading the original instruction(s) and ignoring the
- * alternatives.
- */
-.macro ANNOTATE_NOSPEC_ALTERNATIVE
-	.Lannotate_\@:
-	.pushsection .discard.nospec
-	.long .Lannotate_\@ - .
-	.popsection
-.endm
 
 /*
  * This should be used immediately before an indirect jump/call. It tells
@@ -151,12 +147,6 @@
 .endm
 
 #else /* __ASSEMBLY__ */
-
-#define ANNOTATE_NOSPEC_ALTERNATIVE				\
-	"999:\n\t"						\
-	".pushsection .discard.nospec\n\t"			\
-	".long 999b - .\n\t"					\
-	".popsection\n\t"
 
 #define ANNOTATE_RETPOLINE_SAFE					\
 	"999:\n\t"						\
@@ -364,8 +354,14 @@ static inline void mds_user_clear_cpu_buffers(void)
  */
 static inline void mds_idle_clear_cpu_buffers(void)
 {
+	/*
+	 * Core-scheduling already protects from cross-HT MDS.
+	 * Clearing CPU buffers on idle is not needed.
+	 */
+#ifndef CONFIG_SCHED_CORE
 	if (static_branch_likely(&mds_idle_clear))
 		mds_clear_cpu_buffers();
+#endif
 }
 
 #endif /* __ASSEMBLY__ */

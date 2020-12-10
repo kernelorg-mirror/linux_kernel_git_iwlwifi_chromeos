@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  Implementation of primary alsa driver code base for Intel HD Audio.
@@ -6,18 +7,6 @@
  *
  *  Copyright (c) 2004 Takashi Iwai <tiwai@suse.de>
  *                     PeiSen Hou <pshou@realtek.com.tw>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the Free
- *  Software Foundation; either version 2 of the License, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
- *
- *
  */
 
 #include <linux/clocksource.h>
@@ -712,7 +701,6 @@ static const struct snd_pcm_ops azx_pcm_ops = {
 	.pointer = azx_pcm_pointer,
 	.get_time_info =  azx_get_time_info,
 	.mmap = azx_pcm_mmap,
-	.page = snd_pcm_sgbuf_ops_page,
 };
 
 static void azx_pcm_free(struct snd_pcm *pcm)
@@ -805,6 +793,7 @@ static int azx_rirb_get_response(struct hdac_bus *bus, unsigned int addr,
 	unsigned long timeout;
 	unsigned long loopcounter;
 	int do_poll = 0;
+	bool warned = false;
 
  again:
 	timeout = jiffies + msecs_to_jiffies(1000);
@@ -824,9 +813,17 @@ static int azx_rirb_get_response(struct hdac_bus *bus, unsigned int addr,
 		spin_unlock_irq(&bus->reg_lock);
 		if (time_after(jiffies, timeout))
 			break;
-		if (hbus->needs_damn_long_delay || loopcounter > 3000)
+#define LOOP_COUNT_MAX	3000
+		if (hbus->needs_damn_long_delay ||
+		    loopcounter > LOOP_COUNT_MAX) {
+			if (loopcounter > LOOP_COUNT_MAX && !warned) {
+				dev_dbg_ratelimited(chip->card->dev,
+						    "too slow response, last cmd=%#08x\n",
+						    bus->last_cmd[addr]);
+				warned = true;
+			}
 			msleep(2); /* temporary workaround */
-		else {
+		} else {
 			udelay(10);
 			cond_resched();
 		}
@@ -1220,27 +1217,6 @@ void snd_hda_bus_reset(struct hda_bus *bus)
 	bus->in_reset = 0;
 }
 
-static int get_jackpoll_interval(struct azx *chip)
-{
-	int i;
-	unsigned int j;
-
-	if (!chip->jackpoll_ms)
-		return 0;
-
-	i = chip->jackpoll_ms[chip->dev_index];
-	if (i == 0)
-		return 0;
-	if (i < 50 || i > 60000)
-		j = 0;
-	else
-		j = msecs_to_jiffies(i);
-	if (j == 0)
-		dev_warn(chip->card->dev,
-			 "jackpoll_ms value out of range: %d\n", i);
-	return j;
-}
-
 /* HD-audio bus initialization */
 int azx_bus_init(struct azx *chip, const char *model)
 {
@@ -1321,7 +1297,7 @@ int azx_probe_codecs(struct azx *chip, unsigned int max_slots)
 			err = snd_hda_codec_new(&chip->bus, chip->card, c, &codec);
 			if (err < 0)
 				continue;
-			codec->jackpoll_interval = get_jackpoll_interval(chip);
+			codec->jackpoll_interval = chip->jackpoll_interval;
 			codec->beep_mode = chip->beep_mode;
 			codecs++;
 		}

@@ -26,7 +26,9 @@
 #include <linux/pci.h>
 #include <linux/virtio.h>
 #include <linux/virtio_config.h>
-#include <drm/drmP.h>
+
+#include <drm/drm_file.h>
+
 #include "virtgpu_drv.h"
 
 static void virtio_gpu_config_changed_work_func(struct work_struct *work)
@@ -134,6 +136,7 @@ int virtio_gpu_init(struct drm_device *dev)
 
 	spin_lock_init(&vgdev->display_info_lock);
 	spin_lock_init(&vgdev->request_idr_lock);
+	spin_lock_init(&vgdev->resource_export_lock);
 	ida_init(&vgdev->ctx_id_ida);
 	ida_init(&vgdev->resource_ida);
 	idr_init(&vgdev->request_idr);
@@ -160,28 +163,29 @@ int virtio_gpu_init(struct drm_device *dev)
 		vgdev->has_edid = true;
 		DRM_INFO("EDID support available.\n");
 	}
+	if (virtio_has_feature(vgdev->vdev, VIRTIO_GPU_F_RESOURCE_UUID)) {
+		vgdev->has_resource_assign_uuid = true;
+		DRM_INFO("Virtio cross device support available.\n");
+	}
 
-	if (virtio_has_feature(vgdev->vdev, VIRTIO_GPU_F_RESOURCE_V2)) {
-		if (virtio_has_feature(vgdev->vdev, VIRTIO_GPU_F_HOST_COHERENT)) {
-			vgdev->cbar = 4;
-			vgdev->caddr = pci_resource_start(dev->pdev, vgdev->cbar);
-			vgdev->csize = pci_resource_len(dev->pdev, vgdev->cbar);
-			ret = pci_request_region(dev->pdev, vgdev->cbar, "virtio-gpu-coherent");
-			if (ret != 0) {
-				DRM_WARN("Cannot request coherent memory bar\n");
-			} else {
-				DRM_INFO("coherent host resources enabled, using %s bar %d,"
-					 "at 0x%lx, size %ld MB", dev_name(&dev->pdev->dev),
-					vgdev->cbar, vgdev->caddr, vgdev->csize >> 20);
+	if (virtio_has_feature(vgdev->vdev, VIRTIO_GPU_F_RESOURCE_BLOB)) {
+		vgdev->cbar = 4;
+		vgdev->caddr = pci_resource_start(dev->pdev, vgdev->cbar);
+		vgdev->csize = pci_resource_len(dev->pdev, vgdev->cbar);
+		ret = pci_request_region(dev->pdev, vgdev->cbar, "virtio-gpu-coherent");
+		if (ret != 0) {
+			DRM_WARN("Cannot request coherent memory bar\n");
+		} else {
+			DRM_INFO("coherent host resources enabled, using %s bar %d,"
+				 "at 0x%lx, size %ld MB", dev_name(&dev->pdev->dev),
+				vgdev->cbar, vgdev->caddr, vgdev->csize >> 20);
 
-				vgdev->has_host_coherent = true;
-			}
+			vgdev->has_host_visible = true;
 		}
 
-		if (virtio_has_feature(vgdev->vdev, VIRTIO_GPU_F_SHARED_GUEST))
-			vgdev->has_shared_guest = true;
-
-		vgdev->has_resource_v2 = true;
+		vgdev->has_resource_blob = true;
+		DRM_INFO("resource_blob: %u, host visible %u\n",
+			  vgdev->has_resource_blob, vgdev->has_host_visible);
 	}
 
 	ret = virtio_find_vqs(vgdev->vdev, 2, vqs, callbacks, names, NULL);

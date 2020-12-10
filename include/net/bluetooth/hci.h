@@ -306,6 +306,7 @@ enum {
 	HCI_FORCE_STATIC_ADDR,
 	HCI_LL_RPA_RESOLUTION,
 	HCI_CMD_PENDING,
+	HCI_FORCE_NO_MITM,
 
 	__HCI_NUM_FLAGS,
 };
@@ -1184,6 +1185,26 @@ struct hci_cp_write_sc_support {
 	__u8	support;
 } __packed;
 
+#define HCI_OP_READ_AUTH_PAYLOAD_TO    0x0c7b
+struct hci_cp_read_auth_payload_to {
+	__le16  handle;
+} __packed;
+struct hci_rp_read_auth_payload_to {
+	__u8    status;
+	__le16  handle;
+	__le16  timeout;
+} __packed;
+
+#define HCI_OP_WRITE_AUTH_PAYLOAD_TO    0x0c7c
+struct hci_cp_write_auth_payload_to {
+	__le16  handle;
+	__le16  timeout;
+} __packed;
+struct hci_rp_write_auth_payload_to {
+	__u8    status;
+	__le16  handle;
+} __packed;
+
 #define HCI_OP_READ_LOCAL_OOB_EXT_DATA	0x0c7d
 struct hci_rp_read_local_oob_ext_data {
 	__u8     status;
@@ -1576,6 +1597,20 @@ struct hci_rp_le_read_def_data_len {
 struct hci_cp_le_write_def_data_len {
 	__le16	tx_len;
 	__le16	tx_time;
+} __packed;
+
+#define HCI_OP_LE_ADD_TO_RESOLV_LIST	0x2027
+struct hci_cp_le_add_to_resolv_list {
+	__u8	 bdaddr_type;
+	bdaddr_t bdaddr;
+	__u8	 peer_irk[16];
+	__u8	 local_irk[16];
+} __packed;
+
+#define HCI_OP_LE_DEL_FROM_RESOLV_LIST	0x2028
+struct hci_cp_le_del_from_resolv_list {
+	__u8	 bdaddr_type;
+	bdaddr_t bdaddr;
 } __packed;
 
 #define HCI_OP_LE_CLEAR_RESOLV_LIST	0x2029

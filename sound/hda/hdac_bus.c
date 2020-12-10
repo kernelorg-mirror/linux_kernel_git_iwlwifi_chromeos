@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * HD-audio core bus driver
  */
@@ -8,7 +9,10 @@
 #include <linux/module.h>
 #include <linux/export.h>
 #include <sound/hdaudio.h>
+#include "local.h"
 #include "trace.h"
+
+static void snd_hdac_bus_process_unsol_events(struct work_struct *work);
 
 static const struct hdac_bus_ops default_ops = {
 	.command = snd_hdac_bus_send_cmd,
@@ -38,7 +42,20 @@ int snd_hdac_bus_init(struct hdac_bus *bus, struct device *dev,
 	spin_lock_init(&bus->reg_lock);
 	mutex_init(&bus->cmd_mutex);
 	mutex_init(&bus->lock);
+	INIT_LIST_HEAD(&bus->hlink_list);
 	bus->irq = -1;
+
+	/*
+	 * Default value of '8' is as per the HD audio specification (Rev 1.0a).
+	 * Following relation is used to derive STRIPE control value.
+	 *  For sample rate <= 48K:
+	 *   { ((num_channels * bits_per_sample) / number of SDOs) >= 8 }
+	 *  For sample rate > 48K:
+	 *   { ((num_channels * bits_per_sample * rate/48000) /
+	 *	number of SDOs) >= 8 }
+	 */
+	bus->sdo_limit = 8;
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_hdac_bus_init);
@@ -146,7 +163,7 @@ EXPORT_SYMBOL_GPL(snd_hdac_bus_queue_event);
 /*
  * process queued unsolicited events
  */
-void snd_hdac_bus_process_unsol_events(struct work_struct *work)
+static void snd_hdac_bus_process_unsol_events(struct work_struct *work)
 {
 	struct hdac_bus *bus = container_of(work, struct hdac_bus, unsol_work);
 	struct hdac_device *codec;
@@ -169,7 +186,6 @@ void snd_hdac_bus_process_unsol_events(struct work_struct *work)
 			drv->unsol_event(codec, res);
 	}
 }
-EXPORT_SYMBOL_GPL(snd_hdac_bus_process_unsol_events);
 
 /**
  * snd_hdac_bus_add_device - Add a codec to bus
@@ -194,7 +210,6 @@ int snd_hdac_bus_add_device(struct hdac_bus *bus, struct hdac_device *codec)
 	bus->num_codecs++;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(snd_hdac_bus_add_device);
 
 /**
  * snd_hdac_bus_remove_device - Remove a codec from bus
@@ -213,7 +228,6 @@ void snd_hdac_bus_remove_device(struct hdac_bus *bus,
 	bus->num_codecs--;
 	flush_work(&bus->unsol_work);
 }
-EXPORT_SYMBOL_GPL(snd_hdac_bus_remove_device);
 
 #ifdef CONFIG_SND_HDA_ALIGNED_MMIO
 /* Helpers for aligned read/write of mmio space, for Tegra */

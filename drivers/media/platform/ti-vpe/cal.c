@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI CAL camera interface driver
  *
  * Copyright (c) 2015 Texas Instruments Inc.
  * Benoit Parrot, <bparrot@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation
  */
 
 #include <linux/interrupt.h>
@@ -268,8 +265,6 @@ struct cal_ctx {
 	struct v4l2_async_notifier notifier;
 	struct v4l2_subdev	*sensor;
 	struct v4l2_fwnode_endpoint	endpoint;
-
-	struct v4l2_async_subdev asd;
 
 	struct v4l2_fh		fh;
 	struct cal_dev		*dev;
@@ -916,9 +911,6 @@ static int cal_querycap(struct file *file, void *priv,
 
 	snprintf(cap->bus_info, sizeof(cap->bus_info),
 		 "platform:%s", ctx->v4l2_dev.name);
-	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
-			    V4L2_CAP_READWRITE;
-	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
 	return 0;
 }
 
@@ -1422,6 +1414,8 @@ static const struct video_device cal_videodev = {
 	.ioctl_ops	= &cal_ioctl_ops,
 	.minor		= -1,
 	.release	= video_device_release_empty,
+	.device_caps	= V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
+			  V4L2_CAP_READWRITE,
 };
 
 /* -----------------------------------------------------------------
@@ -1616,6 +1610,7 @@ of_get_next_port(const struct device_node *parent,
 			}
 			prev = port;
 		} while (!of_node_name_eq(port, "port"));
+		of_node_put(ports);
 	}
 
 	return port;
@@ -1643,8 +1638,7 @@ of_get_next_endpoint(const struct device_node *parent,
 static int of_cal_create_instance(struct cal_ctx *ctx, int inst)
 {
 	struct platform_device *pdev = ctx->dev->pdev;
-	struct device_node *ep_node, *port, *remote_ep,
-			*sensor_node, *parent;
+	struct device_node *ep_node, *port, *sensor_node, *parent;
 	struct v4l2_fwnode_endpoint *endpoint;
 	struct v4l2_async_subdev *asd;
 	u32 regval = 0;
@@ -1652,12 +1646,10 @@ static int of_cal_create_instance(struct cal_ctx *ctx, int inst)
 
 	parent = pdev->dev.of_node;
 
-	asd = &ctx->asd;
 	endpoint = &ctx->endpoint;
 
 	ep_node = NULL;
 	port = NULL;
-	remote_ep = NULL;
 	sensor_node = NULL;
 	ret = -EINVAL;
 
@@ -1700,19 +1692,12 @@ static int of_cal_create_instance(struct cal_ctx *ctx, int inst)
 		ctx_dbg(3, ctx, "can't get remote parent\n");
 		goto cleanup_exit;
 	}
-	asd->match_type = V4L2_ASYNC_MATCH_FWNODE;
-	asd->match.fwnode = of_fwnode_handle(sensor_node);
 
-	remote_ep = of_graph_get_remote_endpoint(ep_node);
-	if (!remote_ep) {
-		ctx_dbg(3, ctx, "can't get remote-endpoint\n");
-		goto cleanup_exit;
-	}
-	v4l2_fwnode_endpoint_parse(of_fwnode_handle(remote_ep), endpoint);
+	v4l2_fwnode_endpoint_parse(of_fwnode_handle(ep_node), endpoint);
 
 	if (endpoint->bus_type != V4L2_MBUS_CSI2_DPHY) {
-		ctx_err(ctx, "Port:%d sub-device %s is not a CSI2 device\n",
-			inst, sensor_node->name);
+		ctx_err(ctx, "Port:%d sub-device %pOFn is not a CSI2 device\n",
+			inst, sensor_node);
 		goto cleanup_exit;
 	}
 
@@ -1731,14 +1716,22 @@ static int of_cal_create_instance(struct cal_ctx *ctx, int inst)
 			endpoint->bus.mipi_csi2.data_lanes[lane]);
 	ctx_dbg(3, ctx, "\t>\n");
 
-	ctx_dbg(1, ctx, "Port: %d found sub-device %s\n",
-		inst, sensor_node->name);
+	ctx_dbg(1, ctx, "Port: %d found sub-device %pOFn\n",
+		inst, sensor_node);
 
 	v4l2_async_notifier_init(&ctx->notifier);
+
+	asd = kzalloc(sizeof(*asd), GFP_KERNEL);
+	if (!asd)
+		goto cleanup_exit;
+
+	asd->match_type = V4L2_ASYNC_MATCH_FWNODE;
+	asd->match.fwnode = of_fwnode_handle(sensor_node);
 
 	ret = v4l2_async_notifier_add_subdev(&ctx->notifier, asd);
 	if (ret) {
 		ctx_err(ctx, "Error adding asd\n");
+		kfree(asd);
 		goto cleanup_exit;
 	}
 
@@ -1759,14 +1752,9 @@ static int of_cal_create_instance(struct cal_ctx *ctx, int inst)
 	sensor_node = NULL;
 
 cleanup_exit:
-	if (remote_ep)
-		of_node_put(remote_ep);
-	if (sensor_node)
-		of_node_put(sensor_node);
-	if (ep_node)
-		of_node_put(ep_node);
-	if (port)
-		of_node_put(port);
+	of_node_put(sensor_node);
+	of_node_put(ep_node);
+	of_node_put(port);
 
 	return ret;
 }

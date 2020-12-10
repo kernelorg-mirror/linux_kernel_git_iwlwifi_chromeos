@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Gas Gauge driver for SBS Compliant Batteries
  *
  * Copyright (c) 2010, NVIDIA Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/delay.h>
@@ -52,6 +43,8 @@ enum {
 	REG_MANUFACTURER,
 	REG_MODEL_NAME,
 };
+
+#define REG_ADDR_MANUFACTURE_DATE	0x1B
 
 /* Battery Mode defines */
 #define BATTERY_MODE_OFFSET		0x03
@@ -152,6 +145,9 @@ static enum power_supply_property sbs_properties[] = {
 	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+	POWER_SUPPLY_PROP_MANUFACTURE_YEAR,
+	POWER_SUPPLY_PROP_MANUFACTURE_MONTH,
+	POWER_SUPPLY_PROP_MANUFACTURE_DAY,
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_PROP_MANUFACTURER,
 	POWER_SUPPLY_PROP_MODEL_NAME
@@ -610,6 +606,38 @@ static int sbs_get_property_index(struct i2c_client *client,
 	return -EINVAL;
 }
 
+static int sbs_get_battery_manufacture_date(struct i2c_client *client,
+	enum power_supply_property psp,
+	union power_supply_propval *val)
+{
+	int ret;
+	u16 day, month, year;
+
+	ret = sbs_read_word_data(client, REG_ADDR_MANUFACTURE_DATE);
+	if (ret < 0)
+		return ret;
+
+	day   = ret   & GENMASK(4,  0);
+	month = (ret  & GENMASK(8,  5)) >> 5;
+	year  = ((ret & GENMASK(15, 9)) >> 9) + 1980;
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_MANUFACTURE_YEAR:
+		val->intval = year;
+		break;
+	case POWER_SUPPLY_PROP_MANUFACTURE_MONTH:
+		val->intval = month;
+		break;
+	case POWER_SUPPLY_PROP_MANUFACTURE_DAY:
+		val->intval = day;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int sbs_get_property(struct power_supply *psy,
 	enum power_supply_property psp,
 	union power_supply_propval *val)
@@ -709,6 +737,12 @@ static int sbs_get_property(struct power_supply *psy,
 		ret = sbs_get_battery_string_property(client, ret, psp,
 						      manufacturer);
 		val->strval = manufacturer;
+		break;
+
+	case POWER_SUPPLY_PROP_MANUFACTURE_YEAR:
+	case POWER_SUPPLY_PROP_MANUFACTURE_MONTH:
+	case POWER_SUPPLY_PROP_MANUFACTURE_DAY:
+		ret = sbs_get_battery_manufacture_date(client, psp, val);
 		break;
 
 	default:

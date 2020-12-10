@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * devfreq: Generic Dynamic Voltage and Frequency Scaling (DVFS) Framework
  *	    for Non-CPU Devices.
  *
  * Copyright (C) 2011 Samsung Electronics
  *	MyungJoo Ham <myungjoo.ham@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __LINUX_DEVFREQ_H__
@@ -119,7 +116,6 @@ struct devfreq_dev_profile {
  * @profile:	device-specific devfreq profile
  * @governor:	method how to choose frequency based on the usage.
  * @governor_name:	devfreq governor name for use with this devfreq
- * @opp_table:	Reference to OPP table of dev.parent, if one exists.
  * @nb:		notifier block used to notify devfreq object that it should
  *		reevaluate operable frequencies. Devfreq users may use
  *		devfreq.nb to the corresponding register notifier call chain.
@@ -157,7 +153,6 @@ struct devfreq {
 	struct devfreq_dev_profile *profile;
 	const struct devfreq_governor *governor;
 	char governor_name[DEVFREQ_NAME_LEN];
-	struct opp_table *opp_table;
 	struct notifier_block nb;
 	struct delayed_work work;
 
@@ -206,6 +201,17 @@ extern void devm_devfreq_remove_device(struct device *dev,
 /* Supposed to be called by PM callbacks */
 extern int devfreq_suspend_device(struct devfreq *devfreq);
 extern int devfreq_resume_device(struct devfreq *devfreq);
+
+extern void devfreq_suspend(void);
+extern void devfreq_resume(void);
+
+/**
+ * update_devfreq() - Reevaluate the device and configure frequency
+ * @devfreq:	the devfreq device
+ *
+ * Note: devfreq->lock must be held
+ */
+extern int update_devfreq(struct devfreq *devfreq);
 
 /* Helper functions for devfreq user device driver with OPP. */
 extern struct dev_pm_opp *devfreq_recommended_opp(struct device *dev,
@@ -257,32 +263,6 @@ struct devfreq_simple_ondemand_data {
 
 #if IS_ENABLED(CONFIG_DEVFREQ_GOV_PASSIVE)
 /**
- * struct devfreq_cpu_state - holds the per-cpu state
- * @freq:	the current frequency of the cpu.
- * @min_freq:	the min frequency of the cpu.
- * @max_freq:	the max frequency of the cpu.
- * @first_cpu:	the cpumask of the first cpu of a policy.
- * @dev:	reference to cpu device.
- * @opp_table:	reference to cpu opp table.
- *
- * This structure stores the required cpu_state of a cpu.
- * This is auto-populated by the governor.
- */
-struct devfreq_cpu_state {
-	unsigned int freq;
-	unsigned int min_freq;
-	unsigned int max_freq;
-	unsigned int first_cpu;
-	struct device *dev;
-	struct opp_table *opp_table;
-};
-
-enum devfreq_parent_dev_type {
-	DEVFREQ_PARENT_DEV,
-	CPUFREQ_PARENT_DEV,
-};
-
-/**
  * struct devfreq_passive_data - void *data fed to struct devfreq
  *	and devfreq_add_device
  * @parent:	the devfreq instance of parent device.
@@ -293,15 +273,13 @@ enum devfreq_parent_dev_type {
  *			using governors except for passive governor.
  *			If the devfreq device has the specific method to decide
  *			the next frequency, should use this callback.
- * @parent_type		parent type of the device
- * @this:		the devfreq instance of own device.
- * @nb:			the notifier block for DEVFREQ_TRANSITION_NOTIFIER list
- * @cpu_state:		the state min/max/current frequency of all online cpu's
+ * @this:	the devfreq instance of own device.
+ * @nb:		the notifier block for DEVFREQ_TRANSITION_NOTIFIER list
  *
  * The devfreq_passive_data have to set the devfreq instance of parent
  * device with governors except for the passive governor. But, don't need to
- * initialize the 'this', 'nb' and 'cpu_state' field because the devfreq core
- * will handle them.
+ * initialize the 'this' and 'nb' field because the devfreq core will handle
+ * them.
  */
 struct devfreq_passive_data {
 	/* Should set the devfreq instance of parent device */
@@ -310,13 +288,9 @@ struct devfreq_passive_data {
 	/* Optional callback to decide the next frequency of passvice device */
 	int (*get_target_freq)(struct devfreq *this, unsigned long *freq);
 
-	/* Should set the type of parent device */
-	enum devfreq_parent_dev_type parent_type;
-
 	/* For passive governor's internal use. Don't need to set them */
 	struct devfreq *this;
 	struct notifier_block nb;
-	struct devfreq_cpu_state *cpu_state[NR_CPUS];
 };
 #endif
 
@@ -356,6 +330,9 @@ static inline int devfreq_resume_device(struct devfreq *devfreq)
 {
 	return 0;
 }
+
+static inline void devfreq_suspend(void) {}
+static inline void devfreq_resume(void) {}
 
 static inline struct dev_pm_opp *devfreq_recommended_opp(struct device *dev,
 					   unsigned long *freq, u32 flags)
