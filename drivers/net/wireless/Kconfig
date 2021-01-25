@@ -125,4 +125,5 @@ config VIRT_WIFI
 	  are wifi connections through a special rtnetlink device.
 
 source "drivers/net/wireless/iwl7000/Kconfig"
+
 endif # WLAN
