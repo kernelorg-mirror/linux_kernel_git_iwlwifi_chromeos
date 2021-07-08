@@ -9,7 +9,7 @@
 #include "../mt76.h"
 #include "regs.h"
 
-#define MT7915_MAX_INTERFACES		4
+#define MT7915_MAX_INTERFACES		32
 #define MT7915_MAX_WMM_SETS		4
 #define MT7915_WTBL_SIZE		288
 #define MT7915_WTBL_RESERVED		(MT7915_WTBL_SIZE - 1)
@@ -113,7 +113,7 @@ struct mt7915_phy {
 	struct ieee80211_sband_iftype_data iftype[2][NUM_NL80211_IFTYPES];
 
 	u32 rxfilter;
-	u32 omac_mask;
+	u64 omac_mask;
 
 	u16 noise;
 	u16 chainmask;
@@ -171,24 +171,13 @@ enum {
 	HW_BSSID_1,
 	HW_BSSID_2,
 	HW_BSSID_3,
-	HW_BSSID_MAX,
+	HW_BSSID_MAX = HW_BSSID_3,
 	EXT_BSSID_START = 0x10,
 	EXT_BSSID_1,
-	EXT_BSSID_2,
-	EXT_BSSID_3,
-	EXT_BSSID_4,
-	EXT_BSSID_5,
-	EXT_BSSID_6,
-	EXT_BSSID_7,
-	EXT_BSSID_8,
-	EXT_BSSID_9,
-	EXT_BSSID_10,
-	EXT_BSSID_11,
-	EXT_BSSID_12,
-	EXT_BSSID_13,
-	EXT_BSSID_14,
-	EXT_BSSID_15,
-	EXT_BSSID_END
+	EXT_BSSID_15 = 0x1f,
+	EXT_BSSID_MAX = EXT_BSSID_15,
+	REPEATER_BSSID_START = 0x20,
+	REPEATER_BSSID_MAX = 0x3f,
 };
 
 enum {
@@ -281,7 +270,7 @@ int mt7915_dma_init(struct mt7915_dev *dev);
 void mt7915_dma_prefetch(struct mt7915_dev *dev);
 void mt7915_dma_cleanup(struct mt7915_dev *dev);
 int mt7915_mcu_init(struct mt7915_dev *dev);
-int mt7915_mcu_add_dev_info(struct mt7915_dev *dev,
+int mt7915_mcu_add_dev_info(struct mt7915_phy *phy,
 			    struct ieee80211_vif *vif, bool enable);
 int mt7915_mcu_add_bss_info(struct mt7915_phy *phy,
 			    struct ieee80211_vif *vif, int enable);
@@ -289,6 +278,9 @@ int mt7915_mcu_add_sta(struct mt7915_dev *dev, struct ieee80211_vif *vif,
 		       struct ieee80211_sta *sta, bool enable);
 int mt7915_mcu_add_sta_adv(struct mt7915_dev *dev, struct ieee80211_vif *vif,
 			   struct ieee80211_sta *sta, bool enable);
+int mt7915_mcu_sta_update_hdr_trans(struct mt7915_dev *dev,
+				    struct ieee80211_vif *vif,
+				    struct ieee80211_sta *sta);
 int mt7915_mcu_add_tx_ba(struct mt7915_dev *dev,
 			 struct ieee80211_ampdu_params *params,
 			 bool add);
@@ -327,8 +319,10 @@ int mt7915_mcu_set_pulse_th(struct mt7915_dev *dev,
 			    const struct mt7915_dfs_pulse *pulse);
 int mt7915_mcu_set_radar_th(struct mt7915_dev *dev, int index,
 			    const struct mt7915_dfs_pattern *pattern);
-int mt7915_mcu_get_rate_info(struct mt7915_dev *dev, u32 cmd, u16 wlan_idx);
 int mt7915_mcu_get_temperature(struct mt7915_dev *dev, int index);
+int mt7915_mcu_get_tx_rate(struct mt7915_dev *dev, u32 cmd, u16 wlan_idx);
+int mt7915_mcu_get_rx_rate(struct mt7915_phy *phy, struct ieee80211_vif *vif,
+			   struct ieee80211_sta *sta, struct rate_info *rate);
 int mt7915_mcu_rdd_cmd(struct mt7915_dev *dev, enum mt7915_rdd_cmd cmd,
 		       u8 index, u8 rx_sel, u8 val);
 int mt7915_mcu_fw_log_2_host(struct mt7915_dev *dev, u8 ctrl);
@@ -428,6 +422,7 @@ mt7915_l2_rmw(struct mt7915_dev *dev, u32 addr, u32 mask, u32 val)
 bool mt7915_mac_wtbl_update(struct mt7915_dev *dev, int idx, u32 mask);
 void mt7915_mac_reset_counters(struct mt7915_phy *phy);
 void mt7915_mac_cca_stats_reset(struct mt7915_phy *phy);
+void mt7915_mac_enable_nf(struct mt7915_dev *dev, bool ext_phy);
 void mt7915_mac_write_txwi(struct mt7915_dev *dev, __le32 *txwi,
 			   struct sk_buff *skb, struct mt76_wcid *wcid,
 			   struct ieee80211_key_conf *key, bool beacon);

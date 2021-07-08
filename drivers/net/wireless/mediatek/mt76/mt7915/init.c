@@ -43,8 +43,8 @@ static void mt7915_mac_init(struct mt7915_dev *dev)
 
 	mt76_rmw_field(dev, MT_DMA_DCR0, MT_DMA_DCR0_MAX_RX_LEN, 1536);
 	mt76_rmw_field(dev, MT_MDP_DCR1, MT_MDP_DCR1_MAX_RX_LEN, 1536);
-	/* enable rx rate report */
-	mt76_set(dev, MT_DMA_DCR0, MT_DMA_DCR0_RXD_G5_EN);
+	/* disable rx rate report by default due to hw issues */
+	mt76_clear(dev, MT_DMA_DCR0, MT_DMA_DCR0_RXD_G5_EN);
 	/* disable hardware de-agg */
 	mt76_clear(dev, MT_MDP_DCR0, MT_MDP_DCR0_DAMSDU_EN);
 
@@ -195,12 +195,14 @@ static const struct ieee80211_iface_limit if_limits[] = {
 		.max = 1,
 		.types = BIT(NL80211_IFTYPE_ADHOC)
 	}, {
-		.max = MT7915_MAX_INTERFACES,
+		.max = 16,
 		.types = BIT(NL80211_IFTYPE_AP) |
 #ifdef CONFIG_MAC80211_MESH
-			 BIT(NL80211_IFTYPE_MESH_POINT) |
+			 BIT(NL80211_IFTYPE_MESH_POINT)
 #endif
-			 BIT(NL80211_IFTYPE_STATION)
+	}, {
+		.max = MT7915_MAX_INTERFACES,
+		.types = BIT(NL80211_IFTYPE_STATION)
 	}
 };
 
@@ -208,7 +210,7 @@ static const struct ieee80211_iface_combination if_comb[] = {
 	{
 		.limits = if_limits,
 		.n_limits = ARRAY_SIZE(if_limits),
-		.max_interfaces = 4,
+		.max_interfaces = MT7915_MAX_INTERFACES,
 		.num_different_channels = 1,
 		.beacon_int_infra_match = true,
 		.radar_detect_widths = BIT(NL80211_CHAN_WIDTH_20_NOHT) |
@@ -261,6 +263,7 @@ mt7915_init_wiphy(struct ieee80211_hw *hw)
 	wiphy_ext_feature_set(wiphy, NL80211_EXT_FEATURE_VHT_IBSS);
 
 	ieee80211_hw_set(hw, HAS_RATE_CONTROL);
+	ieee80211_hw_set(hw, SUPPORTS_TX_ENCAP_OFFLOAD);
 
 	hw->max_tx_fragments = 4;
 }
@@ -342,7 +345,7 @@ mt7915_set_stream_he_txbf_caps(struct ieee80211_sta_he_cap *he_cap,
 	elem->phy_cap_info[4] |= IEEE80211_HE_PHY_CAP4_MU_BEAMFORMER;
 
 	/* num_snd_dim */
-	c = (nss - 1) | (max_t(int, mcs->tx_mcs_160, 1) << 3);
+	c = (nss - 1) | (max_t(int, le16_to_cpu(mcs->tx_mcs_160), 1) << 3);
 	elem->phy_cap_info[5] |= c;
 
 	c = IEEE80211_HE_PHY_CAP6_TRIG_SU_BEAMFORMING_FB |
@@ -354,35 +357,24 @@ mt7915_set_stream_he_txbf_caps(struct ieee80211_sta_he_cap *he_cap,
 }
 
 static void
-mt7915_gen_ppe_thresh(u8 *he_ppet)
+mt7915_gen_ppe_thresh(u8 *he_ppet, int nss)
 {
-	int ru, nss, max_nss = 1, max_ru = 3;
-	u8 bit = 7, ru_bit_mask = 0x7;
+	u8 i, ppet_bits, ppet_size, ru_bit_mask = 0x7; /* HE80 */
 	u8 ppet16_ppet8_ru3_ru0[] = {0x1c, 0xc7, 0x71};
 
-	he_ppet[0] = max_nss & IEEE80211_PPE_THRES_NSS_MASK;
-	he_ppet[0] |= (ru_bit_mask <<
-		       IEEE80211_PPE_THRES_RU_INDEX_BITMASK_POS) &
-			IEEE80211_PPE_THRES_RU_INDEX_BITMASK_MASK;
+	he_ppet[0] = FIELD_PREP(IEEE80211_PPE_THRES_NSS_MASK, nss - 1) |
+		     FIELD_PREP(IEEE80211_PPE_THRES_RU_INDEX_BITMASK_MASK,
+				ru_bit_mask);
 
-	for (nss = 0; nss <= max_nss; nss++) {
-		for (ru = 0; ru < max_ru; ru++) {
-			u8 val;
-			int i;
+	ppet_bits = IEEE80211_PPE_THRES_INFO_PPET_SIZE *
+		    nss * hweight8(ru_bit_mask) * 2;
+	ppet_size = DIV_ROUND_UP(ppet_bits, 8);
 
-			if (!(ru_bit_mask & BIT(ru)))
-				continue;
+	for (i = 0; i < ppet_size - 1; i++)
+		he_ppet[i + 1] = ppet16_ppet8_ru3_ru0[i % 3];
 
-			val = (ppet16_ppet8_ru3_ru0[nss] >> (ru * 6)) &
-			       0x3f;
-			val = ((val >> 3) & 0x7) | ((val & 0x7) << 3);
-			for (i = 5; i >= 0; i--) {
-				he_ppet[bit / 8] |=
-					((val >> i) & 0x1) << ((bit % 8));
-				bit++;
-			}
-		}
-	}
+	he_ppet[i + 1] = ppet16_ppet8_ru3_ru0[i % 3] &
+			 (0xff >> (8 - (ppet_bits - 1) % 8));
 }
 
 static int
@@ -513,7 +505,7 @@ mt7915_init_he_caps(struct mt7915_phy *phy, enum nl80211_band band,
 		memset(he_cap->ppe_thres, 0, sizeof(he_cap->ppe_thres));
 		if (he_cap_elem->phy_cap_info[6] &
 		    IEEE80211_HE_PHY_CAP6_PPE_THRESHOLD_PRESENT) {
-			mt7915_gen_ppe_thresh(he_cap->ppe_thres);
+			mt7915_gen_ppe_thresh(he_cap->ppe_thres, nss);
 		} else {
 			he_cap_elem->phy_cap_info[9] |=
 				IEEE80211_HE_PHY_CAP9_NOMIMAL_PKT_PADDING_16US;
