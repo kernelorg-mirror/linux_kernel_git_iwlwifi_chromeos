@@ -92,9 +92,6 @@ ieee80211_get_eht_iftype_cap(const struct ieee80211_supported_band *sband,
 #define cfg_eht_cap_has_eht(obj) (false && (obj))
 #define cfg_eht_cap_set_has_eht(obj, val) do { (void)obj; (void)val; } while (0)
 #define cfg_eht_cap(obj) ((struct ieee80211_sta_eht_cap *)((obj) ? NULL : NULL))
-
-/* mbssid was added in 5.18.0, so it's safe to return 0 prior to that version */
-#define ieee80211_get_mbssid_beacon_len(...) 0
 #else
 #define cfg_eht_cap_has_eht(obj) (obj)->eht_cap.has_eht
 #define cfg_eht_cap_set_has_eht(obj, val) (obj)->eht_cap.has_eht = val
@@ -988,6 +985,37 @@ reg_query_regdb_wmm(char *alpha2, int freq, u32 *ptr,
 	return -ENODATA;
 }
 #endif /* >= 4.5.0 && < 4.17.0 */
+
+#if CFG80211_VERSION < KERNEL_VERSION(99,0,0)
+/* not yet upstream */
+static inline int
+cfg80211_crypto_n_ciphers_group(struct cfg80211_crypto_settings *crypto)
+{
+	return 1;
+}
+
+static inline u32
+cfg80211_crypto_ciphers_group(struct cfg80211_crypto_settings *crypto,
+			      int idx)
+{
+	WARN_ON(idx != 0);
+	return crypto->cipher_group;
+}
+
+#else
+static inline int
+cfg80211_crypto_n_ciphers_group(struct cfg80211_crypto_settings *crypto)
+{
+	return crypto->n_ciphers_group;
+}
+
+static inline u32
+cfg80211_crypto_ciphers_group(struct cfg80211_crypto_settings *crypto,
+			      int idx)
+{
+	return crypto->cipher_groups[idx];
+}
+#endif
 
 #ifndef VHT_MUMIMO_GROUPS_DATA_LEN
 #define VHT_MUMIMO_GROUPS_DATA_LEN (WLAN_MEMBERSHIP_LEN +\

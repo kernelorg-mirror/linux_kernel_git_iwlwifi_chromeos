@@ -126,9 +126,6 @@ static bool iwl_alive_fn(struct iwl_notif_wait_data *notif_wait,
 	u32 version = iwl_fw_lookup_notif_ver(mvm->fw, LEGACY_GROUP,
 					      UCODE_ALIVE_NTFY, 0);
 	u32 i;
-	struct iwl_trans *trans = mvm->trans;
-	enum iwl_device_family device_family = trans->trans_cfg->device_family;
-
 
 	if (version == 6) {
 		struct iwl_alive_ntf_v6 *palive;
@@ -237,8 +234,7 @@ static bool iwl_alive_fn(struct iwl_notif_wait_data *notif_wait,
 
 	if (umac_error_table) {
 		if (umac_error_table >=
-		    mvm->trans->cfg->min_umac_error_event_table ||
-		    device_family >= IWL_DEVICE_FAMILY_BZ) {
+		    mvm->trans->cfg->min_umac_error_event_table) {
 			iwl_fw_umac_set_alive_err_table(mvm->trans,
 							umac_error_table);
 		} else {
@@ -1868,8 +1864,6 @@ int iwl_mvm_up(struct iwl_mvm *mvm)
 #ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
 	iwl_mvm_send_system_features_control(mvm);
 #endif
-
-	iwl_mvm_mei_device_state(mvm, true);
 
 	IWL_DEBUG_INFO(mvm, "RT uCode started.\n");
 	return 0;

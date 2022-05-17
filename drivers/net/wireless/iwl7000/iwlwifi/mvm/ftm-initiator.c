@@ -1077,10 +1077,11 @@ static int iwl_mvm_ftm_range_resp_valid(struct iwl_mvm *mvm, u8 request_id,
 static void iwl_mvm_ftm_rtt_smoothing(struct iwl_mvm *mvm,
 				      struct cfg80211_pmsr_result *res)
 {
-	struct iwl_mvm_smooth_entry *resp = NULL, *iter;
+	struct iwl_mvm_smooth_entry *resp;
 	s64 rtt_avg, rtt = res->ftm.rtt_avg;
 	u32 undershoot, overshoot;
 	u8 alpha;
+	bool found;
 
 	if (!IWL_MVM_FTM_INITIATOR_ENABLE_SMOOTH)
 		return;
@@ -1094,14 +1095,15 @@ static void iwl_mvm_ftm_rtt_smoothing(struct iwl_mvm *mvm,
 		return;
 	}
 
-	list_for_each_entry(iter, &mvm->ftm_initiator.smooth.resp, list) {
-		if (!memcmp(res->addr, iter->addr, ETH_ALEN)) {
-			resp = iter;
+	found = false;
+	list_for_each_entry(resp, &mvm->ftm_initiator.smooth.resp, list) {
+		if (!memcmp(res->addr, resp->addr, ETH_ALEN)) {
+			found = true;
 			break;
 		}
 	}
 
-	if (!resp) {
+	if (!found) {
 		resp = kzalloc(sizeof(*resp), GFP_KERNEL);
 		if (!resp)
 			return;
@@ -1170,10 +1172,10 @@ static void iwl_mvm_debug_range_resp(struct iwl_mvm *mvm, u8 index,
 	IWL_DEBUG_INFO(mvm, "\tstatus: %d\n", res->status);
 	IWL_DEBUG_INFO(mvm, "\tBSSID: %pM\n", res->addr);
 	IWL_DEBUG_INFO(mvm, "\thost time: %llu\n", res->host_time);
-	IWL_DEBUG_INFO(mvm, "\tburst index: %u\n", res->ftm.burst_index);
+	IWL_DEBUG_INFO(mvm, "\tburst index: %hhu\n", res->ftm.burst_index);
 	IWL_DEBUG_INFO(mvm, "\tsuccess num: %u\n", res->ftm.num_ftmr_successes);
 	IWL_DEBUG_INFO(mvm, "\trssi: %d\n", res->ftm.rssi_avg);
-	IWL_DEBUG_INFO(mvm, "\trssi spread: %u\n", res->ftm.rssi_spread);
+	IWL_DEBUG_INFO(mvm, "\trssi spread: %hhu\n", res->ftm.rssi_spread);
 	IWL_DEBUG_INFO(mvm, "\trtt: %lld\n", res->ftm.rtt_avg);
 	IWL_DEBUG_INFO(mvm, "\trtt var: %llu\n", res->ftm.rtt_variance);
 	IWL_DEBUG_INFO(mvm, "\trtt spread: %llu\n", res->ftm.rtt_spread);
@@ -1273,7 +1275,7 @@ void iwl_mvm_ftm_range_resp(struct iwl_mvm *mvm, struct iwl_rx_cmd_buffer *rxb)
 	}
 
 	IWL_DEBUG_INFO(mvm, "Range response received\n");
-	IWL_DEBUG_INFO(mvm, "request id: %lld, num of entries: %u\n",
+	IWL_DEBUG_INFO(mvm, "request id: %lld, num of entries: %hhu\n",
 		       mvm->ftm_initiator.req->cookie, num_of_aps);
 
 	for (i = 0; i < num_of_aps && i < IWL_MVM_TOF_MAX_APS; i++) {
@@ -1365,7 +1367,7 @@ void iwl_mvm_ftm_range_resp(struct iwl_mvm *mvm, struct iwl_rx_cmd_buffer *rxb)
 
 		if (fw_has_api(&mvm->fw->ucode_capa,
 			       IWL_UCODE_TLV_API_FTM_RTT_ACCURACY))
-			IWL_DEBUG_INFO(mvm, "RTT confidence: %u\n",
+			IWL_DEBUG_INFO(mvm, "RTT confidence: %hhu\n",
 				       fw_ap->rttConfidence);
 
 		iwl_mvm_debug_range_resp(mvm, i, &result);
