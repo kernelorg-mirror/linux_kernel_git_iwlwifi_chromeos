@@ -94,7 +94,7 @@ enum iwl_data_path_subcmd_ids {
 	MONITOR_NOTIF = 0xF4,
 
 	/**
-	 * @RX_NO_DATA_NOTIF: &struct iwl_rx_no_data or &struct iwl_rx_no_data_ver_3
+	 * @RX_NO_DATA_NOTIF: &struct iwl_rx_no_data
 	 */
 	RX_NO_DATA_NOTIF = 0xF5,
 
@@ -680,15 +680,13 @@ enum iwl_sec_key_flags {
 	IWL_SEC_KEY_FLAG_SPP_AMSDU	= 0x80,
 };
 
-#define IWL_SEC_WEP_KEY_OFFSET	3
-
 /**
  * struct iwl_sec_key_cmd - security key command
  * @action: action from &enum iwl_ctxt_action
  * @u.add.sta_mask: station mask for the new key
  * @u.add.key_id: key ID (0-7) for the new key
  * @u.add.key_flags: key flags per &enum iwl_sec_key_flags
- * @u.add.key: key material. WEP keys should start from &IWL_SEC_WEP_KEY_OFFSET.
+ * @u.add.key: key material
  * @u.add.tkip_mic_rx_key: TKIP MIC RX key
  * @u.add.tkip_mic_tx_key: TKIP MIC TX key
  * @u.add.rx_seq: RX sequence counter value

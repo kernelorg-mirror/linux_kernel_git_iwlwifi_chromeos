@@ -472,9 +472,7 @@ u32 ieee80211_calc_rx_airtime(struct ieee80211_hw *hw,
 		bool sp = status->enc_flags & RX_ENC_FLAG_SHORTPRE;
 		bool cck;
 
-		/* on 60GHz or sub-1GHz band, there are no legacy rates */
-		if (WARN_ON_ONCE(status->band == NL80211_BAND_60GHZ ||
-				 nl80211_is_s1ghz(status->band)))
+		if (WARN_ON_ONCE(status->band > NL80211_BAND_5GHZ))
 			return 0;
 
 		sband = hw->wiphy->bands[status->band];

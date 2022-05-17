@@ -2381,7 +2381,6 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 	struct cfg80211_sched_scan_request *sched_scan_req;
 	bool sched_scan_stopped = false;
 	bool suspended = local->suspended;
-	bool in_reconfig = false;
 
 	/* nothing to do if HW shouldn't run */
 	if (!local->open_count)
@@ -2736,7 +2735,6 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 		drv_reconfig_complete(local, IEEE80211_RECONFIG_TYPE_RESTART);
 
 	if (local->in_reconfig) {
-		in_reconfig = local->in_reconfig;
 		local->in_reconfig = false;
 		barrier();
 
@@ -2753,15 +2751,6 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 	ieee80211_wake_queues_by_reason(hw, IEEE80211_MAX_QUEUE_MAP,
 					IEEE80211_QUEUE_STOP_REASON_SUSPEND,
 					false);
-
-	if (in_reconfig) {
-		list_for_each_entry(sdata, &local->interfaces, list) {
-			if (!ieee80211_sdata_running(sdata))
-				continue;
-			if (sdata->vif.type == NL80211_IFTYPE_STATION)
-				ieee80211_sta_restart(sdata);
-		}
-	}
 
 	if (!suspended)
 		return 0;
@@ -2792,7 +2781,7 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 	return 0;
 }
 
-static void ieee80211_reconfig_disconnect(struct ieee80211_vif *vif, u8 flag)
+void ieee80211_resume_disconnect(struct ieee80211_vif *vif)
 {
 	struct ieee80211_sub_if_data *sdata;
 	struct ieee80211_local *local;
@@ -2804,34 +2793,18 @@ static void ieee80211_reconfig_disconnect(struct ieee80211_vif *vif, u8 flag)
 	sdata = vif_to_sdata(vif);
 	local = sdata->local;
 
-	if (WARN_ON(flag & IEEE80211_SDATA_DISCONNECT_RESUME &&
-		    !local->resuming))
-		return;
-
-	if (WARN_ON(flag & IEEE80211_SDATA_DISCONNECT_HW_RESTART &&
-		    !local->in_reconfig))
+	if (WARN_ON(!local->resuming))
 		return;
 
 	if (WARN_ON(vif->type != NL80211_IFTYPE_STATION))
 		return;
 
-	sdata->flags |= flag;
+	sdata->flags |= IEEE80211_SDATA_DISCONNECT_RESUME;
 
 	mutex_lock(&local->key_mtx);
 	list_for_each_entry(key, &sdata->key_list, list)
 		key->flags |= KEY_FLAG_TAINTED;
 	mutex_unlock(&local->key_mtx);
-}
-
-void ieee80211_hw_restart_disconnect(struct ieee80211_vif *vif)
-{
-	ieee80211_reconfig_disconnect(vif, IEEE80211_SDATA_DISCONNECT_HW_RESTART);
-}
-EXPORT_SYMBOL_GPL(ieee80211_hw_restart_disconnect);
-
-void ieee80211_resume_disconnect(struct ieee80211_vif *vif)
-{
-	ieee80211_reconfig_disconnect(vif, IEEE80211_SDATA_DISCONNECT_RESUME);
 }
 EXPORT_SYMBOL_GPL(ieee80211_resume_disconnect);
 
@@ -3342,13 +3315,13 @@ u8 *ieee80211_ie_build_he_oper(u8 *pos, struct cfg80211_chan_def *chandef)
 #if CFG80211_VERSION >= KERNEL_VERSION(5,18,0)
 	case NL80211_CHAN_WIDTH_320:
 		/* keep code in case of fall-through (spatch generated) */
-#endif
 		/*
 		 * TODO: mesh operation is not defined over 6GHz 320 MHz
 		 * channels.
 		 */
 		WARN_ON(1);
 		break;
+#endif
 	case NL80211_CHAN_WIDTH_160:
 		/* Convert 160 MHz channel width to new style as interop
 		 * workaround.
@@ -3404,6 +3377,7 @@ bool ieee80211_chandef_ht_oper(const struct ieee80211_ht_operation *ht_oper,
 		channel_type = NL80211_CHAN_HT40MINUS;
 		break;
 	default:
+		channel_type = NL80211_CHAN_NO_HT;
 		return false;
 	}
 
