@@ -116,12 +116,6 @@ static void iwl_mvm_nic_config(struct iwl_op_mode *op_mode)
 	radio_cfg_dash = (phy_config & FW_PHY_CFG_RADIO_DASH) >>
 			 FW_PHY_CFG_RADIO_DASH_POS;
 
-	IWL_DEBUG_INFO(mvm, "Radio type=0x%x-0x%x-0x%x\n", radio_cfg_type,
-		       radio_cfg_step, radio_cfg_dash);
-
-	if (mvm->trans->trans_cfg->device_family >= IWL_DEVICE_FAMILY_AX210)
-		return;
-
 	/* SKU control */
 	reg_val = CSR_HW_REV_STEP_DASH(mvm->trans->hw_rev);
 
@@ -156,6 +150,9 @@ static void iwl_mvm_nic_config(struct iwl_op_mode *op_mode)
 				CSR_HW_IF_CONFIG_REG_BIT_MAC_SI   |
 				CSR_HW_IF_CONFIG_REG_D3_DEBUG,
 				reg_val);
+
+	IWL_DEBUG_INFO(mvm, "Radio type=0x%x-0x%x-0x%x\n", radio_cfg_type,
+		       radio_cfg_step, radio_cfg_dash);
 
 	/*
 	 * W/A : NIC is stuck in a reset state after Early PCIe power off
@@ -938,7 +935,7 @@ static void iwl_mvm_mei_rfkill(void *priv, bool blocked,
 {
 	struct iwl_mvm *mvm = priv;
 
-	if (blocked && !IWL_MVM_MEI_REPORT_RFKILL && !csme_taking_ownership)
+	if (!IWL_MVM_MEI_REPORT_RFKILL && !csme_taking_ownership)
 		return;
 
 	mvm->mei_rfkill_blocked = blocked;
@@ -1260,7 +1257,6 @@ iwl_op_mode_mvm_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 
 	iwl_mvm_get_acpi_tables(mvm);
 	iwl_uefi_get_sgom_table(trans, &mvm->fwrt);
-	iwl_uefi_get_step_table(trans);
 
 	mvm->init_status = 0;
 
@@ -1560,7 +1556,7 @@ void iwl_mvm_stop_device(struct iwl_mvm *mvm)
 	iwl_trans_stop_device(mvm->trans);
 	iwl_free_fw_paging(&mvm->fwrt);
 	iwl_fw_dump_conf_clear(&mvm->fwrt);
-	iwl_mvm_mei_device_state(mvm, false);
+	iwl_mvm_mei_device_down(mvm);
 }
 
 static void iwl_op_mode_mvm_stop(struct iwl_op_mode *op_mode)

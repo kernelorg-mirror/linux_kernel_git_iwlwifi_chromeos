@@ -365,9 +365,9 @@ void iwl_dbg_tlv_alloc(struct iwl_trans *trans, const struct iwl_ucode_tlv *tlv,
 
 	ret = dbg_tlv_alloc[tlv_idx](trans, tlv);
 	if (ret) {
-		IWL_WARN(trans,
-			 "WRT: Failed to allocate TLV 0x%x, ret %d, (ext=%d)\n",
-			 type, ret, ext);
+		IWL_ERR(trans,
+			"WRT: Failed to allocate TLV 0x%x, ret %d, (ext=%d)\n",
+			type, ret, ext);
 		goto out_err;
 	}
 
@@ -386,7 +386,7 @@ void iwl_dbg_tlv_del_timers(struct iwl_trans *trans)
 	struct iwl_dbg_tlv_timer_node *node, *tmp;
 
 	list_for_each_entry_safe(node, tmp, timer_list, list) {
-		del_timer_sync(&node->timer);
+		del_timer(&node->timer);
 		list_del(&node->list);
 		kfree(node);
 	}

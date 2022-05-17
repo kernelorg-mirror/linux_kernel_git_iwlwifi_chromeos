@@ -984,6 +984,7 @@ struct iwl_mvm {
 	unsigned long fw_key_table[BITS_TO_LONGS(STA_KEY_MAX_NUM)];
 	u8 fw_key_deleted[STA_KEY_MAX_NUM];
 
+	u8 vif_count;
 	struct ieee80211_vif __rcu *vif_id_to_mac[NUM_MAC_INDEX_DRIVER];
 
 	/* -1 for always, 0 for never, >0 for that many times */
@@ -1204,7 +1205,6 @@ struct iwl_mvm {
 	bool sta_remove_requires_queue_remove;
 
 	struct iwl_time_sync_data time_sync;
-
 };
 
 /* Extract MVM priv from op_mode and _hw */
@@ -2353,10 +2353,10 @@ static inline void iwl_mvm_mei_host_disassociated(struct iwl_mvm *mvm)
 		iwl_mei_host_disassociated();
 }
 
-static inline void iwl_mvm_mei_device_state(struct iwl_mvm *mvm, bool up)
+static inline void iwl_mvm_mei_device_down(struct iwl_mvm *mvm)
 {
 	if (mvm->mei_registered)
-		iwl_mei_device_state(up);
+		iwl_mei_device_down();
 }
 
 static inline void iwl_mvm_mei_set_sw_rfkill_state(struct iwl_mvm *mvm)
