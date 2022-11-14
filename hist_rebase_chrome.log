@@ -1,0 +1,1000 @@
+ 1182  cat 0001-wifi-iwlwifi-acpi-add-support-for-BIOS-China-profile.patch 
+ 1183  git reset --hard HEAD~5
+ 1184  git pull
+ 1185  cdw
+ 1186  cd wcd_fw-dev/
+ 1187  git pull
+ 1188  git log --author=gregory
+ 1189  gs 1da2b84a5ce6ab01eac1f1a874c2b4e5a68177bc
+ 1190  vi CMakeLists.txt
+ 1191  vi fw-external.dep 
+ 1192  git diff
+ 1193  git add CMakeLists.txt w-external.dep
+ 1194  git add CMakeLists.txt fw-external.dep
+ 1195  git commit -s 
+ 1196  gs
+ 1197  gpm
+ 1198  git gr _13F8
+ 1199  vi fw/src/shared/inc/assertUmac.h +4919
+ 1200  git gr PPAG_TABLE
+ 1201  git gr PPAG
+ 1202  vi fw/inc/commands/apiGroupPhy.h
+ 1203  git gr FW_TLV_CAPA_SET3_PPAG_CHINA_BIOS_SUPPORT
+ 1204  vi fw/inc/fwApiTlv.h +424
+ 1205  git gr PER_PLAT_ANTENNA_GAIN_CMD_API_S_VER_1
+ 1206  vi fw/inc/commands/apiGroupPhy.h +336
+ 1207  cdw
+ 1208  cd iwlwifi-chrome-kernel/
+ 1209  git branch 
+ 1210  git checkout origin/chromeos-5.15__release/core73 
+ 1211  git log 
+ 1212  git branch -r --contains f1c903f994b9d9161fcae4ad4b14da07c132dfb3
+ 1213  git checkout origin/chromeos-5.15__release/core73 
+ 1214  git log
+ 1215  gs f1c903f994b9d9161fcae4ad4b14da07c132dfb3
+ 1216  git checkout upstream/chromeos-5.15 
+ 1217  git cherry-pick f1c903f994b9d9161fcae4ad4b14da07c132dfb3
+ 1218  git am -3 0001-CHROMIUM-iwl7000-mac80211-fix-MBSSID-parsing-use-aft.patch
+ 1219  vi drivers/net/wireless/iwl7000/mac80211/util.c
+ 1220  git am --abort 
+ 1221  vi drivers/net/wireless/iwl7000/mac80211/util.c
+ 1222  gll
+ 1223  cd ~/work/iwlwifi/iwlwifi-chrome-kernel
+ 1224  vi 0001-CHROMIUM-iwl7000-mac80211-fix-MBSSID-parsing-use-aft.patch 
+ 1225  cd ../iwlwifi-kernel
+ 1226  git remote -v
+ 1227  git branch -r
+ 1228  cd ..
+ 1229  cd ../public/
+ 1230  git clone http://git.kernel.org/pub/scm/linux/kernel/git/iwamatsu/linux-stable.git
+ 1231  cd linux-stable/
+ 1232  git branch -r
+ 1233  git co origin/linux-5.1.y
+ 1234  git branch 
+ 1235  git log --author=berg
+ 1236  grep date work/iwlwifi/iwlwifi-tools/chromeos/chrome-*
+ 1237  date +%F
+ 1238  cd work/
+ 1239  ll
+ 1240  find . -iname "welcome*"
+ 1241  vi ./pgp/kernel-account/ggreenman/welcome.readme
+ 1242  cdw
+ 1243  cd iwlwifi-chrome-kernel/
+ 1244  git fetch upstream 
+ 1245  ll ..
+ 1246  git fetch upstream 
+ 1247  git fetch origin 
+ 1248  git branch 
+ 1249  git co -b tmp_5.15 origin/chromeos-5.15__release/core74
+ 1250  git log
+ 1251  git format-patch -2
+ 1252  git co master
+ 1253  git checkout upstream/chromeos-5.15
+ 1254  git log
+ 1255  ld -ltr
+ 1256  ls -ltr
+ 1257  git am -3 0001-CHROMIUM-iwl7000-mac80211-fix-MBSSID-parsing-use-aft.patch
+ 1258  vi drivers/net/wireless/iwl7000/mac80211/util.c
+ 1259  git am --abort
+ 1260  git log origin/chromeos-5.15__release/core73 
+ 1261  git log
+ 1262  git cherry-pick 009ef5d902384f69eb18a28a6117ae5ea175ddff
+ 1263  gll
+ 1264  git am -3 0001-CHROMIUM-iwl7000-mac80211-fix-MBSSID-parsing-use-aft.patch
+ 1265  gll
+ 1266  vi 0001-CHROMIUM-iwl7000-mac80211-fix-MBSSID-parsing-use-aft.patch 
+ 1267  git am -3 0002-CHROMIUM-iwl7000-mac80211-fix-crash-in-beacon-protec.patch
+ 1268  gll
+ 1269  cd Downloads/
+ 1270  ll
+ 1271  ls -ltr
+ 1272  mv jenkins-Core_build_core69-81-65420-src.tar.gz ~/work/public/core69/
+ 1273  cd ~/work/public/core69/
+ 1274  ll
+ 1275  ll ../core72
+ 1276  ll ../core71
+ 1277  ll
+ 1278  tar -xvzf jenkins-Core_build_core69-81-65420-src.tar.gz 
+ 1279  ll
+ 1280  ll src/
+ 1281  ll src/fw-binaries/
+ 1282  ll src/fw-binaries/iwlwifi-cc-a0-*
+ 1283  ll
+ 1284  rm -rf bin
+ 1285  rm -rf scripts/
+ 1286  cp src/fw-binaries/iwlwifi-cc-a0-72.ucode .
+ 1287  ll src/fw-binaries/iwlwifi-Qu*ucode
+ 1288  ll src/fw-binaries/iwlwifi-Qu-*0-7*ucode
+ 1289  cp src/fw-binaries/iwlwifi-Qu-*0-7*ucode .
+ 1290  ll src/fw-binaries/iwlwifi-QuX*ucode
+ 1291  ll src/fw-binaries/iwlwifi-QuZ*ucode
+ 1292  ll src/fw-binaries/iwlwifi-QuZ*0-7*ucode
+ 1293  cp src/fw-binaries/iwlwifi-QuZ*0-7*ucode .
+ 1294  cp src/fw-binaries/iwlwifi-ty-a0-gf-a0-72.u
+ 1295  ll src/fw-binaries/iwlwifi-so-a0-gf*-0-7*ucode
+ 1296  ll src/fw-binaries/iwlwifi-so-a0-gf*0-7*ucode
+ 1297  cp src/fw-binaries/iwlwifi-so-a0-gf*0-7*ucode .
+ 1298  ll src/fw-binaries/iwlwifi-so-a0-hr*0-7*ucode
+ 1299  ll src/fw-binaries/iwlwifi-so-a0-jf*0-7*ucode
+ 1300  cp src/fw-binaries/iwlwifi-so-a0-hr-b0-72.ucode .
+ 1301  cp src/fw-binaries/iwlwifi-so-a0-jf-b0-72.ucode .
+ 1302  ll
+ 1303  cd ../linux-firmware-1/
+ 1304  ll iwlwifi-*72.ucode
+ 1305  cp ../core69/iwlwifi-*ucode .
+ 1306  vi WHENCE 
+ 1307  git diff
+ 1308  vi WHENCE 
+ 1309  git diff
+ 1310  git status 
+ 1311  git add WHENCE iwlwifi-Qu-b0-hr-b0-72.ucode iwlwifi-Qu-b0-jf-b0-72.ucode iwlwifi-Qu-c0-hr-b0-72.ucode iwlwifi-Qu-c0-jf-b0-72.ucode iwlwifi-QuZ-a0-hr-b0-72.ucode iwlwifi-QuZ-a0-jf-b0-72.ucode iwlwifi-cc-a0-72.ucode iwlwifi-so-a0-gf-a0-72.ucode iwlwifi-so-a0-gf4-a0-72.ucode iwlwifi-so-a0-hr-b0-72.ucode iwlwifi-so-a0-jf-b0-72.ucode iwlwifi-ty-a0-gf-a0-72.ucode
+ 1312  git commit -s -C 98b55774bcc6c901cc985e8fab1404219a4ef196 --edit --reset-author 
+ 1313  gs
+ 1314  gll
+ 1315  mkdir ../core74_pv_44
+ 1316  mv ~/Downloads/jenkins-Core_build_core74_pv-44-96225-src.tar.gz ../core74_pv_44/
+ 1317  cd ../core74_pv_44/
+ 1318  ll
+ 1319  tar -xvzf jenkins-Core_build_core74_pv-44-96225-src.tar.gz 
+ 1320  ll
+ 1321  ll src/
+ 1322  ll src/fw-binaries/*pnvm
+ 1323  cp src/fw-binaries/iwlwifi-ty-a0-gf-a0.pnvm ../linux-firmware-1/
+ 1324  cp src/fw-binaries/iwlwifi-so-a0-gf-a0.pnvm ../linux-firmware-1/
+ 1325  cd -
+ 1326  git status 
+ 1327  grep iwlwifi-so-a0-gf-a0.pnvm WHENCE 
+ 1328  vi WHENCE 
+ 1329  gre iwlwifi-ty-a0-gf-a0.pnvm WHENCE 
+ 1330  grep iwlwifi-ty-a0-gf-a0.pnvm WHENCE 
+ 1331  git add iwlwifi-so-a0-gf-a0.pnvm iwlwifi-ty-a0-gf-a0.pnvm
+ 1332  git commit -s
+ 1333  gs
+ 1334  gs HEAD~1
+ 1335  gll
+ 1336  git pull -r
+ 1337  git tag -s iwlwifi-fw-2022-06-09 
+ 1338  git tag -s iwlwifi-fw-2022-10-26 
+ 1339  git tag|grep iwlwifi-fw-2022-10-26
+ 1340  git remote -v
+ 1341  git push iwlwifi-firmware HEAD:for-upstream tag iwlwifi-fw-2022-10-26
+ 1342  gll
+ 1343  git remote -v
+ 1344  git request-pull origin/main git request-pull origin/main http://git.kernel.org/pub/scm/linux/kernel/git/iwlwifi/linux-firmware.git iwlwifi-fw-2022-10-26
+ 1345  git request-pull origin/main http://git.kernel.org/pub/scm/linux/kernel/git/iwlwifi/linux-firmware.git iwlwifi-fw-2022-10-26
+ 1346  cds
+ 1347  git blame 
+ 1348  git blame drivers/net/wireless/iwl7000/mac80211/util.c
+ 1349  git blame 
+ 1350  git blame drivers/net/wireless/iwl7000/mac80211/util.c
+ 1351  git blame net/mac80211/util.c
+ 1352  gs c878b6e3454
+ 1353  git tag --contains c878b6e345435b3c8055d467738149763cbdd6aa
+ 1354  gs c878b6e345435b3c8055d467738149763cbdd6aa
+ 1355  git log net/mac80211/util.c
+ 1356  gs fa145b9785e5f833b0c6cc2a3dff0af66f3a0757
+ 1357  git log
+ 1358  cdw
+ 1359  ll
+ 1360  cd ../public/linux-firmware-1/
+ 1361  gll
+ 1362  git log
+ 1363  ll ..
+ 1364  mkdir ../core69
+ 1365  pwd
+ 1366  gll
+ 1367  gs 604026cc
+ 1368  gll
+ 1369  gs 98b55774
+ 1370  ll iwlwifi-cc-a0-*
+ 1371  gs
+ 1372  git pull -r
+ 1373  git remote -v
+ 1374  gll
+ 1375  git log --author=greenman
+ 1376  gs 604026ccc3f937d84c0c3914d2e83afe5d726fd1
+ 1377  git log --author=greenman
+ 1378  gs 98b55774bcc6c901cc985e8fab1404219a4ef196
+ 1379  git log --author=coelho
+ 1380  git log --author=coelho --oneline 
+ 1381  gs 23e0197e
+ 1382  git log --author=greenman
+ 1383  git show 98b55774bcc6c901cc985e8fab1404219a4ef196
+ 1384  git log --coelho
+ 1385  git log --author=coelho
+ 1386  gs 8f9285cca830cb709439ee2cf14d0519d155983b
+ 1387  ll iwlwifi-so-a0-gf*pnvm
+ 1388  ll iwlwifi-so-a0-gf-a0.pnvm
+ 1389  gs 8f9285cca830cb709439ee2cf14d0519d155983b
+ 1390  cds
+ 1391  ../iwlwifi-tools/upstreaming/update_upstreaming.py 
+ 1392  sudo reboot
+ 1393  cdw
+ 1394  cd iwlwifi-next/
+ 1395  git branch 
+ 1396  git remote -v
+ 1397  git log
+ 1398  git remote -v
+ 1399  git pull --rebase wireless-next main 
+ 1400  gll
+ 1401  git fetch wireless-next 
+ 1402  git pull --rebase wireless-next main 
+ 1403  gll --graph
+ 1404  c
+ 1405  gll
+ 1406  git log --format=fuller
+ 1407  #git push origin HEAD:pending -f
+ 1408  git remote -v
+ 1409  git push origin HEAD:pending -f
+ 1410  cd ..
+ 1411  ll
+ 1412  cd ..
+ 1413  cd -
+ 1414  cd iwlwifi-next/
+ 1415  git remote -v
+ 1416  cd ../..
+ 1417  ll
+ 1418  ll public/
+ 1419  cd public/iwlwifi-next/
+ 1420  git remote -v
+ 1421  git fetch origin 
+ 1422  git fetch wireless-next 
+ 1423  git branch 
+ 1424  git log pending
+ 1425  git co pending
+ 1426  git pull --rebase wireless-next main
+ 1427  gll
+ 1428  git log --format=fuller
+ 1429  git remote -v
+ 1430  git push origin HEAD:pending -f
+ 1431  git branch 
+ 1432  git log
+ 1433  #git fetch /home/ggreenma/work/tmp/upstream/for-upstream
+ 1434  git fetch /home/ggreenma/work/tmp/upstream/for-upstream
+ 1435  git log
+ 1436  git log FETCH_HEAD
+ 1437  git branch 
+ 1438  git cherry-pick origin/pending..FETCH_HEAD
+ 1439  gll
+ 1440  gs
+ 1441  git remote -v
+ 1442  ll .git
+ 1443  ll .git/hooks/
+ 1444  vi .git/hooks/applypatch-msg
+ 1445  gll
+ 1446  git rebase -i HEAD~6
+ 1447  gll
+ 1448  gs
+ 1449  gs HEAD~1
+ 1450  gs HEAD~2
+ 1451  gs HEAD~3
+ 1452  gs HEAD~4
+ 1453  gs HEAD~5
+ 1454  gs HEAD~6
+ 1455  git log
+ 1456  gs
+ 1457  git log
+ 1458  gs
+ 1459  vi ../../iwlwifi/iwlwifi-tools/upstreaming/upstream_checks.sh 
+ 1460  cd .config/nvim/
+ 1461  ll
+ 1462  vi init.vim 
+ 1463  ll ~/.vim/
+ 1464  find ~/.vim/ -iname "*luci*"
+ 1465  mkdir colors
+ 1466  co /home/ggreenma/.vim/colors/lucius.vim colors/
+ 1467  cp /home/ggreenma/.vim/colors/lucius.vim colors/
+ 1468  echo $XDG_DATA_HOME
+ 1469  echo $HOME
+ 1470  export XDG_DATA_HOME=~/.config
+ 1471  echo $XDG_DATA_HOME
+ 1472  sh -c 'curl -fLo "${XDG_DATA_HOME:-$HOME/.local/share}"/nvim/site/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim'
+ 1473  ll
+ 1474  ll site/
+ 1475  ll site/autoload/
+ 1476  vi init.vim 
+ 1477  ll
+ 1478  mv site/autoload/ .
+ 1479  ll
+ 1480  ll bundle/
+ 1481  ll autoload/
+ 1482  rm -rf site/
+ 1483  ll
+ 1484  ll autoload/
+ 1485  ll bundle/
+ 1486  rm -rf bundle/ctrlp.vim.old/
+ 1487  vi init.vim 
+ 1488  ll
+ 1489  ll bundle/
+ 1490  find . -iname "*feli*"
+ 1491  vi init.vim 
+ 1492  ll /home/ggreenma/.local/share/nvim
+ 1493  ll /home/ggreenma/.local/share/nvim/plugged/
+ 1494  ll /home/ggreenma/.local/share/nvim/plugged/feline.nvim/
+ 1495  vi /home/ggreenma/.local/share/nvim/plugged/feline.nvim/README.md 
+ 1496  ll bundle/
+ 1497  rm -rf bundle/vim-airline-master/
+ 1498  vi init.vim 
+ 1499  ll /home/ggreenma/.local/share/nvim/plugged
+ 1500  ll /home/ggreenma/.local/share/nvim/
+ 1501  ll
+ 1502  ll bundle/
+ 1503  vi init.vim 
+ 1504  cd tools/
+ 1505  mkdir neovim
+ 1506  cd neovim/
+ 1507  wget https://github.com/neovim/neovim/releases/download/v0.8.0/nvim-linux64.tar.gz
+ 1508  ll
+ 1509  tar -xvzf nvim-linux64.tar.gz 
+ 1510  ./nvim-linux64/bin/nvim
+ 1511  ll
+ 1512  rm nvim-linux64.tar.gz 
+ 1513  cd nvim-linux64/
+ 1514  ll
+ 1515  ll bin/
+ 1516  ll lib/
+ 1517  ll lib/nvim/parser/
+ 1518  ll
+ 1519  ll share/
+ 1520  cd
+ 1521  ./tools/nvim-linux64/bin/nvim
+ 1522  ./tools/neovim/nvim-linux64/bin/nvim
+ 1523  ~/tools/neovim/nvim-linux64/bin/nvim
+ 1524  vi .bash_aliases 
+ 1525  source ~/.bashrc 
+ 1526  nvim
+ 1527  cds
+ 1528  nvim 
+ 1529  touch ~/.config/nvim/init.vim
+ 1530  mkdir ~/.config/nvim
+ 1531  touch ~/.config/nvim/init.vim
+ 1532  ll ~/.vim/
+ 1533  ll ~/.vim/bundle/
+ 1534  cp -r ~/.vim/bundle/ ~/.config/nvim/bundle/
+ 1535  cp -r ~/.vimrc ~/.config/nvim/init.vim 
+ 1536  nvim 
+ 1537  nvim drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
+ 1538  nvim 
+ 1539  nvim drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
+ 1540  git branch 
+ 1541  nvim
+ 1542  cds
+ 1543  nvim
+ 1544  ll
+ 1545  ls
+ 1546  ls -ltr ~/Downloads/
+ 1547  #mv ~/Downloads/'Hack Regular Nerd Font Complete.ttf' ~/.local/share/fonts
+ 1548  mkdir -p ~/.local/share/fonts
+ 1549  mv ~/Downloads/'Hack Regular Nerd Font Complete.ttf' ~/.local/share/fonts
+ 1550  ll ~/.local/share/fonts
+ 1551  cd ~/.local/share/fonts
+ 1552  ll
+ 1553  ls -ltr ~/Downloads/
+ 1554  mv ~/Downloads/'Hack Bold Nerd Font Complete.ttf' 'Hack Bold Italic Nerd Font Complete.ttf' Hack Italic Nerd Font Complete.ttf' .
+ 1555  mv ~/Downloads/'Hack Bold Nerd Font Complete.ttf' ~/Downloads/'Hack Bold Italic Nerd Font Complete.ttf' ~/Downloads/Hack Italic Nerd Font Complete.ttf' .
+ 1556  mv ~/Downloads/'Hack Bold Nerd Font Complete.ttf' .
+ 1557  mv ~/Downloads/'Hack Bold Italic Nerd Font Complete.ttf' .
+ 1558  ll
+ 1559  mv ~/Downloads/Hack Italic Nerd Font Complete.ttf' .
+ 1560  mv ~/Downloads/'Hack Italic Nerd Font Complete.ttf' .
+ 1561  ll
+ 1562  
+ 1563  source ~/.bashrc
+ 1564  cds
+ 1565  e725
+ 1566  c
+ 1567  cd ..
+ 1568  cds
+ 1569  echo -e "Default \e[104mLight blue"
+ 1570  echo -e "Default \e[47mLight blue"
+ 1571  echo -e "Default \e[246mLight blue"
+ 1572  for i in {16..21} {21..16} ; do echo -en "\e[48;5;${i}m \e[0m" ; done ; echo
+ 1573  for i in {16..21} {21..16} ; do echo -en "\e[48;5;${i}m \e[0m" ; echo; done ; echo
+ 1574  for i in {16..255}; do echo -en "\e[48;5;${i}m \e[0m" ; echo; done ; echo
+ 1575  for i in {232..255}; do echo -en "\e[48;5;${i}m \e[0m" ; echo; done ; echo
+ 1576  echo -e "\e[40;38;5;82m Hello "
+ 1577  cd ..
+ 1578  source ~/.bashrc
+ 1579  cds
+ 1580  source ~/.bashrc
+ 1581  cd ..
+ 1582  cds
+ 1583  source ~/.bashrc
+ 1584  c
+ 1585  source ~/.bashrc
+ 1586  c
+ 1587  vi ~/.bashrc
+ 1588  cd .local/share/
+ 1589  ll
+ 1590  cd nvim/
+ 1591  ll
+ 1592  find . -name "*pack*"
+ 1593  find . -name "*packer*"
+ 1594  cd ~/.config/nvim
+ 1595  ll
+ 1596  ll plugin/
+ 1597  vi init.lua 
+ 1598  cds
+ 1599  nvim 
+ 1600  cd
+ 1601  cd tmp
+ 1602  vi dmesg_log.txt 
+ 1603  cd ~/.config/nvim/
+ 1604  ll
+ 1605  cd ..
+ 1606  mv nvim/ nvim.old
+ 1607  cd ..
+ 1608  git clone https://github.com/LunarVim/Neovim-from-scratch.git ~/.config/nvim
+ 1609  cd .config/nvim
+ 1610  ll
+ 1611  vi init.lua 
+ 1612  nvim 
+ 1613  git checkout 01-options 
+ 1614  ll
+ 1615  ll lua/
+ 1616  ll lua/user/
+ 1617  vi lua/user/options.lua 
+ 1618  git co master 
+ 1619  vi lua/user/options.lua 
+ 1620  ll lua/
+ 1621  ll
+ 1622  vi init.lua 
+ 1623  vi lua/user/options.lua 
+ 1624  vi lua/user/keymaps.lua 
+ 1625  vi lua/user/plugins.lua 
+ 1626  sparse --version
+ 1627  cds
+ 1628  vi
+ 1629  which git
+ 1630  cd ~/Downloads/
+ 1631  ll
+ 1632  ls -ltr
+ 1633  mv jenkins-Core_build_core75-4-95922-src.tar.gz tmp
+ 1634  cd tmp
+ 1635  ll
+ 1636  rm iwl-fw-error_2022-10-26_16-34-45-658_HOST_ALIVE_TIMEOUT_0x201000b6.tgz *log *dump
+ 1637  ll
+ 1638  rm xab trace*
+ 1639  ll
+ 1640  tar -xvzf jenkins-Core_build_core75-4-95922-src.tar.gz 
+ 1641  ll
+ 1642  ll src/
+ 1643  ll src/fw-binaries/
+ 1644  ll src/fw-binaries/iwlwifi-so-a0-hr-b0-78.ucode 
+ 1645  ll src/fw-binaries/iwlwifi-so-a0-*ucode
+ 1646  xsa
+ 1647  cds
+ 1648  nvim
+ 1649  alias
+ 1650  source ~/.bashrc 
+ 1651  nvim
+ 1652  ll ~/.local/share/
+ 1653  ll ~/.local/share/nvim/
+ 1654  ll ~/.local/share/nvim/site/
+ 1655  ll ~/.local/
+ 1656  find ~/.local/ -name nvim
+ 1657  nvim 
+ 1658  cds
+ 1659  git status 
+ 1660  rm 1 tags
+ 1661  git status 
+ 1662  git clean -fdxq
+ 1663  cp -a intc-scripts/ /tmp/
+ 1664  ./intc-scripts/prune.py prune-chromeos
+ 1665  git commit -amp
+ 1666  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1667  vi drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej
+ 1668  git reset --hard HEAD
+ 1669  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1670  git reset --hard HEAD
+ 1671  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1672  vi drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej
+ 1673  git reset --hard HEAD
+ 1674  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1675  vi drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej
+ 1676  git reset --hard HEAD
+ 1677  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1678  git reset --hard HEAD
+ 1679  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1680  vi drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej
+ 1681  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1682  vi drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej
+ 1683  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1684  vi drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej +1313
+ 1685  git reset --hard HEAD
+ 1686  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1687  vi drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej
+ 1688  vi /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1689  git reset --hard HEAD
+ 1690  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1691  git reset --hard HEAD
+ 1692  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1693  git reset --hard HEAD
+ 1694  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1695  vi drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej
+ 1696  ./intc-scripts/prune.py prune-chromeos
+ 1697  rm drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej
+ 1698  ./intc-scripts/prune.py prune-chromeos
+ 1699  git status 
+ 1700  git co intc-scripts/
+ 1701  git co local-symbols
+ 1702  git co nix
+ 1703  git co shell.nix
+ 1704  git status 
+ 1705  git reset --hard HEAD
+ 1706  git status 
+ 1707  rm  drivers/net/wireless/intel/iwlwifi/cfg/22000.c.orig drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.orig drivers/net/wireless/intel/iwlwifi/mvm/link.c.orig drivers/net/wireless/intel/iwlwifi/mvm/mac80211.c.orig
+ 1708  ./intc-scripts/prune.py prune-chromeos
+ 1709  git commit -amp
+ 1710  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1711  vi -o drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1712  git reset --hard HEAD
+ 1713  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1714  git reset --hard HEAD
+ 1715  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1716  git reset --hard HEAD
+ 1717  vi -o drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1718  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1719  fg
+ 1720  vi -o drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1721  git diff HEAD > /tmp/intc-scripts/chromeOS/iwlwifi1.patch 
+ 1722  vimdiff /tmp/intc-scripts/chromeOS/iwlwifi1.patch /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1723  cp /tmp/intc-scripts/chromeOS/iwlwifi1.patch /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1724  vimdiff /tmp/intc-scripts/chromeOS/iwlwifi1.patch /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1725  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1726  git reset --hard HEAD
+ 1727  git rebase -i HEAD~3
+ 1728  git reset --hard HEAD
+ 1729  git reset --hard HEAD~1
+ 1730  cp /tmp/intc-scripts/chromeOS/iwlwifi.patch intc-scripts/chromeOS/iwlwifi.patch 
+ 1731  git status 
+ 1732  git add intc-scripts/chromeOS/iwlwifi.patch
+ 1733  git commit --amend
+ 1734  gs
+ 1735  vi ~/Downloads/console-ramoops-1 
+ 1736  cd ../wcd_fw-dev/
+ 1737  gs 058653f6
+ 1738  git branch -r --contains 058653f6
+ 1739  ls -ltr ~/Downloads/
+ 1740  vi ~/Downloads/m4-sta-all-tests-stdout.log
+ 1741  cds
+ 1742  git log
+ 1743  git log --graph 
+ 1744  git log --format=fuller
+ 1745  cds
+ 1746  vi ./Documentation/developers/chromeos.rst 
+ 1747  cd ../../public/linux-firmware-1/
+ 1748  git log
+ 1749  xxd iwlwifi-ty-a0-gf-a0.pnvm > 1
+ 1750  vi 1
+ 1751  rm 1
+ 1752  git log iwlwifi-ty-a0-gf-a0.pnvm
+ 1753  git co -b tmp
+ 1754  git log iwlwifi-ty-a0-gf-a0.pnvm
+ 1755  git reset --hard 98b55774bcc6c901cc985e8fab1404219a4ef196
+ 1756  xxd iwlwifi-ty-a0-gf-a0.pnvm > 1
+ 1757  vi 1
+ 1758  scp iwlwifi-ty-a0-gf-a0.pnvm tester@10.12.186.33:~/
+ 1759  cds
+ 1760  cd ../tmp/iwlwifi-stack-dev/
+ 1761  git blame drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
+ 1762  gs 94281dd17ae
+ 1763  vi drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
+ 1764  cds
+ 1765  git log
+ 1766  git log --oneline --author=giladi
+ 1767  gs 0784ff5be2
+ 1768  git log --oneline --author=giladi
+ 1769  gs 15afd8712c
+ 1770  gs 62e5336571
+ 1771  gs 05f3b38a1e
+ 1772  gs 5c1395bf7b
+ 1773  gs 0a8f23fdb4
+ 1774  gs 79b0a8189c
+ 1775  gs 1689b36369
+ 1776  gs 21ebca1ed0
+ 1777  gs 0f629ad3d3
+ 1778  gs 442ef19c29
+ 1779  git commit -s --amend --no-edit 
+ 1780  cd ..
+ 1781  ll *txt
+ 1782  ll ~/Documents/
+ 1783  find ~/Documents/ -name "*txt"
+ 1784  vi /home/ggreenma/Documents/tmp.txt
+ 1785  vi /home/ggreenma/Documents/kernel/misc.txt
+ 1786  find . -name "*txt"
+ 1787  find . -iname "*chrome*txt"
+ 1788  vi ~/Downloads/console-ramoops-0 
+ 1789  cds
+ 1790  git status 
+ 1791  git add drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c
+ 1792  git commit -s
+ 1793  make -j4
+ 1794  git status 
+ 1795  git add drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c
+ 1796  git commit --amend 
+ 1797  alias|grep gps
+ 1798  git push origin HEAD:sandbox/ggreenma/chrome-crash-dbg
+ 1799  rm 0*patch
+ 1800  git reset --hard HEAD~1
+ 1801  git push origin :sandbox/ggreenma/chrome-crash-dbg
+ 1802  git push origin HEAD:sandbox/ggreenma/chrome-crash-dbg
+ 1803  git diff
+ 1804  git status 
+ 1805  rm drivers/net/wireless/intel/iwlwifi/cfg/22000.c.orig drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.orig drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c.rej drivers/net/wireless/intel/iwlwifi/mvm/link.c.orig drivers/net/wireless/intel/iwlwifi/mvm/mac80211.c.orig
+ 1806  git clean -fdxq
+ 1807  ./intc-scripts/prune.py prune-chromeos
+ 1808  git commit -amp
+ 1809  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1810  git gr "struct ieee80211_sband_iftype_data"
+ 1811  git gr "struct ieee80211_sband_iftype_data" -- *.h
+ 1812  git status 
+ 1813  cd ..
+ 1814  ll
+ 1815  cd iwlwifi-backports/
+ 1816  ll
+ 1817  git log
+ 1818  git gr cfg_eht_cap_has_eht
+ 1819  find . -iname mac80211-bp.h
+ 1820  cds
+ 1821  find . -iname mac80211-bp.h
+ 1822  git log
+ 1823  git reset --hard HEAD~1
+ 1824  find . -iname mac80211-bp.h
+ 1825  git gr cfg_eht_cap_has_eht
+ 1826  vi intc-scripts/chromeOS/adjustments/019-eht.spatch
+ 1827  git push origin HEAD:sandbox/ggreenma/chrome-crash-dbg
+ 1828  git fetch
+ 1829  git log origin/sandbox/ggreenma/chrome-crash-dbg
+ 1830  git clean -fdxq
+ 1831  ./intc-scripts/prune.py prune-chromeos
+ 1832  git commit -amp
+ 1833  patch -p1 < /tmp/intc-scripts/chromeOS/iwlwifi.patch
+ 1834  git reset --hard HEAD~1
+ 1835  git log origin/sandbox/ggreenma/chrome-crash-dbg
+ 1836  git format-patch -2
+ 1837  git reset --hard HEAD~2
+ 1838  git reset --hard HEAD~12
+ 1839  git pull -r
+ 1840  git am 0002-BUGFIX-wifi-iwlwifi-fix-configuring-EHT-for-GL.patch
+ 1841  git am --abort
+ 1842  cat 0002-BUGFIX-wifi-iwlwifi-fix-configuring-EHT-for-GL.patch
+ 1843  git am -3 0002-BUGFIX-wifi-iwlwifi-fix-configuring-EHT-for-GL.patch
+ 1844  vi drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c
+ 1845  git am --abort
+ 1846  git log
+ 1847  cat 0002-BUGFIX-wifi-iwlwifi-fix-configuring-EHT-for-GL.patch
+ 1848  grep _v1 drivers/net/wireless/intel/iwlwifi/fw/api/*
+ 1849  git diff
+ 1850  vi drivers/net/wireless/intel/iwlwifi/mvm/rs-fw.c
+ 1851  git blame drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
+ 1852  git diff
+ 1853  git add -p drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
+ 1854  git commit -s
+ 1855  gs
+ 1856  git diff --cached
+ 1857  gs 442ef19c29
+ 1858  git log
+ 1859  git diff --cached
+ 1860  gs 442ef19c29
+ 1861  git log --author=yedid
+ 1862  gs c8e4e15874f0bd4900475d7ffa765dc4c27bad43
+ 1863  git log --oneline --grep "wait for the mac to stop on suspend"
+ 1864  git log --oneline --grep "wifi: iwlwifi: mei: wait for the mac to stop on suspend"
+ 1865  vi check.sh
+ 1866  chmod a+x check.sh 
+ 1867  ./check.sh < 2
+ 1868  vi check.sh 
+ 1869  ./check.sh < 2
+ 1870  vi check.sh 
+ 1871  ./check.sh < 2
+ 1872  vi check.sh 
+ 1873  ./check.sh < 2
+ 1874  vi check.sh 
+ 1875  ./check.sh < 2
+ 1876  vi check.sh 
+ 1877  ./check.sh < 2
+ 1878  cat 2
+ 1879  cat 1
+ 1880  vi 2
+ 1881  ./check.sh < 2
+ 1882  cat 2
+ 1883  ./check.sh < 2
+ 1884  vi check.sh 
+ 1885  ./check.sh < 2
+ 1886  vi check.sh 
+ 1887  ./check.sh < 2
+ 1888  vi check.sh 
+ 1889  ./check.sh < 2
+ 1890  vi check.sh 
+ 1891  ./check.sh < 2
+ 1892  cp 2 3
+ 1893  vi 3
+ 1894  ./check.sh < 3
+ 1895  vi 3
+ 1896  rm 3
+ 1897  vi check.sh 
+ 1898  ./check.sh < 2
+ 1899  ./check.sh < 2|&tee 3
+ 1900  vi 3
+ 1901  git log --oneline 
+ 1902  gs b9f03abdd3
+ 1903  git log --oneline 
+ 1904  gs aff886adbf
+ 1905  vi
+ 1906  cdw
+ 1907  cd iwlwifi-chrome-kernel/
+ 1908  git branch 
+ 1909  git co -b chromeos-5.15__release/core74-rebase-2022-09-20
+ 1910  git co chromeos-5.15__release/core74-rebase-2022-09-20
+ 1911  git gr "struct ieee80211_sband_iftype_data"
+ 1912  git gr "struct ieee80211_sband_iftype_data" -- *h
+ 1913  git grep "struct ieee80211_sband_iftype_data" -- *.h
+ 1914  git grep "struct ieee80211_sband_iftype_data {" -- *.h
+ 1915  vi drivers/net/wireless/iwl7000/hdrs/mac80211-bp.h
+ 1916  git grep "struct ieee80211_sband_iftype_data {" -n -- *.h
+ 1917  git grep -n "struct ieee80211_sband_iftype_data {" -- *.h
+ 1918  vi include/net/cfg80211.h +378
+ 1919  git fetch
+ 1920  git co -b chromeos-5.10__release_core75 origin/chromeos-5.10__release/core75
+ 1921  git grep -n "struct ieee80211_sband_iftype_data {" -- *.h
+ 1922  vi drivers/net/wireless/iwl7000/hdrs/mac80211-bp.h +657
+ 1923  vi include/net/cfg80211.h +385
+ 1924  git gr ieee80211_sta_eht_cap
+ 1925  git gr -n ieee80211_sta_eht_cap
+ 1926  vi drivers/net/wireless/iwl7000/hdrs/mac80211-bp.h +78
+ 1927  vi 
+ 1928  find . -iname iwl-nvm-parse.c
+ 1929  vi ./drivers/net/wireless/iwl7000/iwlwifi/iwl-nvm-parse.c
+ 1930  git gr cfg_eht_cap
+ 1931  fg
+ 1932  git gr cfg_eht_cap_has_eht
+ 1933  fg
+ 1934  cds
+ 1935  git log
+ 1936  git status 
+ 1937  git add drivers/net/wireless/intel/iwlwifi/iwl-nvm-parse.c
+ 1938  git commit -s 
+ 1939  gs
+ 1940  cd -
+ 1941  vi ./drivers/net/wireless/iwl7000/iwlwifi/iwl-nvm-parse.c
+ 1942  cds
+ 1943  ssh tester@10.12.186.33
+ 1944  tail ~/.bashrc 
+ 1945  sshpass -p 2k7Whkvzyu ssh-copy-id -f -o StrictHostKeyChecking=no tester@10.12.186.33
+ 1946  ls -lre ~/Downloads/
+ 1947  ls -ltr ~/Downloads/
+ 1948  scp ~/Downloads/jenkins-Core_build_core68-62-56047-src.tar.gz tester@10.12.186.33
+ 1949  scp ~/Downloads/jenkins-Core_build_core68-62-56047-src.tar.gz tester@10.12.186.33:~/
+ 1950  rm "tester@10.12.186.33"
+ 1951  ssh tester@10.12.186.33
+ 1952  git log origin/release/core74 
+ 1953  git log --author=benshi
+ 1954  git log --author=yedid
+ 1955  gs c8e4e15874f0bd4900475d7ffa765dc4c27bad43
+ 1956  vi drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c +1582
+ 1957  gs c8e4e15874f0bd4900475d7ffa765dc4c27bad43
+ 1958  git diff
+ 1959  gs c8e4e15874f0bd4900475d7ffa765dc4c27bad43
+ 1960  make clean
+ 1961  make -j8
+ 1962  git gr _2_
+ 1963  git gr _2_ -- *.c
+ 1964  git gr id_to_
+ 1965  git gr id_for
+ 1966  gs
+ 1967  git diff
+ 1968  git status 
+ 1969  git co ./compat/verification/
+ 1970  git co ./kconf/
+ 1971  git status 
+ 1972  git diff
+ 1973  git status 
+ 1974  git add drivers/net/wireless/intel/iwlwifi/fw/api/mac-cfg.h drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c drivers/net/wireless/intel/iwlwifi/mvm/sta.c drivers/net/wireless/intel/iwlwifi/mvm/sta.h
+ 1975  git commit -s
+ 1976  gs
+ 1977  gs c8e4e15874f0bd4900475d7ffa765dc4c27bad43
+ 1978  git diff
+ 1979  git add drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
+ 1980  git commit -s
+ 1981  git rebase -i HEAD~3
+ 1982  make -j8
+ 1983  gs
+ 1984  git pull -r
+ 1985  gll
+ 1986  gpm
+ 1987  git log --grep=iwlmei
+ 1988  git log --grep=iwlmei --oneline 
+ 1989  c
+ 1990  git log --grep=iwlmei --oneline 
+ 1991  c
+ 1992  git log --grep=mei --oneline 
+ 1993  git log --grep="mei: " --oneline 
+ 1994  git log --oneline |grep "mei: "
+ 1995  git log --oneline |grep "mei: " > 1
+ 1996  vi 1
+ 1997  gll
+ 1998  vi 1
+ 1999  cp 1 2
+ 2000  vi 2
+ 2001  cd work/public/linux
+ 2002  git log
+ 2003  cdw
+ 2004  cd iwlwifi-chrome-kernel/
+ 2005  git remote -v
+ 2006  git fetch
+ 2007  git log upstream/chromeos-4.4
+ 2008  git log upstream/chromeos-4.14
+ 2009  git log upstream/chromeos-4.19
+ 2010  git log upstream/chromeos-5.4
+ 2011  git log upstream/chromeos-5.10
+ 2012  git log upstream/chromeos-5.15
+ 2013  git log upstream/chromeos-5.15 --grep="fix MBSSID parsing use-after-free"
+ 2014  git log upstream/chromeos-5.15 --grep="fix crash in beacon protection for P2P-device"
+ 2015  git log --oneline upstream/chromeos-5.15 --grep="fix crash in beacon protection for P2P-device"
+ 2016  git log --oneline upstream/chromeos-5.10 --grep="fix crash in beacon protection for P2P-device"
+ 2017  git log --oneline upstream/chromeos-5.10 --grep="fix MBSSID parsing use-after-free"
+ 2018  git log --oneline upstream/chromeos-5.4 --grep="fix MBSSID parsing use-after-free"
+ 2019  git log --oneline upstream/chromeos-5.4 --grep="fix crash in beacon protection for P2P-device"
+ 2020  git log --oneline upstream/chromeos-4.19 --grep="fix crash in beacon protection for P2P-device"
+ 2021  git log --oneline upstream/chromeos-4.14 --grep="fix crash in beacon protection for P2P-device"
+ 2022  git log --oneline upstream/chromeos-4.4 --grep="fix crash in beacon protection for P2P-device"
+ 2023  git log --oneline upstream/chromeos-5.4 --grep="fix crash in beacon protection for P2P-device"
+ 2024  git log --oneline upstream/chromeos-5.4 --grep="fix MBSSID parsing use-after-free"
+ 2025  git log --oneline upstream/chromeos-4.19 --grep="fix MBSSID parsing use-after-free"
+ 2026  git log --oneline upstream/chromeos-4.14 --grep="fix MBSSID parsing use-after-free"
+ 2027  git log --oneline upstream/chromeos-4.4 --grep="fix MBSSID parsing use-after-free"
+ 2028  gs 1ef983c6c9d4
+ 2029  cds
+ 2030  git branch 
+ 2031  git co core74
+ 2032  #git cherry-pick 22ead2b746e40f4672d123caf5ced10443d73613
+ 2033  git log --grep="fix MBSSID parsing use-after-free"
+ 2034  gs 562f72e7fa7c91e7a44f5415e1077a3f8df1dcc4
+ 2035  git branch 
+ 2036  git cherry-pick 22ead2b746e40f4672d123caf5ced10443d73613
+ 2037  vi net/mac80211/util.c
+ 2038  git cherry-pick --abort
+ 2039  vi net/mac80211/util.c
+ 2040  git log
+ 2041  gs 562f72e7fa7c91e7a44f5415e1077a3f8df1dcc4
+ 2042  git branch 
+ 2043  git cherry-pick 22ead2b746e40f4672d123caf5ced10443d73613
+ 2044  vi net/mac80211/util.c
+ 2045  git add net/mac80211/util.c
+ 2046  git cherry-pick --continue 
+ 2047  gs
+ 2048  git commit --amend 
+ 2049  alias|grep "git push"
+ 2050  git push origin HEAD:refs/for/release/core74
+ 2051  gs 22ead2b746e40f4672d123caf5ced10443d73613
+ 2052  git branch 
+ 2053  git gr scratch_len
+ 2054  git branch 
+ 2055  git gr scratch_len
+ 2056  vi net/mac80211/ieee80211_i.h
+ 2057  vi ~/Downloads/222115649_comment2_36393811_report-078931db3a9a61a4 
+ 2058  cds
+ 2059  git blame drivers/net/wireless/intel/iwlwifi/mvm/sta.c
+ 2060  git log --grep="fix MBSSID parsing use-after-free"
+ 2061  h
+ 2062  git branch -r|grep GaP_A
+ 2063  git co -b GaP_Alpha origin/release/GaP_Alpha
+ 2064  git diff
+ 2065  git add drivers/net/wireless/intel/iwlwifi/mvm/tx.c
+ 2066  git commit -s -m "fix"
+ 2067  git co -b GaP_Alpha origin/release/GaP_Alpha
+ 2068  git pull
+ 2069  gll
+ 2070  gll origin/release/GaP_Alpha
+ 2071  git branch 
+ 2072  pwd
+ 2073  cd ../iwlwifi-chrome-kernel/
+ 2074  git fetch
+ 2075  git fetch origin 
+ 2076  git branch 
+ 2077  git log chromeos-5.4__release/core74
+ 2078  git log origin/chromeos-5.4__release/core74
+ 2079  git tag|grep core70
+ 2080  git tag|grep core74
+ 2081  git tag|grep core74_pv
+ 2082  h
+ 2083  gs 7804c96fab9aa5c381761e1815866ed1bd05ba71
+ 2084  gs 7804c96fab9aa5c381761e1815866ed1bd05ba71 --names-only
+ 2085  gs 7804c96fab9aa5c381761e1815866ed1bd05ba71 --name-only
+ 2086  h> 2
+ 2087  vi 2
+ 2088  h
+ 2089  vi 1
+ 2090  ll
+ 2091  ll ~/Documents/
+ 2092  ll ~/Documents/maintainer/
+ 2093  c
+ 2094  git branch 
+ 2095  git log chromeos-5.4__master
+ 2096  git log origin/chromeos-5.4__master 
+ 2097  git log origin/chromeos-5.4__release/core72  
+ 2098  git log origin/chromeos-5.4__release/core74 
+ 2099  git fetch origin
+ 2100  git log origin/chromeos-5.4__release/core74 
+ 2101  git log origin/chromeos-5.4__release/core75 
+ 2102  git remote -v
+ 2103  git branch 
+ 2104  git co chromeos-5.4__release/core74-rebase-2022-11-08
+ 2105  git branch -D chromeos-5.4__release/core74-pv-63
+ 2106  for ver in 4.4 4.14 4.19 5.4 5.10 5.15; do git diff origin/chromeos-${ver}__release/core74..chromeos-${ver}__release/core74-2022-11-08 -- drivers/net/wireless/iwl7000; done 
+ 2107  for ver in 4.4 4.14 4.19 5.4 5.10 5.15; do echo ${ver};git diff origin/chromeos-${ver}__release/core74..chromeos-${ver}__release/core74-2022-11-08 -- drivers/net/wireless/iwl7000; done 
+ 2108  for ver in 4.4 4.14 4.19 5.4 5.10 5.15; do echo CHECKING ${ver};git diff origin/chromeos-${ver}__release/core74..chromeos-${ver}__release/core74-2022-11-08 -- drivers/net/wireless/iwl7000; done 
+ 2109  for ver in 4.4 4.14 4.19 5.4 5.10 5.15; do echo CHECKING ${ver}; git diff --stat upstream/chromeos-${ver}..chromeos-${ver}__release/core74-2022-11-08 |grep -v iwl7000; done
+ 2110  ll arch/x86/crypto/blake2s-x86_64.mod
+ 2111  git branch 
+ 2112  git co chromeos-4.4__release/core74-pv-63
+ 2113  for ver in 4.4 4.14 4.19 5.4 5.10 5.15; do echo CHECKING ${ver}; git diff --stat upstream/chromeos-${ver}..chromeos-${ver}__release/core74-2022-11-08 |grep -v iwl7000; done
+ 2114  git log chromeos-4.4__release/core74-pv-63
+ 2115  gs 05edbcd4d9cb77ea1d0a9b0e04e3ca553963fe23
+ 2116  for ver in 4.4 4.14 4.19 5.4 5.10 5.15; do echo CHECKING ${ver}; git diff --stat upstream/chromeos-${ver}..chromeos-${ver}__release/core74-2022-11-08 |grep -v iwl7000; done
+ 2117  git blame arch/x86/crypto/blake2s-x86_64.mod
+ 2118  gs 31419f7fcce1c
+ 2119  for ver in 4.4 4.14 4.19 5.4 5.10 5.15; do echo CHECKING ${ver}; git diff --stat upstream/chromeos-${ver}..chromeos-${ver}__release/core74-2022-11-08 |grep -v iwl7000; done
+ 2120  git status 
+ 2121  ll arch/x86/crypto/blake2s-x86_64.mod
+ 2122  make clean
+ 2123  make mrpoper
+ 2124  ll arch/x86/crypto/blake2s-x86_64.mod
+ 2125  git branch 
+ 2126  git branch |grep pv-63
+ 2127  git co chromeos-5.10__master
+ 2128  ll arch/x86/crypto/blake2s-x86_64.mod
+ 2129  git branch -D chromeos-4.14__release/core74-pv-63 chromeos-4.19__release/core74-pv-63 chromeos-4.4__release/core74-pv-63 chromeos-5.10__release/core74-pv-63 chromeos-5.15__release/core74-pv-63 chromeos-5.4__release/core74-pv-63
+ 2130  make clean
+ 2131  ll arch/x86/crypto/blake2s-x86_64.mod
+ 2132  git branch 
+ 2133  git log
+ 2134  git log origin/chromeos-4.4__release/core74 
+ 2135  git branch 
+ 2136  git log
+ 2137  git log origin/chromeos-4.4__release/core74
+ 2138  gs chromeos-4.4__release/core74-2022-11-08
+ 2139  git branch --contains chromeos-4.4__release/core74-2022-11-08
+ 2140  git branch 
+ 2141  ll arch/x86/crypto/blake2s-x86_64.mod
+ 2142  gs
+ 2143  gll
+ 2144  git rev-parse
+ 2145  git rev-parse chromeos-4.4-core74-pv-63,
+ 2146  man git-rev-parse
+ 2147  git cat-file tag chromeos-4.4-core74-pv-63,
+ 2148  git cat-file tag chromeos-4.4-core74-pv-63
+ 2149  git showtag chromeos-4.4-core74-pv-63
+ 2150  git for-each-ref refs/tags/chromeos-4.4-core74-pv-63 --shell --format='COMMIT=%(objectname)'
+ 2151  gs 0991283ce1878dd763ec1f8b552a511b0e6a2072
+ 2152  git for-each-ref refs/tags/chromeos-4.4__release/core74-2022-11-08 --shell --format='COMMIT=%(objectname)'
+ 2153  gs 31419f7fcce1c71b6812e542615390748ddd6a86
+ 2154  git branch --contains 31419f7fcce1c71b6812e542615390748ddd6a86
+ 2155  git for-each-ref refs/tags/chromeos-4.4__release/core74-2022-11-08 --shell --format='TAGGER=%(tagger)'
+ 2156  git for-each-ref refs/tags/chromeos-4.4__release/core74-2022-11-08
+ 2157  git tag -d chromeos-4.4__release/core74-2022-11-08
+ 2158  for ver in 4.4 4.14 4.19 5.4 5.10 5.15; do git diff origin/chromeos-${ver}__release/core74..chromeos-${ver}__release/core74-2022-11-08 -- drivers/net/wireless/iwl7000; done 
+ 2159  for ver in 4.4 4.14 4.19 5.4 5.10 5.15; do echo CHECKING ${ver}; git diff --stat upstream/chromeos-${ver}..chromeos-${ver}__release/core74-2022-11-08 |grep -v iwl7000; done 
+ 2160  git remote -v
+ 2161  h
+ 2162  git fetch upstream 
+ 2163  git fetch origin 
+ 2164  d=`date +%F`; for ver in 4.4 4.14 4.19; do git tag chromeos-${ver}__master-rebase-${d} origin/chromeos-${ver}__master; done
+ 2165  ../iwlwifi-tools/chromeos/chrome-send-core-rebase-master.sh 
+ 2166  git push origin chromeos-4.4__master:chromeos-4.4__master tag chromeos-4.4__master/rebase-2022-11-14 
+ 2167  git push origin chromeos-4.14__master:chromeos-4.14__master tag chromeos-4.14__master/rebase-2022-11-14 
+ 2168  git push origin chromeos-4.19__master:chromeos-4.19__master tag chromeos-4.19__master/rebase-2022-11-14 
+ 2169  ../iwlwifi-tools/chromeos/chrome-send-core.sh core74 rebase-2022-11-14 
+ 2170  core=core74; rev=rebase-2022-11-14 for ver in 4.4 4.14 4.19; do git tag chromeos-${ver}-${core}-${rev} origin/chromeos-${ver}__release/${core}; done  
+ 2171  core=core74; rev=rebase-2022-11-14; for ver in 4.4 4.14 4.19; do git tag chromeos-${ver}-${core}-${rev} origin/chromeos-${ver}__release/${core}; done
+ 2172  ../iwlwifi-tools/chromeos/chrome-send-core.sh core74 rebase-2022-11-14 
+ 2173  git push origin chromeos-4.4__release/core74-rebase-2022-11-14:chromeos-4.4__release/core74 tag chromeos-4.4__release/core74-2022-11-14 
+ 2174  git push origin chromeos-4.14__release/core74-rebase-2022-11-14:chromeos-4.14__release/core74 tag chromeos-4.14__release/core74-2022-11-14 
+ 2175  git push origin chromeos-4.19__release/core74-rebase-2022-11-14:chromeos-4.19__release/core74 tag chromeos-4.19__release/core74-2022-11-14 
+ 2176  core=core75; rev=rebase-2022-11-14; for ver in 4.4 4.14 4.19; do git tag chromeos-${ver}-${core}-${rev} origin/chromeos-${ver}__release/${core}; done
+ 2177  ../iwlwifi-tools/chromeos/chrome-send-core.sh core75 rebase-2022-11-14 
+ 2178  git push origin chromeos-4.4__release/core75-rebase-2022-11-14:chromeos-4.4__release/core75 tag chromeos-4.4__release/core75-2022-11-14 
+ 2179  git push origin chromeos-4.14__release/core75-rebase-2022-11-14:chromeos-4.14__release/core75 tag chromeos-4.14__release/core75-2022-11-14 
+ 2180  git push origin chromeos-4.19__release/core75-rebase-2022-11-14:chromeos-4.19__release/core75 tag chromeos-4.19__release/core75-2022-11-14 
+ 2181  h > hist_rebase_chrome.log
