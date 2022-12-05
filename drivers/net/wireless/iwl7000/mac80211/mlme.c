@@ -5227,8 +5227,7 @@ out_err:
 
 static void ieee80211_assoc_comeback(struct net_device *dev,
 				     struct ieee80211_mgd_assoc_data *assoc_data,
-				     u32 timeout)
-{
+				     u32 timeout) {
 #if CFG80211_VERSION < KERNEL_VERSION(6,0,0)
 	int i;
 
