@@ -42,8 +42,6 @@
 #include "inode_mark.h"
 #include "utils.h"
 
-static const char secagentd[] = "/usr/sbin/secagentd";
-
 #if defined(CONFIG_SECURITY_CHROMIUMOS_NO_UNPRIVILEGED_UNSAFE_MOUNTS) || \
 	defined(CONFIG_SECURITY_CHROMIUMOS_NO_SYMLINK_MOUNT)
 static void report(const char *origin, const struct path *path, char *operation)
@@ -214,7 +212,7 @@ static int chromiumos_security_file_open(struct file *file)
 	return policy == CHROMIUMOS_INODE_POLICY_BLOCK ? -EACCES : 0;
 }
 
-int chromiumos_sb_eat_lsm_opts(char *options, void **mnt_opts)
+static int chromiumos_sb_eat_lsm_opts(char *options, void **mnt_opts)
 {
 	char *from = options, *to = options;
 	bool found = false;
@@ -274,6 +272,7 @@ static int chromiumos_bprm_creds_for_exec(struct linux_binprm *bprm)
 			task_pid_nr(current));
 		kfree(cmdline);
 
+		pr_notice_ratelimited("memfd execution blocked\n");
 		return -EACCES;
 	}
 	return 0;
@@ -281,13 +280,18 @@ static int chromiumos_bprm_creds_for_exec(struct linux_binprm *bprm)
 
 static int chromiumos_locked_down(enum lockdown_reason what)
 {
-	if (what == LOCKDOWN_BPF_WRITE_USER)
+	if (what == LOCKDOWN_BPF_WRITE_USER) {
+		pr_notice_ratelimited("BPF_WRITE_USER blocked\n");
 		return -EACCES;
+	}
 
 	return 0;
 }
 
 #ifdef CONFIG_BPF_SYSCALL
+
+static const char secagentd[] = "/usr/sbin/secagentd";
+
 static int chromiumos_bpf(int cmd, union bpf_attr *attr, unsigned int size)
 {
 	char buf[128];
@@ -302,7 +306,7 @@ static int chromiumos_bpf(int cmd, union bpf_attr *attr, unsigned int size)
 	}
 
 	if (res < len || strncmp(buf, secagentd, len)) {
-		pr_notice("bpf syscall blocked");
+		pr_notice_ratelimited("bpf syscall blocked\n");
 		return -EACCES;
 	}
 
