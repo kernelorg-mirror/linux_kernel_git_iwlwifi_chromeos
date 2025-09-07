@@ -183,7 +183,7 @@ struct iwl_rfi_ddr_lut_entry iwl_mvm_rfi_ddr_table[IWL_RFI_DDR_LUT_SIZE] = {
 static inline bool iwl_mvm_rfi_enabled_by_mac_type(struct iwl_mvm *mvm,
 						   bool so_rfi_mode)
 {
-	u32 mac_type = CSR_HW_REV_TYPE(mvm->trans->hw_rev);
+	u32 mac_type = CSR_HW_REV_TYPE(mvm->trans->info.hw_rev);
 	bool enable_rfi = false;
 
 	if ((mac_type != IWL_CFG_ANY && mac_type >= IWL_CFG_MAC_TYPE_MA) ||
@@ -211,11 +211,11 @@ bool iwl_mvm_rfi_supported(struct iwl_mvm *mvm, bool so_rfi_mode, bool is_ddr)
 
 	IWL_DEBUG_FW(mvm,
 		     "HW is integrated:%s rfi_enabled:%s fw_rfi_state:%d\n",
-		     mvm->trans->trans_cfg->integrated ? "yes" : "no",
+		     mvm->trans->mac_cfg->integrated ? "yes" : "no",
 		     rfi_enable_mac_type ? "yes" : "no", mvm->fw_rfi_state);
 
 	return (is_ddr ? ddr_capa : dlvr_capa) && mvm->bios_enable_rfi &&
-		rfi_enable_mac_type && mvm->trans->trans_cfg->integrated &&
+		rfi_enable_mac_type && mvm->trans->mac_cfg->integrated &&
 		iwl_mvm_fw_rfi_state_supported(mvm);
 }
 

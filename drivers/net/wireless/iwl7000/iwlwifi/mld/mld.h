@@ -8,8 +8,6 @@
 #include <linux/leds.h>
 #include <net/mac80211.h>
 
-#include <net/mac80211.h>
-
 #include "iwl-trans.h"
 #include "iwl-op-mode.h"
 #include "fw/runtime.h"
@@ -37,6 +35,8 @@
 #include "rfi.h"
 #include "ptp.h"
 #include "time_sync.h"
+#include "ftm-initiator.h"
+#include "ftm-responder.h"
 
 /**
  * DOC: Introduction
@@ -118,6 +118,7 @@
  * @monitor.ampdu_toggle: the state of the previous packet to track A-MPDU
  * @monitor.cur_aid: current association id tracked by the sniffer
  * @monitor.cur_bssid: current bssid tracked by the sniffer
+ * @monitor.ptp_time: set the Rx mactime using the device's PTP clock time
  * @monitor.p80: primary channel position relative to he whole bandwidth, in
  * steps of 80 MHz
  * @fw_id_to_link_sta: maps a fw id of a sta to the corresponding
@@ -128,7 +129,6 @@
  *	cleanup using iwl_mld_free_internal_sta
  * @netdetect: indicates the FW is in suspend mode with netdetect configured
  * @p2p_device_vif: points to the p2p device vif if exists
- * @bt_is_active: indicates that BT is active
  * @dev: pointer to device struct. For printing purposes
  * @trans: pointer to the transport layer
  * @cfg: pointer to the device configuration
@@ -156,9 +156,13 @@
  * @radio_kill: bitmap of radio kill status
  * @radio_kill.hw: radio is killed by hw switch
  * @radio_kill.ct: radio is killed because the device it too hot
+ * @power_budget_mw: maximum cTDP power budget as defined for this system and
+ *	device
  * @addresses: device MAC addresses.
  * @scan: instance of the scan object
+ * @channel_survey: channel survey information collected during scan
  * @wowlan: WoWLAN support data.
+ * @debug_max_sleep: maximum sleep time in D3 (for debug purposes)
  * @led: the led device
  * @mcc_src: the source id of the MCC, comes from the firmware
  * @bios_enable_puncturing: is puncturing enabled by bios
@@ -176,6 +180,7 @@
  * @mcast_filter_cmd: pointer to the multicast filter command.
  * @mgmt_tx_ant: stores the last TX antenna index; used for setting
  *	TX rate_n_flags for non-STA mgmt frames (toggles on every TX failure).
+ * @fw_rates_ver_3: FW rates are in version 3
  * @low_latency: low-latency manager.
  * @tzone: thermal zone device's data
  * @cooling_dev: cooling device's related data
@@ -187,6 +192,8 @@
  * @ptp_data: data of the PTP clock
  * @time_sync: time sync data.
  * @ftm_initiator: FTM initiator data
+ * @ftm_responder: FTM responder data
+ * @last_bt_notif: last received BT Coex notif
  */
 struct iwl_mld {
 	/* Add here fields that need clean up on restart */
@@ -204,19 +211,20 @@ struct iwl_mld {
 #ifdef CPTCFG_IWLWIFI_DEBUGFS
 			__le16 cur_aid;
 			u8 cur_bssid[ETH_ALEN];
+			bool ptp_time;
 #endif
 		} monitor;
 #ifdef CONFIG_PM_SLEEP
 		bool netdetect;
 #endif /* CONFIG_PM_SLEEP */
 		struct ieee80211_vif *p2p_device_vif;
-		bool bt_is_active;
+		struct iwl_bt_coex_profile_notif last_bt_notif;
 	);
 	struct ieee80211_link_sta __rcu *fw_id_to_link_sta[IWL_STATION_COUNT_MAX];
 	/* And here fields that survive a fw restart */
 	struct device *dev;
 	struct iwl_trans *trans;
-	const struct iwl_cfg *cfg;
+	const struct iwl_rf_cfg *cfg;
 	const struct iwl_fw *fw;
 	struct ieee80211_hw *hw;
 	struct wiphy *wiphy;
@@ -244,10 +252,14 @@ struct iwl_mld {
 		    ct:1;
 	} radio_kill;
 
+	u32 power_budget_mw;
+
 	struct mac_address addresses[IWL_MLD_MAX_ADDRESSES];
 	struct iwl_mld_scan scan;
+	struct iwl_mld_survey *channel_survey;
 #ifdef CONFIG_PM_SLEEP
 	struct wiphy_wowlan_support wowlan;
+	u32 debug_max_sleep;
 #endif /* CONFIG_PM_SLEEP */
 #ifdef CPTCFG_IWLWIFI_LEDS
 	struct led_classdev led;
@@ -269,6 +281,8 @@ struct iwl_mld {
 
 	u8 mgmt_tx_ant;
 
+	bool fw_rates_ver_3;
+
 	struct iwl_mld_low_latency low_latency;
 
 	bool ibss_manager;
@@ -278,13 +292,21 @@ struct iwl_mld {
 #endif
 #ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
 	/**
-	 * @nmi_thresh: the hcmd number on which nmi will be triggered
+	 * @random_nmi: random NMI parameters
+	 *
+	 * @random_nmi.nmi_thresh: the hcmd number on which NMI will be
+	 *	triggered. 0 means that random NMI is disabled.
+	 * @random_nmi.hcmd_counter: counts the number of hcmds sent
+	 * @random_nmi.nmi_counter: counts the number of NMIs triggered
+	 * @random_nmi.nmi_limit: the number of NMIs to trigger before disabling
+	 *	random NMI
 	 */
-	u8 nmi_thresh;
-	/**
-	 * @hcmd_counter: counts the number of hcmd sent
-	 */
-	u32 hcmd_counter;
+	struct iwl_mld_random_nmi {
+		u8 nmi_thresh;
+		u32 hcmd_counter;
+		u32 nmi_counter;
+		u32 nmi_limit;
+	} random_nmi;
 #endif
 
 	struct iwl_mld_rfi rfi;
@@ -293,11 +315,8 @@ struct iwl_mld {
 
 	struct iwl_mld_time_sync_data __rcu *time_sync;
 
-	struct {
-		struct cfg80211_pmsr_request *req;
-		struct wireless_dev *req_wdev;
-		int responses[IWL_TOF_MAX_APS];
-	} ftm_initiator;
+	struct ftm_initiator_data ftm_initiator;
+	struct ftm_responder_data ftm_responder;
 };
 
 /* memset the part of the struct that requires cleanup on restart */
@@ -314,7 +333,7 @@ iwl_mld_cleanup_rfi(struct iwl_mld *mld)
 	mld->rfi.fw_table = NULL;
 }
 
-/* Cleanup function for struct iwl_mld_vif, will be called in restart */
+/* Cleanup function for struct iwl_mld, will be called in restart */
 static inline void
 iwl_cleanup_mld(struct iwl_mld *mld)
 {
@@ -361,7 +380,6 @@ iwl_mld_add_debugfs_files(struct iwl_mld *mld, struct dentry *debugfs_dir)
 {}
 #endif
 
-int iwl_mld_run_fw_init_sequence(struct iwl_mld *mld);
 int iwl_mld_load_fw(struct iwl_mld *mld);
 void iwl_mld_stop_fw(struct iwl_mld *mld);
 int iwl_mld_start_fw(struct iwl_mld *mld);
@@ -441,7 +459,7 @@ iwl_mld_legacy_hw_idx_to_mac80211_idx(u32 rate_n_flags,
 	int rate = rate_n_flags & RATE_LEGACY_RATE_MSK;
 	bool is_lb = band == NL80211_BAND_2GHZ;
 
-	if (format == RATE_MCS_LEGACY_OFDM_MSK)
+	if (format == RATE_MCS_MOD_TYPE_LEGACY_OFDM)
 		return is_lb ? rate + IWL_FIRST_OFDM_RATE : rate;
 
 	/* CCK is not allowed in 5 GHz */
@@ -587,5 +605,20 @@ static inline bool iwl_mld_error_before_recovery(struct iwl_mld *mld)
 }
 
 int iwl_mld_tdls_sta_count(struct iwl_mld *mld);
+
+static inline enum iwl_location_cipher
+iwl_mld_cipher_to_location_cipher(u32 cipher)
+{
+	switch (cipher) {
+	case WLAN_CIPHER_SUITE_CCMP:
+		return IWL_LOCATION_CIPHER_CCMP_128;
+	case WLAN_CIPHER_SUITE_GCMP:
+		return IWL_LOCATION_CIPHER_GCMP_128;
+	case WLAN_CIPHER_SUITE_GCMP_256:
+		return IWL_LOCATION_CIPHER_GCMP_256;
+	default:
+		return IWL_LOCATION_CIPHER_INVALID;
+	}
+}
 
 #endif /* __iwl_mld_h__ */

@@ -22,16 +22,58 @@ int iwl_mld_allocate_fw_phy_id(struct iwl_mld *mld)
 }
 EXPORT_SYMBOL_IF_IWLWIFI_KUNIT(iwl_mld_allocate_fw_phy_id);
 
-struct cfg80211_chan_def *
-iwl_mld_get_chandef_from_chanctx(struct ieee80211_chanctx_conf *ctx)
+struct iwl_mld_chanctx_usage_data {
+	struct iwl_mld *mld;
+	struct ieee80211_chanctx_conf *ctx;
+	bool use_def;
+};
+
+static bool iwl_mld_chanctx_fils_enabled(struct ieee80211_vif *vif,
+					 struct ieee80211_chanctx_conf *ctx)
 {
-	bool use_def = cfg80211_channel_is_psc(ctx->def.chan) ||
+	if (vif->type != NL80211_IFTYPE_AP)
+		return false;
+
+	return cfg80211_channel_is_psc(ctx->def.chan) ||
 		(ctx->def.chan->band == NL80211_BAND_6GHZ &&
 		 ctx->def.width >= NL80211_CHAN_WIDTH_80);
-
-	return use_def ? &ctx->def : &ctx->min_def;
 }
-EXPORT_SYMBOL_IF_IWLWIFI_KUNIT(iwl_mld_get_chandef_from_chanctx);
+
+static void iwl_mld_chanctx_usage_iter(void *_data, u8 *mac,
+				       struct ieee80211_vif *vif)
+{
+	struct iwl_mld_chanctx_usage_data *data = _data;
+	struct ieee80211_bss_conf *link_conf;
+	int link_id;
+
+	for_each_vif_active_link(vif, link_conf, link_id) {
+		if (rcu_access_pointer(link_conf->chanctx_conf) != data->ctx)
+			continue;
+
+		if (vif->type == NL80211_IFTYPE_AP && link_conf->ftm_responder)
+			data->use_def = true;
+
+		if (iwl_mld_chanctx_fils_enabled(vif, data->ctx))
+			data->use_def = true;
+	}
+}
+
+struct cfg80211_chan_def *
+iwl_mld_get_chandef_from_chanctx(struct iwl_mld *mld,
+				 struct ieee80211_chanctx_conf *ctx)
+{
+	struct iwl_mld_chanctx_usage_data data = {
+		.mld = mld,
+		.ctx = ctx,
+	};
+
+	ieee80211_iterate_active_interfaces_mtx(mld->hw,
+						IEEE80211_IFACE_ITER_NORMAL,
+						iwl_mld_chanctx_usage_iter,
+						&data);
+
+	return data.use_def ? &ctx->def : &ctx->min_def;
+}
 
 static u8
 iwl_mld_nl80211_width_to_fw(enum nl80211_chan_width width)
@@ -115,7 +157,6 @@ int iwl_mld_phy_fw_action(struct iwl_mld *mld,
 	return ret;
 }
 
-#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
 static u32 iwl_mld_get_phy_config(struct iwl_mld *mld)
 {
 	u32 phy_config = ~(FW_PHY_CFG_TX_CHAIN |
@@ -137,23 +178,30 @@ int iwl_mld_send_phy_cfg_cmd(struct iwl_mld *mld)
 		.phy_cfg = cpu_to_le32(iwl_mld_get_phy_config(mld)),
 		.calib_control.event_trigger = default_calib->event_trigger,
 		.calib_control.flow_trigger = default_calib->flow_trigger,
+		.phy_specific_cfg = mld->fwrt.phy_filters,
 	};
 
-	/* For now, this function is called only if
-	 * MLD_SNIFFER_REDUCED_SENSITIVITY is enabled, but since we remove the
-	 * sensitivity calibration, better be safe than sorry and ensure
-	 * nobody called this function with MLD_SNIFFER_REDUCED_SENSITIVITY
-	 * disabled.
-	 */
-	WARN_ON(!mld->trans->dbg_cfg.MLD_SNIFFER_REDUCED_SENSITIVITY);
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	if(mld->trans->dbg_cfg.MLD_SNIFFER_REDUCED_SENSITIVITY) {
+		cmd.calib_control.event_trigger &=
+			cpu_to_le32(~IWL_CALIB_CFG_SENSITIVITY_IDX);
+		cmd.calib_control.flow_trigger &=
+			cpu_to_le32(~IWL_CALIB_CFG_SENSITIVITY_IDX);
+	}
+#endif
 
-	cmd.calib_control.event_trigger &=
-		cpu_to_le32(~IWL_CALIB_CFG_SENSITIVITY_IDX);
-	cmd.calib_control.flow_trigger &=
-		cpu_to_le32(~IWL_CALIB_CFG_SENSITIVITY_IDX);
-
-	IWL_INFO(mld, "Sending Phy CFG command: 0x%x\n", cmd.phy_cfg);
+	IWL_DEBUG_INFO(mld, "Sending Phy CFG command: 0x%x\n", cmd.phy_cfg);
 
 	return iwl_mld_send_cmd_pdu(mld, PHY_CONFIGURATION_CMD, &cmd);
 }
-#endif /* CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES */
+
+void iwl_mld_update_phy_chandef(struct iwl_mld *mld,
+				struct ieee80211_chanctx_conf *ctx)
+{
+	struct iwl_mld_phy *phy = iwl_mld_phy_from_mac80211(ctx);
+	struct cfg80211_chan_def *chandef =
+		iwl_mld_get_chandef_from_chanctx(mld, ctx);
+
+	phy->chandef = *chandef;
+	iwl_mld_phy_fw_action(mld, ctx, FW_CTXT_ACTION_MODIFY);
+}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2014, 2018-2024 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2025 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -24,7 +24,6 @@
 #include "iwl-modparams.h"
 #include "iwl-nvm-parse.h"
 #ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
-#include "iwl-dnt-cfg.h"
 #include "fw/testmode.h"
 #endif
 #include "time-sync.h"
@@ -33,8 +32,8 @@
 #define MVM_UCODE_CALIB_TIMEOUT	(2 * HZ * CPTCFG_IWL_TIMEOUT_FACTOR)
 
 struct iwl_mvm_alive_data {
+	__le32 sku_id[3];
 	bool valid;
-	u32 scd_base_addr;
 };
 
 static int iwl_send_tx_ant_cfg(struct iwl_mvm *mvm, u8 valid_tx_ant)
@@ -61,13 +60,13 @@ static int iwl_send_rss_cfg_cmd(struct iwl_mvm *mvm)
 			     BIT(IWL_RSS_HASH_TYPE_IPV6_PAYLOAD),
 	};
 
-	if (mvm->trans->num_rx_queues == 1)
+	if (mvm->trans->info.num_rxqs == 1)
 		return 0;
 
 	/* Do not direct RSS traffic to Q 0 which is our fallback queue */
 	for (i = 0; i < ARRAY_SIZE(cmd.indirection_table); i++)
 		cmd.indirection_table[i] =
-			1 + (i % (mvm->trans->num_rx_queues - 1));
+			1 + (i % (mvm->trans->info.num_rxqs - 1));
 	netdev_rss_key_fill(cmd.secret_key, sizeof(cmd.secret_key));
 
 	return iwl_mvm_send_cmd_pdu(mvm, RSS_CONFIG_CMD, 0, sizeof(cmd), &cmd);
@@ -118,7 +117,7 @@ static bool iwl_alive_fn(struct iwl_notif_wait_data *notif_wait,
 	u32 i;
 
 
-	if (version == 6) {
+	if (version >= 6) {
 		struct iwl_alive_ntf_v6 *palive;
 
 		if (pkt_len < sizeof(*palive))
@@ -161,6 +160,17 @@ static bool iwl_alive_fn(struct iwl_notif_wait_data *notif_wait,
 				}
 			}
 		}
+
+		if (version >= 8) {
+			const struct iwl_alive_ntf *palive_v8 =
+				(void *)pkt->data;
+
+			if (pkt_len < sizeof(*palive_v8))
+				return false;
+
+			IWL_DEBUG_FW(mvm, "platform id: 0x%llx\n",
+				     palive_v8->platform_id);
+		}
 	}
 
 	if (version >= 5) {
@@ -175,14 +185,15 @@ static bool iwl_alive_fn(struct iwl_notif_wait_data *notif_wait,
 		lmac2 = &palive->lmac_data[1];
 		status = le16_to_cpu(palive->status);
 
-		mvm->trans->sku_id[0] = le32_to_cpu(palive->sku_id.data[0]);
-		mvm->trans->sku_id[1] = le32_to_cpu(palive->sku_id.data[1]);
-		mvm->trans->sku_id[2] = le32_to_cpu(palive->sku_id.data[2]);
+		BUILD_BUG_ON(sizeof(palive->sku_id.data) !=
+			     sizeof(alive_data->sku_id));
+		memcpy(alive_data->sku_id, palive->sku_id.data,
+		       sizeof(palive->sku_id.data));
 
 		IWL_DEBUG_FW(mvm, "Got sku_id: 0x0%x 0x0%x 0x0%x\n",
-			     mvm->trans->sku_id[0],
-			     mvm->trans->sku_id[1],
-			     mvm->trans->sku_id[2]);
+			     le32_to_cpu(alive_data->sku_id[0]),
+			     le32_to_cpu(alive_data->sku_id[1]),
+			     le32_to_cpu(alive_data->sku_id[2]));
 	} else if (iwl_rx_packet_payload_len(pkt) == sizeof(struct iwl_alive_ntf_v4)) {
 		struct iwl_alive_ntf_v4 *palive;
 
@@ -225,7 +236,7 @@ static bool iwl_alive_fn(struct iwl_notif_wait_data *notif_wait,
 
 	if (umac_error_table) {
 		if (umac_error_table >=
-		    mvm->trans->cfg->min_umac_error_event_table) {
+		    mvm->trans->mac_cfg->base->min_umac_error_event_table) {
 			iwl_fw_umac_set_alive_err_table(mvm->trans,
 							umac_error_table);
 		} else {
@@ -237,7 +248,6 @@ static bool iwl_alive_fn(struct iwl_notif_wait_data *notif_wait,
 		}
 	}
 
-	alive_data->scd_base_addr = le32_to_cpu(lmac1->dbg_ptrs.scd_base_ptr);
 	alive_data->valid = status == IWL_ALIVE_STATUS_OK;
 
 #ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
@@ -290,7 +300,7 @@ static void iwl_mvm_print_pd_notification(struct iwl_mvm *mvm)
 	IWL_ERR(mvm, #reg_name ": 0x%x\n", iwl_read_umac_prph(trans, reg_name))
 
 	struct iwl_trans *trans = mvm->trans;
-	enum iwl_device_family device_family = trans->trans_cfg->device_family;
+	enum iwl_device_family device_family = trans->mac_cfg->device_family;
 
 	if (device_family < IWL_DEVICE_FAMILY_8000)
 		return;
@@ -312,7 +322,6 @@ static int iwl_mvm_load_ucode_wait_alive(struct iwl_mvm *mvm,
 {
 	struct iwl_notification_wait alive_wait;
 	struct iwl_mvm_alive_data alive_data = {};
-	const struct fw_img *fw;
 	int ret;
 	enum iwl_ucode_type old_type = mvm->fwrt.cur_fw_img;
 	static const u16 alive_cmd[] = { UCODE_ALIVE_NTFY };
@@ -325,11 +334,7 @@ static int iwl_mvm_load_ucode_wait_alive(struct iwl_mvm *mvm,
 	    iwl_fw_dbg_conf_usniffer(mvm->fw, FW_DBG_START_FROM_ALIVE) &&
 	    !(fw_has_capa(&mvm->fw->ucode_capa,
 			  IWL_UCODE_TLV_CAPA_USNIFFER_UNIFIED)))
-		fw = iwl_get_ucode_image(mvm->fw, IWL_UCODE_REGULAR_USNIFFER);
-	else
-		fw = iwl_get_ucode_image(mvm->fw, ucode_type);
-	if (WARN_ON(!fw))
-		return -EINVAL;
+		ucode_type = IWL_UCODE_REGULAR_USNIFFER;
 	iwl_fw_set_current_image(&mvm->fwrt, ucode_type);
 	clear_bit(IWL_MVM_STATUS_FIRMWARE_RUNNING, &mvm->status);
 
@@ -342,7 +347,8 @@ static int iwl_mvm_load_ucode_wait_alive(struct iwl_mvm *mvm,
 	 * For the unified firmware case, the ucode_type is not
 	 * INIT, but we still need to run it.
 	 */
-	ret = iwl_trans_start_fw(mvm->trans, fw, run_in_rfkill);
+	ret = iwl_trans_start_fw(mvm->trans, mvm->fw, ucode_type,
+				 run_in_rfkill);
 	if (ret) {
 		iwl_fw_set_current_image(&mvm->fwrt, old_type);
 		iwl_remove_notification(&mvm->notif_wait, &alive_wait);
@@ -356,7 +362,7 @@ static int iwl_mvm_load_ucode_wait_alive(struct iwl_mvm *mvm,
 	ret = iwl_wait_notification(&mvm->notif_wait, &alive_wait,
 				    MVM_UCODE_ALIVE_TIMEOUT);
 
-	if (mvm->trans->trans_cfg->device_family ==
+	if (mvm->trans->mac_cfg->device_family ==
 	    IWL_DEVICE_FAMILY_AX210) {
 		/* print these registers regardless of alive fail/success */
 		IWL_INFO(mvm, "WFPM_UMAC_PD_NOTIFICATION: 0x%x\n",
@@ -373,14 +379,14 @@ static int iwl_mvm_load_ucode_wait_alive(struct iwl_mvm *mvm,
 		struct iwl_trans *trans = mvm->trans;
 
 		/* SecBoot info */
-		if (trans->trans_cfg->device_family >=
+		if (trans->mac_cfg->device_family >=
 					IWL_DEVICE_FAMILY_22000) {
 			IWL_ERR(mvm,
 				"SecBoot CPU1 Status: 0x%x, CPU2 Status: 0x%x\n",
 				iwl_read_umac_prph(trans, UMAG_SB_CPU_1_STATUS),
 				iwl_read_umac_prph(trans,
 						   UMAG_SB_CPU_2_STATUS));
-		} else if (trans->trans_cfg->device_family >=
+		} else if (trans->mac_cfg->device_family >=
 			   IWL_DEVICE_FAMILY_8000) {
 			IWL_ERR(mvm,
 				"SecBoot CPU1 Status: 0x%x, CPU2 Status: 0x%x\n",
@@ -391,7 +397,7 @@ static int iwl_mvm_load_ucode_wait_alive(struct iwl_mvm *mvm,
 		iwl_mvm_print_pd_notification(mvm);
 
 		/* LMAC/UMAC PC info */
-		if (trans->trans_cfg->device_family >=
+		if (trans->mac_cfg->device_family >=
 					IWL_DEVICE_FAMILY_22000) {
 			pc_data = trans->dbg.pc_data;
 			for (count = 0; count < trans->dbg.num_pc;
@@ -399,7 +405,7 @@ static int iwl_mvm_load_ucode_wait_alive(struct iwl_mvm *mvm,
 				IWL_ERR(mvm, "%s: 0x%x\n",
 					pc_data->pc_name,
 					pc_data->pc_address);
-		} else if (trans->trans_cfg->device_family >=
+		} else if (trans->mac_cfg->device_family >=
 					IWL_DEVICE_FAMILY_9000) {
 			IWL_ERR(mvm, "UMAC PC: 0x%x\n",
 				iwl_read_umac_prph(trans,
@@ -430,15 +436,15 @@ static int iwl_mvm_load_ucode_wait_alive(struct iwl_mvm *mvm,
 	/* if reached this point, Alive notification was received */
 	iwl_mei_alive_notif(true);
 
+	iwl_trans_fw_alive(mvm->trans);
+
 	ret = iwl_pnvm_load(mvm->trans, &mvm->notif_wait,
-			    &mvm->fw->ucode_capa);
+			    mvm->fw, alive_data.sku_id);
 	if (ret) {
 		IWL_ERR(mvm, "Timeout waiting for PNVM load!\n");
 		iwl_fw_set_current_image(&mvm->fwrt, old_type);
 		return ret;
 	}
-
-	iwl_trans_fw_alive(mvm->trans, alive_data.scd_base_addr);
 
 	/*
 	 * Note: all the queues are enabled as part of the interface
@@ -481,7 +487,7 @@ static void iwl_mvm_phy_filter_init(struct iwl_mvm *mvm,
 				    struct iwl_phy_specific_cfg *phy_filters)
 {
 #ifdef CONFIG_ACPI
-	*phy_filters = mvm->phy_filters;
+	*phy_filters = mvm->fwrt.phy_filters;
 #endif /* CONFIG_ACPI */
 #ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
 	if (IWL_MVM_PHY_FILTER_CHAIN_A)
@@ -512,7 +518,7 @@ static void iwl_mvm_uats_init(struct iwl_mvm *mvm)
 		.dataflags[0] = IWL_HCMD_DFL_NOCOPY,
 	};
 
-	if (mvm->trans->trans_cfg->device_family < IWL_DEVICE_FAMILY_AX210) {
+	if (mvm->trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_AX210) {
 		IWL_DEBUG_RADIO(mvm, "UATS feature is not supported\n");
 		return;
 	}
@@ -526,11 +532,10 @@ static void iwl_mvm_uats_init(struct iwl_mvm *mvm)
 		return;
 	}
 
-	ret = iwl_uefi_get_uats_table(mvm->trans, &mvm->fwrt);
-	if (ret < 0) {
-		IWL_DEBUG_FW(mvm, "failed to read UATS table (%d)\n", ret);
+	iwl_uefi_get_uats_table(mvm->trans, &mvm->fwrt);
+
+	if (!mvm->fwrt.uats_valid)
 		return;
-	}
 
 	ret = iwl_mvm_send_cmd(mvm, &cmd);
 	if (ret < 0)
@@ -610,7 +615,7 @@ static int iwl_send_phy_cfg_cmd(struct iwl_mvm *mvm)
 
 	/* set flags extra PHY configuration flags from the device's cfg */
 	phy_cfg_cmd.phy_cfg |=
-		cpu_to_le32(mvm->trans->trans_cfg->extra_phy_cfg_flags);
+		cpu_to_le32(mvm->trans->mac_cfg->extra_phy_cfg_flags);
 
 #ifdef CPTCFG_IWLWIFI_ATLAS_PLATFORM_WORKAROUND
 	if (dmi_match(DMI_BOARD_NAME, "Atlas")) {
@@ -734,7 +739,7 @@ static int iwl_run_unified_mvm_ucode(struct iwl_mvm *mvm)
 
 	mvm->rfkill_safe_init_done = false;
 
-	if (mvm->trans->trans_cfg->device_family == IWL_DEVICE_FAMILY_AX210) {
+	if (mvm->trans->mac_cfg->device_family == IWL_DEVICE_FAMILY_AX210) {
 		sb_cfg = iwl_read_umac_prph(mvm->trans, SB_MODIFY_CFG_FLAG);
 		/* if needed, we'll reset this on our way out later */
 		mvm->fw_product_reset = sb_cfg == SB_CFG_RESIDES_IN_ROM;
@@ -767,11 +772,6 @@ static int iwl_run_unified_mvm_ucode(struct iwl_mvm *mvm)
 	}
 	iwl_dbg_tlv_time_point(&mvm->fwrt, IWL_FW_INI_TIME_POINT_AFTER_ALIVE,
 			       NULL);
-
-	if (mvm->trans->trans_cfg->device_family >= IWL_DEVICE_FAMILY_BZ)
-		mvm->trans->step_urm = !!(iwl_read_umac_prph(mvm->trans,
-							     CNVI_PMU_STEP_FLOW) &
-						CNVI_PMU_STEP_FLOW_FORCE_URM);
 
 	/* Send init config command to mark that we are sending NVM access
 	 * commands
@@ -872,11 +872,8 @@ int iwl_run_init_mvm_ucode(struct iwl_mvm *mvm)
 		IWL_ERR(mvm, "Failed to start INIT ucode: %d\n", ret);
 		goto remove_notif;
 	}
-#ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
-	iwl_dnt_start(mvm->trans);
-#endif
 
-	if (mvm->trans->trans_cfg->device_family < IWL_DEVICE_FAMILY_8000) {
+	if (mvm->trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_8000) {
 		ret = iwl_mvm_send_bt_init_conf(mvm);
 		if (ret)
 			goto remove_notif;
@@ -1430,7 +1427,7 @@ void iwl_mvm_get_bios_tables(struct iwl_mvm *mvm)
 		}
 	}
 
-	iwl_acpi_get_phy_filters(&mvm->fwrt, &mvm->phy_filters);
+	iwl_acpi_get_phy_filters(&mvm->fwrt);
 
 	if (iwl_bios_get_eckv(&mvm->fwrt, &mvm->ext_clock_valid))
 		IWL_DEBUG_RADIO(mvm, "ECKV table doesn't exist in BIOS\n");
@@ -1598,10 +1595,6 @@ int iwl_mvm_up(struct iwl_mvm *mvm)
 	ret = iwl_mvm_sf_update(mvm, NULL, false);
 	if (ret)
 		IWL_ERR(mvm, "Failed to initialize Smart Fifo\n");
-
-#ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
-	iwl_dnt_start(mvm->trans);
-#endif
 
 	if (!iwl_trans_dbg_ini_valid(mvm->trans)) {
 		mvm->fwrt.dump.conf = FW_DBG_INVALID;
@@ -1843,9 +1836,6 @@ int iwl_mvm_load_d3_fw(struct iwl_mvm *mvm)
 		goto error;
 	}
 
-#ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
-	iwl_dnt_start(mvm->trans);
-#endif
 	ret = iwl_send_tx_ant_cfg(mvm, iwl_mvm_get_valid_tx_ant(mvm));
 	if (ret)
 		goto error;

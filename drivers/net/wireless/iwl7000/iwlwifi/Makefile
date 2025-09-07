@@ -13,24 +13,34 @@ iwlwifi-objs		+= iwl-trans.o
 iwlwifi-objs		+= fw/img.o fw/notif-wait.o fw/rs.o
 iwlwifi-objs		+= fw/dbg.o fw/pnvm.o fw/dump.o
 iwlwifi-objs		+= fw/regulatory.o
-iwlwifi-$(CPTCFG_IWLMVM)	+= fw/paging.o fw/smem.o fw/init.o
-iwlwifi-$(CPTCFG_IWLMLD)	+= fw/smem.o fw/init.o
-iwlwifi-$(CONFIG_ACPI)	+= fw/acpi.o
+iwlwifi-$(CPTCFG_IWLMVM) += fw/paging.o fw/smem.o fw/init.o
+iwlwifi-$(CPTCFG_IWLMLD) += fw/smem.o fw/init.o
+iwlwifi-$(CONFIG_ACPI) += fw/acpi.o
 iwlwifi-$(CONFIG_EFI)	+= fw/uefi.o
 
+iwlwifi-$(CPTCFG_IWLXVT)	+= fw/paging.o fw/smem.o
 iwlwifi-$(CPTCFG_IWLXVT)	+= fw/init.o
 iwlwifi-$(CPTCFG_IWLWIFI_DEBUGFS) += fw/debugfs.o
 
 # Mock-ups
 
 # Bus
-iwlwifi-$(CONFIG_PCI) += pcie/drv.o pcie/rx.o pcie/tx.o pcie/trans.o
-iwlwifi-$(CONFIG_PCI) += pcie/ctxt-info.o pcie/ctxt-info-gen3.o pcie/trans-gen2.o pcie/tx-gen2.o
+iwlwifi-$(CONFIG_PCI) += pcie/ctxt-info.o pcie/ctxt-info-v2.o pcie/drv.o pcie/utils.o
+iwlwifi-$(CONFIG_PCI) += pcie/gen1_2/rx.o pcie/gen1_2/tx.o pcie/gen1_2/trans.o
+iwlwifi-$(CONFIG_PCI) += pcie/gen1_2/trans-gen2.o pcie/gen1_2/tx-gen2.o
+iwlwifi-$(CONFIG_PCI) += pcie/gen3/trans.o
 
+CFLAGS_pcie/drv.o += -Wno-override-init
+
+# combined MAC/RF configurations
 iwlwifi-$(CPTCFG_IWLMVM) += cfg/7000.o cfg/8000.o
+# MAC configurations
 iwlwifi-$(CPTCFG_IWLMVM) += cfg/9000.o cfg/22000.o
 iwlwifi-$(CPTCFG_IWLMVM) += cfg/ax210.o
 iwlwifi-$(CPTCFG_IWLMLD) += cfg/bz.o cfg/sc.o cfg/dr.o
+# RF configurations
+iwlwifi-$(CPTCFG_IWLMVM) += cfg/rf-jf.o cfg/rf-hr.o cfg/rf-gf.o
+iwlwifi-$(CPTCFG_IWLMLD) += cfg/rf-fm.o cfg/rf-wh.o cfg/rf-pe.o
 
 iwlwifi-$(CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES) += iwl-dbg-cfg.o
 
@@ -38,8 +48,7 @@ iwlwifi-objs += $(iwlwifi-m)
 iwlwifi-objs += $(iwlwifi-y)
 
 iwlwifi-$(CPTCFG_IWLWIFI_DEVICE_TRACING) += iwl-devtrace.o
-iwlwifi-$(CPTCFG_IWLWIFI_DEVICE_TESTMODE) += iwl-tm-gnl.o iwl-dnt-cfg.o iwl-dnt-dispatch.o
-iwlwifi-$(CPTCFG_IWLWIFI_DEVICE_TESTMODE) += iwl-dnt-dev-if.o fw/testmode.o
+iwlwifi-$(CPTCFG_IWLWIFI_DEVICE_TESTMODE) += iwl-tm-gnl.o fw/testmode.o
 
 ccflags-y += -I$(src)
 # for FreeBSD compatibility - they use most of our driver

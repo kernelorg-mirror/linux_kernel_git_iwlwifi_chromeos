@@ -25,6 +25,7 @@
 #include "low_latency.h"
 #include "hcmd.h"
 #include "fw/api/location.h"
+#include "ftm-initiator.h"
 
 #include "iwl-nvm-parse.h"
 
@@ -59,6 +60,8 @@ module_exit(iwl_mld_exit);
 #ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
 static void iwl_mld_debug_setup_random_nmi(struct iwl_mld *mld)
 {
+	struct iwl_mld_random_nmi *random_nmi = &mld->random_nmi;
+
 	if (mld->trans->dbg_cfg.MLD_RANDOM_NMI_ENABLE) {
 		u8 ceil = mld->trans->dbg_cfg.MLD_RANDOM_NMI_CEIL;
 		u8 floor = mld->trans->dbg_cfg.MLD_RANDOM_NMI_FLOOR;
@@ -67,9 +70,11 @@ static void iwl_mld_debug_setup_random_nmi(struct iwl_mld *mld)
 			return;
 
 		/* Avoid 0, since this means that random nmi is disabled */
-		mld->nmi_thresh = get_random_u8() % (ceil - floor) + floor + 1;
+		random_nmi->nmi_thresh = get_random_u8() % (ceil - floor) + floor + 1;
 		IWL_WARN(mld, "NMI will be forced on hcmd number: %d\n",
-			 mld->nmi_thresh);
+			 random_nmi->nmi_thresh);
+
+		random_nmi->nmi_limit = mld->trans->dbg_cfg.MLD_RANDOM_NMI_LIMIT;
 	}
 }
 #endif
@@ -84,7 +89,7 @@ static void iwl_mld_hw_set_regulatory(struct iwl_mld *mld)
 
 VISIBLE_IF_IWLWIFI_KUNIT
 void iwl_construct_mld(struct iwl_mld *mld, struct iwl_trans *trans,
-		       const struct iwl_cfg *cfg, const struct iwl_fw *fw,
+		       const struct iwl_rf_cfg *cfg, const struct iwl_fw *fw,
 		       struct ieee80211_hw *hw, struct dentry *dbgfs_dir)
 {
 	mld->dev = trans->dev;
@@ -224,6 +229,7 @@ static const struct iwl_hcmd_names iwl_mld_system_names[] = {
 	HCMD_NAME(SOC_CONFIGURATION_CMD),
 	HCMD_NAME(INIT_EXTENDED_CFG_CMD),
 	HCMD_NAME(FW_ERROR_RECOVERY_CMD),
+	HCMD_NAME(RFI_CONFIG_CMD),
 	HCMD_NAME(RFI_GET_FREQ_TABLE_CMD),
 	HCMD_NAME(SYSTEM_STATISTICS_CMD),
 	HCMD_NAME(SYSTEM_STATISTICS_END_NOTIF),
@@ -291,8 +297,18 @@ static const struct iwl_hcmd_names iwl_mld_data_path_names[] = {
 /* Please keep this array *SORTED* by hex value.
  * Access is done through binary search
  */
+static const struct iwl_hcmd_names iwl_mld_scan_names[] = {
+	HCMD_NAME(CHANNEL_SURVEY_NOTIF),
+};
+
+/* Please keep this array *SORTED* by hex value.
+ * Access is done through binary search
+ */
 static const struct iwl_hcmd_names iwl_mld_location_names[] = {
 	HCMD_NAME(TOF_RANGE_REQ_CMD),
+	HCMD_NAME(TOF_RESPONDER_CONFIG_CMD),
+	HCMD_NAME(TOF_RESPONDER_DYN_CONFIG_CMD),
+	HCMD_NAME(TOF_LC_NOTIF),
 	HCMD_NAME(TOF_RANGE_RESPONSE_NOTIF),
 };
 
@@ -320,7 +336,9 @@ static const struct iwl_hcmd_names iwl_mld_statistics_names[] = {
  * Access is done through binary search
  */
 static const struct iwl_hcmd_names iwl_mld_prot_offload_names[] = {
-	HCMD_NAME(STORED_BEACON_NTF),
+	HCMD_NAME(WOWLAN_WAKE_PKT_NOTIFICATION),
+	HCMD_NAME(WOWLAN_INFO_NOTIFICATION),
+	HCMD_NAME(D3_END_NOTIFICATION),
 };
 
 /* Please keep this array *SORTED* by hex value.
@@ -337,6 +355,7 @@ const struct iwl_hcmd_arr iwl_mld_groups[] = {
 	[SYSTEM_GROUP] = HCMD_ARR(iwl_mld_system_names),
 	[MAC_CONF_GROUP] = HCMD_ARR(iwl_mld_mac_conf_names),
 	[DATA_PATH_GROUP] = HCMD_ARR(iwl_mld_data_path_names),
+	[SCAN_GROUP] = HCMD_ARR(iwl_mld_scan_names),
 	[LOCATION_GROUP] = HCMD_ARR(iwl_mld_location_names),
 	[REGULATORY_AND_NVM_GROUP] = HCMD_ARR(iwl_mld_reg_and_nvm_names),
 	[DEBUG_GROUP] = HCMD_ARR(iwl_mld_debug_names),
@@ -350,33 +369,44 @@ EXPORT_SYMBOL_IF_IWLWIFI_KUNIT(iwl_mld_groups);
 static void
 iwl_mld_configure_trans(struct iwl_op_mode *op_mode)
 {
-	const struct iwl_mld *mld = IWL_OP_MODE_GET_MLD(op_mode);
+	struct iwl_mld *mld = IWL_OP_MODE_GET_MLD(op_mode);
 	static const u8 no_reclaim_cmds[] = {TX_CMD};
-	struct iwl_trans_config trans_cfg = {
-		.op_mode = op_mode,
-		/* Rx is not supported yet, but add it to avoid warnings */
-		.rx_buf_size = iwl_amsdu_size_to_rxb_size(),
-		.command_groups = iwl_mld_groups,
-		.command_groups_size = ARRAY_SIZE(iwl_mld_groups),
-		.fw_reset_handshake = true,
-		.queue_alloc_cmd_ver =
-			iwl_fw_lookup_cmd_ver(mld->fw,
-					      WIDE_ID(DATA_PATH_GROUP,
-						      SCD_QUEUE_CONFIG_CMD),
-					      0),
-		.no_reclaim_cmds = no_reclaim_cmds,
-		.n_no_reclaim_cmds = ARRAY_SIZE(no_reclaim_cmds),
-		.cb_data_offs = offsetof(struct ieee80211_tx_info,
-					 driver_data[2]),
-	};
 	struct iwl_trans *trans = mld->trans;
+	u32 eckv_value;
 
-	trans->rx_mpdu_cmd = REPLY_RX_MPDU_CMD;
-	trans->iml = mld->fw->iml;
-	trans->iml_len = mld->fw->iml_len;
-	trans->wide_cmd_header = true;
+	iwl_bios_setup_step(trans, &mld->fwrt);
+	iwl_uefi_get_step_table(trans);
 
-	iwl_trans_configure(trans, &trans_cfg);
+	if (iwl_bios_get_eckv(&mld->fwrt, &eckv_value))
+		IWL_DEBUG_RADIO(mld, "ECKV table doesn't exist in BIOS\n");
+	else
+		trans->conf.ext_32khz_clock_valid = !!eckv_value;
+
+	trans->conf.rx_buf_size = iwl_amsdu_size_to_rxb_size();
+	trans->conf.command_groups = iwl_mld_groups;
+	trans->conf.command_groups_size = ARRAY_SIZE(iwl_mld_groups);
+	trans->conf.fw_reset_handshake = true;
+	trans->conf.queue_alloc_cmd_ver =
+		iwl_fw_lookup_cmd_ver(mld->fw, WIDE_ID(DATA_PATH_GROUP,
+						       SCD_QUEUE_CONFIG_CMD),
+				      0);
+	trans->conf.cb_data_offs = offsetof(struct ieee80211_tx_info,
+					    driver_data[2]);
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	trans->conf.fseq_img = &mld->fw->fseq;
+#endif
+	BUILD_BUG_ON(sizeof(no_reclaim_cmds) >
+		     sizeof(trans->conf.no_reclaim_cmds));
+	memcpy(trans->conf.no_reclaim_cmds, no_reclaim_cmds,
+	       sizeof(no_reclaim_cmds));
+	trans->conf.n_no_reclaim_cmds = ARRAY_SIZE(no_reclaim_cmds);
+
+	trans->conf.rx_mpdu_cmd = REPLY_RX_MPDU_CMD;
+	trans->conf.rx_mpdu_cmd_hdr_size = sizeof(struct iwl_rx_mpdu_desc);
+	trans->conf.wide_cmd_header = true;
+	trans->conf.rx_mpdu_no_unmap = true;
+
+	iwl_trans_op_mode_enter(trans, op_mode);
 }
 
 /*
@@ -387,13 +417,12 @@ iwl_mld_configure_trans(struct iwl_op_mode *op_mode)
 
 #define NUM_FW_LOAD_RETRIES	3
 static struct iwl_op_mode *
-iwl_op_mode_mld_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
+iwl_op_mode_mld_start(struct iwl_trans *trans, const struct iwl_rf_cfg *cfg,
 		      const struct iwl_fw *fw, struct dentry *dbgfs_dir)
 {
 	struct ieee80211_hw *hw;
 	struct iwl_op_mode *op_mode;
 	struct iwl_mld *mld;
-	u32 eckv_value;
 	int ret;
 
 	/* Allocate and initialize a new hardware device */
@@ -411,16 +440,13 @@ iwl_op_mode_mld_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 
 	iwl_construct_mld(mld, trans, cfg, fw, hw, dbgfs_dir);
 
+	/* we'll verify later it matches between commands */
+	mld->fw_rates_ver_3 = iwl_fw_lookup_cmd_ver(mld->fw, TX_CMD, 0) >= 11;
+
 	iwl_mld_construct_fw_runtime(mld, trans, fw, dbgfs_dir);
 
 	iwl_mld_get_bios_tables(mld);
 	iwl_uefi_get_sgom_table(trans, &mld->fwrt);
-	iwl_uefi_get_step_table(trans);
-	if (iwl_bios_get_eckv(&mld->fwrt, &eckv_value))
-		IWL_DEBUG_RADIO(mld, "ECKV table doesn't exist in BIOS\n");
-	else
-		trans->ext_32khz_clock_valid = !!eckv_value;
-	iwl_bios_setup_step(trans, &mld->fwrt);
 	mld->bios_enable_puncturing = iwl_uefi_get_puncturing(&mld->fwrt);
 	mld->rfi.bios_enabled = iwl_rfi_is_enabled_in_bios(&mld->fwrt);
 
@@ -486,6 +512,8 @@ iwl_op_mode_mld_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 	iwl_mld_thermal_initialize(mld);
 
 	iwl_mld_ptp_init(mld);
+	iwl_mld_ftm_initiator_init(mld);
+	iwl_mld_ftm_responder_init(mld);
 
 	return op_mode;
 
@@ -511,10 +539,12 @@ iwl_op_mode_mld_stop(struct iwl_op_mode *op_mode)
 	iwl_mld_ptp_remove(mld);
 	iwl_mld_leds_exit(mld);
 
-	wiphy_lock(mld->wiphy);
 	iwl_mld_thermal_exit(mld);
+
+	wiphy_lock(mld->wiphy);
 	iwl_mld_low_latency_stop(mld);
 	iwl_mld_deinit_time_sync(mld);
+	iwl_mld_ftm_initiator_stop(mld);
 	wiphy_unlock(mld->wiphy);
 
 	ieee80211_unregister_hw(mld->hw);
@@ -526,6 +556,7 @@ iwl_op_mode_mld_stop(struct iwl_op_mode *op_mode)
 
 	kfree(mld->nvm_data);
 	kfree(mld->scan.cmd);
+	kfree(mld->channel_survey);
 	kfree(mld->error_recovery_buf);
 	kfree(mld->mcast_filter_cmd);
 	kfree(mld->rfi.fw_table);
@@ -689,7 +720,8 @@ iwl_mld_nic_error(struct iwl_op_mode *op_mode,
 	 * It might not actually be true that we'll restart, but the
 	 * setting doesn't matter if we're going to be unbound either.
 	 */
-	if (type != IWL_ERR_TYPE_RESET_HS_TIMEOUT)
+	if (type != IWL_ERR_TYPE_RESET_HS_TIMEOUT &&
+	    mld->fw_status.running)
 		mld->fw_status.in_hw_restart = true;
 }
 
@@ -714,6 +746,13 @@ static bool iwl_mld_sw_reset(struct iwl_op_mode *op_mode,
 			     enum iwl_fw_error_type type)
 {
 	struct iwl_mld *mld = IWL_OP_MODE_GET_MLD(op_mode);
+
+	/* SW reset can happen for TOP error w/o NIC error, so
+	 * also abort scan here and set in_hw_restart, when we
+	 * had a NIC error both were already done.
+	 */
+	iwl_mld_report_scan_aborted(mld);
+	mld->fw_status.in_hw_restart = true;
 
 	/* Do restart only in the following conditions are met:
 	 * - we consider the FW as running
@@ -743,7 +782,6 @@ static void iwl_mld_device_powered_off(struct iwl_op_mode *op_mode)
 	struct iwl_mld *mld = IWL_OP_MODE_GET_MLD(op_mode);
 
 	wiphy_lock(mld->wiphy);
-	mld->trans->system_pm_mode = IWL_PLAT_PM_MODE_DISABLED;
 	iwl_mld_stop_fw(mld);
 	mld->fw_status.in_d3 = false;
 	wiphy_unlock(mld->wiphy);
@@ -752,6 +790,17 @@ static void iwl_mld_device_powered_off(struct iwl_op_mode *op_mode)
 static void iwl_mld_device_powered_off(struct iwl_op_mode *op_mode)
 {}
 #endif
+
+static void iwl_mld_dump(struct iwl_op_mode *op_mode)
+{
+	struct iwl_mld *mld = IWL_OP_MODE_GET_MLD(op_mode);
+	struct iwl_fw_runtime *fwrt = &mld->fwrt;
+
+	if (!iwl_trans_fw_running(fwrt->trans))
+		return;
+
+	iwl_dbg_tlv_time_point(fwrt, IWL_FW_INI_TIME_POINT_USER_TRIGGER, NULL);
+}
 
 static const struct iwl_op_mode_ops iwl_mld_ops = {
 	.start = iwl_op_mode_mld_start,
@@ -767,6 +816,7 @@ static const struct iwl_op_mode_ops iwl_mld_ops = {
 	.sw_reset = iwl_mld_sw_reset,
 	.time_point = iwl_mld_time_point,
 	.device_powered_off = pm_sleep_ptr(iwl_mld_device_powered_off),
+	.dump = iwl_mld_dump,
 };
 
 struct iwl_mld_mod_params iwlmld_mod_params = {
