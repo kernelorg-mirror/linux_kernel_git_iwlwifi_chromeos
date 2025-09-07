@@ -14,6 +14,8 @@
 #include "rfi.h"
 #include "iface.h"
 #include "mlo.h"
+#include "ftm-initiator.h"
+#include "ftm-responder.h"
 
 static int validate_rfi_channel(const struct nlattr *attr,
 				struct netlink_ext_ack *extack)
@@ -88,6 +90,11 @@ iwl_mld_vendor_attr_policy[NUM_IWL_MVM_VENDOR_ATTR] = {
 	[IWL_MVM_VENDOR_ATTR_RFIM_DDR_SNR_THRESHOLD] =
 		NLA_POLICY_MAX(NLA_U32, IWL_RFI_MAX_SNR_THRESHOLD),
 	[IWL_MVM_VENDOR_ATTR_RFIM_CNVI_MASTER] = { .type = NLA_U32 },
+	[IWL_MVM_VENDOR_ATTR_ADDR] = { .type = NLA_BINARY, .len = ETH_ALEN },
+	[IWL_MVM_VENDOR_ATTR_STA_CIPHER] = { .type = NLA_U32 },
+	[IWL_MVM_VENDOR_ATTR_STA_HLTK] = NLA_POLICY_EXACT_LEN(HLTK_11AZ_LEN),
+	[IWL_MVM_VENDOR_ATTR_STA_TK] = { .type = NLA_BINARY,
+				         .len = WLAN_KEY_LEN_GCMP_256 },
 };
 
 static struct nlattr **iwl_mld_parse_vendor_data(const void *data, int data_len)
@@ -224,7 +231,7 @@ static int iwl_mld_vendor_ppag_get_table(struct wiphy *wiphy,
 		goto err;
 	}
 
-	per_chain_size = (mld->fwrt.ppag_ver == 0) ?
+	per_chain_size = (mld->fwrt.ppag_bios_rev == 0) ?
 		IWL_NUM_SUB_BANDS_V1 : IWL_NUM_SUB_BANDS_V2;
 
 	for (chain = 0; chain < IWL_NUM_CHAIN_LIMITS; chain++) {
@@ -255,6 +262,7 @@ enum iwl_mld_rfi_capabilites {
 	IWL_MLD_RFI_DDR_CAPA_SCAN		= BIT(3),
 	IWL_MLD_RFI_DDR_CAPA_ASSOC		= BIT(4),
 	IWL_MLD_RFI_DDR_CAPA_TPT		= BIT(5),
+	IWL_MLD_RFI_GET_LINKS_INFO_CAPA		= BIT(7),
 	IWL_MLD_RFI_DLVR_CAPA			= BIT(9),
 	IWL_MLD_RFI_DDR_DESENSE_CAPA		= BIT(12),
 };
@@ -270,8 +278,8 @@ static int iwl_mld_vendor_rfim_get_capa(struct wiphy *wiphy,
 {
 	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
 	struct iwl_mld *mld = IWL_MAC80211_GET_MLD(hw);
+	u16 capa = IWL_MLD_RFI_GET_LINKS_INFO_CAPA;
 	struct sk_buff *skb;
-	u16 capa = 0;
 
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, 4);
 	if (!skb)
@@ -279,7 +287,7 @@ static int iwl_mld_vendor_rfim_get_capa(struct wiphy *wiphy,
 
 	if (iwl_mld_rfi_supported(mld, IWL_MLD_RFI_DDR_FEATURE))
 		capa |= IWL_MLD_RFI_DDR_CAPA_ALL;
-	else if (mld->trans->trans_cfg->integrated)
+	else if (mld->trans->mac_cfg->integrated)
 		capa |= IWL_MLD_RFI_DDR_CAPA_CNVI;
 
 	if (iwl_mld_rfi_supported(mld, IWL_MLD_RFI_DLVR_FEATURE))
@@ -776,6 +784,198 @@ err:
 	return ret;
 }
 
+static int iwl_mld_vendor_add_pasn_sta(struct wiphy *wiphy,
+				       struct wireless_dev *wdev,
+				       const void *data, int data_len)
+{
+	struct nlattr **tb __free(kfree) = NULL;
+	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
+	struct iwl_mld *mld = IWL_MAC80211_GET_MLD(hw);
+	struct ieee80211_vif *vif = wdev_to_ieee80211_vif(wdev);
+	u8 *addr, *tk = NULL, *hltk;
+	u32 tk_len = 0, hltk_len, cipher;
+	int ret = 0;
+	struct ieee80211_sta *sta;
+
+	tb = iwl_mld_parse_vendor_data(data, data_len);
+	if (IS_ERR(tb))
+		return PTR_ERR(tb);
+
+	if (!tb[IWL_MVM_VENDOR_ATTR_ADDR] ||
+	    (!tb[IWL_MVM_VENDOR_ATTR_STA_HLTK] &&
+	     !tb[IWL_MVM_VENDOR_ATTR_STA_TK]) ||
+	    !tb[IWL_MVM_VENDOR_ATTR_STA_CIPHER])
+		return -EINVAL;
+
+	addr = nla_data(tb[IWL_MVM_VENDOR_ATTR_ADDR]);
+	cipher = nla_get_u32(tb[IWL_MVM_VENDOR_ATTR_STA_CIPHER]);
+	if (tb[IWL_MVM_VENDOR_ATTR_STA_HLTK]) {
+		hltk = nla_data(tb[IWL_MVM_VENDOR_ATTR_STA_HLTK]);
+		hltk_len = nla_len(tb[IWL_MVM_VENDOR_ATTR_STA_HLTK]);
+	} else {
+		hltk = NULL;
+		hltk_len = 0;
+	}
+
+	sta = ieee80211_find_sta(vif, addr);
+	if ((!tb[IWL_MVM_VENDOR_ATTR_STA_TK] && (!sta || !sta->mfp)) ||
+	    (tb[IWL_MVM_VENDOR_ATTR_STA_TK] && sta && sta->mfp))
+		return ret;
+
+	if (tb[IWL_MVM_VENDOR_ATTR_STA_TK]) {
+		u32 expected_tk_len = cipher == WLAN_CIPHER_SUITE_GCMP_256 ?
+			WLAN_KEY_LEN_GCMP_256 : WLAN_KEY_LEN_CCMP;
+
+		tk = nla_data(tb[IWL_MVM_VENDOR_ATTR_STA_TK]);
+		tk_len = nla_len(tb[IWL_MVM_VENDOR_ATTR_STA_TK]);
+		if (tk_len != expected_tk_len)
+			return -EINVAL;
+	}
+
+	if (vif->bss_conf.ftm_responder)
+		return iwl_mld_ftm_responder_add_pasn_sta(mld, vif, addr,
+							  cipher, tk, tk_len,
+							  hltk, hltk_len);
+	else
+		return iwl_mld_ftm_add_pasn_sta(mld, vif, addr, cipher, tk,
+						tk_len, hltk, hltk_len);
+}
+
+static int iwl_mld_vendor_remove_pasn_sta(struct wiphy *wiphy,
+					  struct wireless_dev *wdev,
+					  const void *data, int data_len)
+{
+	struct nlattr **tb;
+	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
+	struct iwl_mld *mld = IWL_MAC80211_GET_MLD(hw);
+	struct ieee80211_vif *vif = wdev_to_ieee80211_vif(wdev);
+	u8 *addr;
+	int ret = 0;
+
+	tb = iwl_mld_parse_vendor_data(data, data_len);
+	if (IS_ERR(tb))
+		return PTR_ERR(tb);
+
+	if (!tb[IWL_MVM_VENDOR_ATTR_ADDR])
+		return -EINVAL;
+
+	addr = nla_data(tb[IWL_MVM_VENDOR_ATTR_ADDR]);
+
+	if (vif->bss_conf.ftm_responder)
+		iwl_mld_ftm_resp_remove_pasn_sta(mld, vif, addr);
+	else
+		iwl_mld_ftm_remove_pasn_sta(mld, addr);
+	return ret;
+}
+
+static int
+iwl_mld_fill_vendor_link_type(struct ieee80211_vif *vif, struct sk_buff *skb,
+			      unsigned int link_id)
+{
+	lockdep_assert_held(&ieee80211_vif_to_wdev(vif)->wiphy->mtx);
+
+	if (ieee80211_vif_type_p2p(vif) == NL80211_IFTYPE_STATION) {
+		if (link_id == iwl_mld_get_primary_link(vif))
+			return nla_put_u8(skb, IWL_MVM_VENDOR_ATTR_LINK_TYPE,
+					  IWL_VENDOR_PRIMARY_LINK);
+		return nla_put_u8(skb, IWL_MVM_VENDOR_ATTR_LINK_TYPE,
+				  IWL_VENDOR_SECONDARY_LINK);
+	}
+	return 0;
+}
+
+static int
+iwl_mld_vendor_cmd_fill_links_info(struct wiphy *wiphy,
+				   struct ieee80211_vif *vif,
+				   struct sk_buff *skb)
+{
+	struct ieee80211_bss_conf *link_conf;
+	unsigned int link_id;
+
+	lockdep_assert_held(&wiphy->mtx);
+
+	for_each_vif_active_link(vif, link_conf, link_id) {
+		const struct cfg80211_chan_def *chandef;
+		u8 channel;
+		u8 fw_band;
+
+		chandef = &link_conf->chanreq.oper;
+		if (!cfg80211_chandef_valid(chandef) || !link_conf->bss)
+			continue;
+
+		channel = ieee80211_frequency_to_channel(chandef->center_freq1);
+		fw_band = iwl_mld_nl80211_band_to_fw(chandef->chan->band);
+		if (nla_put_u8(skb, IWL_MVM_VENDOR_ATTR_CHANNEL, channel) ||
+		    nla_put_u8(skb, IWL_MVM_VENDOR_ATTR_PHY_BAND, fw_band) ||
+		    nla_put_u8(skb, IWL_MVM_VENDOR_ATTR_RSSI,
+			       link_conf->bss->signal) ||
+		    nla_put_u32(skb, IWL_MVM_VENDOR_ATTR_WIPHY_FREQ,
+				chandef->chan->center_freq) ||
+		    nla_put_u32(skb, IWL_MVM_VENDOR_ATTR_CHANNEL_WIDTH,
+				chandef->width) ||
+		    nla_put_u32(skb, IWL_MVM_VENDOR_ATTR_CENTER_FREQ1,
+				chandef->center_freq1) ||
+		    (chandef->center_freq2 &&
+		     nla_put_u32(skb, IWL_MVM_VENDOR_ATTR_CENTER_FREQ2,
+				 chandef->center_freq2)) ||
+		    iwl_mld_fill_vendor_link_type(vif, skb, link_id))
+			return -ENOBUFS;
+	}
+
+	return 0;
+}
+
+static int iwl_mld_vendor_get_links_info(struct wiphy *wiphy,
+					 struct wireless_dev *wdev,
+					 const void *data, int data_len)
+{
+	struct ieee80211_vif *vif = wdev_to_ieee80211_vif(wdev);
+	struct nlattr *link_info_attr;
+	struct sk_buff *skb = NULL;
+	int ret;
+
+	if (!vif)
+		return -ENODEV;
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, NLMSG_GOODSIZE);
+	if (!skb)
+		return -ENOMEM;
+
+	link_info_attr = nla_nest_start(skb, IWL_MVM_VENDOR_ATTR_LINKS_INFO);
+	if (!link_info_attr) {
+		ret = -ENOBUFS;
+		goto err;
+	}
+
+	ret = iwl_mld_vendor_cmd_fill_links_info(wiphy, vif, skb);
+	if (ret)
+		goto err;
+
+	nla_nest_end(skb, link_info_attr);
+	return cfg80211_vendor_cmd_reply(skb);
+
+err:
+	kfree_skb(skb);
+	return ret;
+}
+
+static int iwl_mld_vendor_dbg_clear_monitor_buf(struct wiphy *wiphy,
+						struct wireless_dev *wdev,
+						const void *data, int data_len)
+{
+	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
+	struct iwl_mld *mld = IWL_MAC80211_GET_MLD(hw);
+
+	/* If the firmware is not running, silently succeed since there is
+	 * no data to clear.
+	 */
+	if (!mld->fw_status.running)
+		return 0;
+
+	iwl_fw_dbg_clear_monitor_buf(&mld->fwrt);
+	return 0;
+}
+
 static const struct wiphy_vendor_command iwl_mld_vendor_commands[] = {
 	{
 		.info = {
@@ -890,6 +1090,50 @@ static const struct wiphy_vendor_command iwl_mld_vendor_commands[] = {
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV,
 		.doit = iwl_mld_vendor_sar_get_table,
+		.policy = iwl_mld_vendor_attr_policy,
+		.maxattr = MAX_IWL_MVM_VENDOR_ATTR,
+	},
+	{
+		.info = {
+			.vendor_id = INTEL_OUI,
+			.subcmd = IWL_MVM_VENDOR_CMD_ADD_PASN_STA,
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = iwl_mld_vendor_add_pasn_sta,
+		.policy = iwl_mld_vendor_attr_policy,
+		.maxattr = MAX_IWL_MVM_VENDOR_ATTR,
+	},
+	{
+		.info = {
+			.vendor_id = INTEL_OUI,
+			.subcmd = IWL_MVM_VENDOR_CMD_REMOVE_PASN_STA,
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = iwl_mld_vendor_remove_pasn_sta,
+		.policy = iwl_mld_vendor_attr_policy,
+		.maxattr = MAX_IWL_MVM_VENDOR_ATTR,
+	},
+	{
+		.info = {
+			.vendor_id = INTEL_OUI,
+			.subcmd = IWL_MVM_VENDOR_CMD_GET_LINK_INFO,
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = iwl_mld_vendor_get_links_info,
+		.policy = iwl_mld_vendor_attr_policy,
+		.maxattr = MAX_IWL_MVM_VENDOR_ATTR,
+	},
+	{
+		.info = {
+			.vendor_id = INTEL_OUI,
+			.subcmd = IWL_MVM_VENDOR_CMD_DBG_CLEAR_MONITOR_BUFFER,
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = iwl_mld_vendor_dbg_clear_monitor_buf,
 		.policy = iwl_mld_vendor_attr_policy,
 		.maxattr = MAX_IWL_MVM_VENDOR_ATTR,
 	},

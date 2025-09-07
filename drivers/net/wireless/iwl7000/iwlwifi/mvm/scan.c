@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2014, 2018-2024 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2025 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -11,6 +11,7 @@
 #include "mvm.h"
 #include "fw/api/scan.h"
 #include "iwl-io.h"
+#include "iwl-utils.h"
 
 #define IWL_DENSE_EBS_SCAN_RATIO 5
 #define IWL_SPARSE_EBS_SCAN_RATIO 1
@@ -2757,6 +2758,89 @@ static const struct iwl_scan_umac_handler iwl_scan_umac_handlers[] = {
 	IWL_SCAN_UMAC_HANDLER(12),
 };
 
+static void iwl_mvm_mei_scan_work(struct work_struct *wk)
+{
+	struct iwl_mei_scan_filter *scan_filter =
+		container_of(wk, struct iwl_mei_scan_filter, scan_work);
+	struct iwl_mvm *mvm =
+		container_of(scan_filter, struct iwl_mvm, mei_scan_filter);
+	struct iwl_mvm_csme_conn_info *info;
+	struct sk_buff *skb;
+	u8 bssid[ETH_ALEN];
+
+	mutex_lock(&mvm->mutex);
+	info = iwl_mvm_get_csme_conn_info(mvm);
+	memcpy(bssid, info->conn_info.bssid, ETH_ALEN);
+	mutex_unlock(&mvm->mutex);
+
+	while ((skb = skb_dequeue(&scan_filter->scan_res))) {
+		struct ieee80211_mgmt *mgmt = (void *)skb->data;
+
+		if (!memcmp(mgmt->bssid, bssid, ETH_ALEN))
+			ieee80211_rx_irqsafe(mvm->hw, skb);
+		else
+			kfree_skb(skb);
+	}
+}
+
+void iwl_mvm_mei_scan_filter_init(struct iwl_mei_scan_filter *mei_scan_filter)
+{
+	skb_queue_head_init(&mei_scan_filter->scan_res);
+	INIT_WORK(&mei_scan_filter->scan_work, iwl_mvm_mei_scan_work);
+}
+
+/* In case CSME is connected and has link protection set, this function will
+ * override the scan request to scan only the associated channel and only for
+ * the associated SSID.
+ */
+static void iwl_mvm_mei_limited_scan(struct iwl_mvm *mvm,
+				     struct iwl_mvm_scan_params *params)
+{
+	struct iwl_mvm_csme_conn_info *info = iwl_mvm_get_csme_conn_info(mvm);
+	struct iwl_mei_conn_info *conn_info;
+	struct ieee80211_channel *chan;
+	int scan_iters, i;
+
+	if (!info) {
+		IWL_DEBUG_SCAN(mvm, "mei_limited_scan: no connection info\n");
+		return;
+	}
+
+	conn_info = &info->conn_info;
+	if (!info->conn_info.lp_state || !info->conn_info.ssid_len)
+		return;
+
+	if (!params->n_channels || !params->n_ssids)
+		return;
+
+	mvm->mei_scan_filter.is_mei_limited_scan = true;
+
+	chan = ieee80211_get_channel(mvm->hw->wiphy,
+				     ieee80211_channel_to_frequency(conn_info->channel,
+								    conn_info->band));
+	if (!chan) {
+		IWL_DEBUG_SCAN(mvm,
+			       "Failed to get CSME channel (chan=%u band=%u)\n",
+			       conn_info->channel, conn_info->band);
+		return;
+	}
+
+	/* The mei filtered scan must find the AP, otherwise CSME will
+	 * take the NIC ownership. Add several iterations on the channel to
+	 * make the scan more robust.
+	 */
+	scan_iters = min(IWL_MEI_SCAN_NUM_ITER, params->n_channels);
+	params->n_channels = scan_iters;
+	for (i = 0; i < scan_iters; i++)
+		params->channels[i] = chan;
+
+	IWL_DEBUG_SCAN(mvm, "Mei scan: num iterations=%u\n", scan_iters);
+
+	params->n_ssids = 1;
+	params->ssids[0].ssid_len = conn_info->ssid_len;
+	memcpy(params->ssids[0].ssid, conn_info->ssid, conn_info->ssid_len);
+}
+
 static int iwl_mvm_build_scan_cmd(struct iwl_mvm *mvm,
 				  struct ieee80211_vif *vif,
 				  struct iwl_host_cmd *hcmd,
@@ -2768,6 +2852,8 @@ static int iwl_mvm_build_scan_cmd(struct iwl_mvm *mvm,
 
 	lockdep_assert_held(&mvm->mutex);
 	memset(mvm->scan_cmd, 0, mvm->scan_cmd_size);
+
+	iwl_mvm_mei_limited_scan(mvm, params);
 
 	if (!fw_has_capa(&mvm->fw->ucode_capa, IWL_UCODE_TLV_CAPA_UMAC_SCAN)) {
 		hcmd->id = SCAN_OFFLOAD_REQUEST_CMD;
@@ -3149,6 +3235,8 @@ void iwl_mvm_rx_umac_scan_complete_notif(struct iwl_mvm *mvm,
 	u32 uid = __le32_to_cpu(notif->uid);
 	bool aborted = (notif->status == IWL_SCAN_OFFLOAD_ABORTED);
 	bool select_links = false;
+
+	mvm->mei_scan_filter.is_mei_limited_scan = false;
 
 	IWL_DEBUG_SCAN(mvm,
 		       "Scan completed: uid=%u type=%u, status=%s, EBS=%s\n",
@@ -3627,117 +3715,6 @@ static int iwl_mvm_chanidx_from_phy(struct iwl_mvm *mvm,
 	return -EINVAL;
 }
 
-static u32 iwl_mvm_div_by_db(u32 value, u8 db)
-{
-	/*
-	 * 2^32 * 10**(i / 10) for i = [1, 10], skipping 0 and simply stopping
-	 * at 10 dB and looping instead of using a much larger table.
-	 *
-	 * Using 64 bit math is overkill, but means the helper does not require
-	 * a limit on the input range.
-	 */
-	static const u32 db_to_val[] = {
-		0xcb59185e, 0xa1866ba8, 0x804dce7a, 0x65ea59fe, 0x50f44d89,
-		0x404de61f, 0x331426af, 0x2892c18b, 0x203a7e5b, 0x1999999a,
-	};
-
-	while (value && db > 0) {
-		u8 change = min_t(u8, db, ARRAY_SIZE(db_to_val));
-
-		value = (((u64)value) * db_to_val[change - 1]) >> 32;
-
-		db -= change;
-	}
-
-	return value;
-}
-
-VISIBLE_IF_IWLWIFI_KUNIT s8
-iwl_mvm_average_dbm_values(const struct iwl_umac_scan_channel_survey_notif *notif)
-{
-	s8 average_magnitude;
-	u32 average_factor;
-	s8 sum_magnitude = -128;
-	u32 sum_factor = 0;
-	int i, count = 0;
-
-	/*
-	 * To properly average the decibel values (signal values given in dBm)
-	 * we need to do the math in linear space.  Doing a linear average of
-	 * dB (dBm) values is a bit annoying though due to the large range of
-	 * at least -10 to -110 dBm that will not fit into a 32 bit integer.
-	 *
-	 * A 64 bit integer should be sufficient, but then we still have the
-	 * problem that there are no directly usable utility functions
-	 * available.
-	 *
-	 * So, lets not deal with that and instead do much of the calculation
-	 * with a 16.16 fixed point integer along with a base in dBm. 16.16 bit
-	 * gives us plenty of head-room for adding up a few values and even
-	 * doing some math on it. And the tail should be accurate enough too
-	 * (1/2^16 is somewhere around -48 dB, so effectively zero).
-	 *
-	 * i.e. the real value of sum is:
-	 *      sum = sum_factor / 2^16 * 10^(sum_magnitude / 10) mW
-	 *
-	 * However, that does mean we need to be able to bring two values to
-	 * a common base, so we need a helper for that.
-	 *
-	 * Note that this function takes an input with unsigned negative dBm
-	 * values but returns a signed dBm (i.e. a negative value).
-	 */
-
-	for (i = 0; i < ARRAY_SIZE(notif->noise); i++) {
-		s8 val_magnitude;
-		u32 val_factor;
-
-		if (notif->noise[i] == 0xff)
-			continue;
-
-		val_factor = 0x10000;
-		val_magnitude = -notif->noise[i];
-
-		if (val_magnitude <= sum_magnitude) {
-			u8 div_db = sum_magnitude - val_magnitude;
-
-			val_factor = iwl_mvm_div_by_db(val_factor, div_db);
-			val_magnitude = sum_magnitude;
-		} else {
-			u8 div_db = val_magnitude - sum_magnitude;
-
-			sum_factor = iwl_mvm_div_by_db(sum_factor, div_db);
-			sum_magnitude = val_magnitude;
-		}
-
-		sum_factor += val_factor;
-		count++;
-	}
-
-	/* No valid noise measurement, return a very high noise level */
-	if (count == 0)
-		return 0;
-
-	average_magnitude = sum_magnitude;
-	average_factor = sum_factor / count;
-
-	/*
-	 * average_factor will be a number smaller than 1.0 (0x10000) at this
-	 * point. What we need to do now is to adjust average_magnitude so that
-	 * average_factor is between -0.5 dB and 0.5 dB.
-	 *
-	 * Just do -1 dB steps and find the point where
-	 *   -0.5 dB * -i dB = 0x10000 * 10^(-0.5/10) / i dB
-	 *                   = div_by_db(0xe429, i)
-	 * is smaller than average_factor.
-	 */
-	for (i = 0; average_factor < iwl_mvm_div_by_db(0xe429, i); i++) {
-		/* nothing */
-	}
-
-	return average_magnitude - i;
-}
-EXPORT_SYMBOL_IF_IWLWIFI_KUNIT(iwl_mvm_average_dbm_values);
-
 void iwl_mvm_rx_channel_survey_notif(struct iwl_mvm *mvm,
 				     struct iwl_rx_cmd_buffer *rxb)
 {
@@ -3795,5 +3772,6 @@ void iwl_mvm_rx_channel_survey_notif(struct iwl_mvm *mvm,
 	info->time_busy = le32_to_cpu(notif->busy_time);
 	info->time_rx = le32_to_cpu(notif->rx_time);
 	info->time_tx = le32_to_cpu(notif->tx_time);
-	info->noise = iwl_mvm_average_dbm_values(notif);
+	info->noise =
+		iwl_average_neg_dbm(notif->noise, ARRAY_SIZE(notif->noise));
 }

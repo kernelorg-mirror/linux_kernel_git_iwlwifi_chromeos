@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
  * Copyright (C) 2024-2025 Intel Corporation
  */
@@ -11,6 +11,7 @@
 #include "iwl-config.h"
 #include "iwl-trans.h"
 #include "iface.h"
+#include "phy.h"
 
 struct iwl_mld;
 
@@ -36,7 +37,7 @@ static inline bool iwl_mld_vif_has_emlsr_cap(struct ieee80211_vif *vif)
 	return ieee80211_vif_type_p2p(vif) == NL80211_IFTYPE_STATION &&
 	       ieee80211_vif_is_mld(vif) &&
 	       vif->cfg.eml_cap & IEEE80211_EML_CAP_EMLSR_SUPP &&
-	       !CSR_HW_RFID_IS_CDB(mld_vif->mld->trans->hw_rf_id);
+	       !CSR_HW_RFID_IS_CDB(mld_vif->mld->trans->info.hw_rf_id);
 }
 
 static inline int
@@ -133,13 +134,11 @@ void iwl_mld_emlsr_unblock_tpt_wk(struct wiphy *wiphy, struct wiphy_work *wk);
 
 void iwl_mld_select_links(struct iwl_mld *mld);
 
-void iwl_mld_emlsr_check_equal_bw(struct iwl_mld *mld,
-				  struct ieee80211_vif *vif,
-				  struct ieee80211_bss_conf *link);
-
 void iwl_mld_emlsr_check_bt(struct iwl_mld *mld);
 
-void iwl_mld_emlsr_check_chan_load(struct iwl_mld *mld);
+void iwl_mld_emlsr_check_chan_load(struct ieee80211_hw *hw,
+				   struct iwl_mld_phy *phy,
+				   u32 prev_chan_load_not_by_us);
 
 /**
  * iwl_mld_retry_emlsr - Retry entering EMLSR
@@ -150,5 +149,17 @@ void iwl_mld_emlsr_check_chan_load(struct iwl_mld *mld);
  * Use this if one of the parameters that can prevent EMLSR has changed.
  */
 void iwl_mld_retry_emlsr(struct iwl_mld *mld, struct ieee80211_vif *vif);
+
+struct iwl_mld_link_sel_data {
+	u8 link_id;
+	const struct cfg80211_chan_def *chandef;
+	s32 signal;
+	u16 grade;
+};
+
+void iwl_mld_emlsr_block_tmp_non_bss(struct iwl_mld *mld);
+
+void iwl_mld_start_ignoring_tpt_updates(struct iwl_mld *mld);
+void iwl_mld_stop_ignoring_tpt_updates(struct iwl_mld *mld);
 
 #endif /* __iwl_mld_mlo_h__ */

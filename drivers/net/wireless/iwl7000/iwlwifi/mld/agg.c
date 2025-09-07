@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
  * Copyright (C) 2024-2025 Intel Corporation
@@ -86,7 +85,7 @@ void iwl_mld_handle_frame_release_notif(struct iwl_mld *mld,
 	u32 pkt_len = iwl_rx_packet_payload_len(pkt);
 
 	if (IWL_FW_CHECK(mld, pkt_len < sizeof(*release),
-			 "Unexpected frame release notif size %d (expected %ld)\n",
+			 "Unexpected frame release notif size %u (expected %zu)\n",
 			 pkt_len, sizeof(*release)))
 		return;
 
@@ -106,7 +105,7 @@ void iwl_mld_handle_bar_frame_release_notif(struct iwl_mld *mld,
 	u32 pkt_len = iwl_rx_packet_payload_len(pkt);
 
 	if (IWL_FW_CHECK(mld, pkt_len < sizeof(*release),
-			 "Unexpected frame release notif size %d (expected %ld)\n",
+			 "Unexpected frame release notif size %u (expected %zu)\n",
 			 pkt_len, sizeof(*release)))
 		return;
 
@@ -125,10 +124,12 @@ void iwl_mld_handle_bar_frame_release_notif(struct iwl_mld *mld,
 
 	rcu_read_lock();
 	baid_data = rcu_dereference(mld->fw_id_to_ba[baid]);
-	if (IWL_FW_CHECK(mld, !baid_data,
-			 "Got valid BAID %d but not allocated, invalid BAR release!\n",
-			 baid))
+	if (!baid_data) {
+		IWL_DEBUG_HT(mld,
+			     "Got valid BAID %d but not allocated\n",
+			     baid);
 		goto out_unlock;
+	}
 
 	if (IWL_FW_CHECK(mld, tid != baid_data->tid ||
 			 sta_id > mld->fw->ucode_capa.num_stations ||
@@ -450,7 +451,7 @@ static void iwl_mld_init_reorder_buffer(struct iwl_mld *mld,
 					struct iwl_mld_baid_data *data,
 					u16 ssn)
 {
-	for (int i = 0; i < mld->trans->num_rx_queues; i++) {
+	for (int i = 0; i < mld->trans->info.num_rxqs; i++) {
 		struct iwl_mld_reorder_buffer *reorder_buf =
 			&data->reorder_buf[i];
 		struct iwl_mld_reorder_buf_entry *entries =
@@ -474,7 +475,7 @@ static void iwl_mld_free_reorder_buffer(struct iwl_mld *mld,
 	iwl_mld_sync_rx_queues(mld, IWL_MLD_RXQ_NOTIF_DEL_BA,
 			       &delba_data, sizeof(delba_data));
 
-	for (int i = 0; i < mld->trans->num_rx_queues; i++) {
+	for (int i = 0; i < mld->trans->info.num_rxqs; i++) {
 		struct iwl_mld_reorder_buffer *reorder_buf =
 			&data->reorder_buf[i];
 		struct iwl_mld_reorder_buf_entry *entries =
@@ -536,7 +537,7 @@ int iwl_mld_ampdu_rx_start(struct iwl_mld *mld, struct ieee80211_sta *sta,
 	 * before starting the BA session in the firmware
 	 */
 	baid_data = kzalloc(sizeof(*baid_data) +
-			    mld->trans->num_rx_queues * reorder_buf_size,
+			    mld->trans->info.num_rxqs * reorder_buf_size,
 			    GFP_KERNEL);
 	if (!baid_data)
 		return -ENOMEM;
@@ -619,7 +620,11 @@ int iwl_mld_ampdu_rx_stop(struct iwl_mld *mld, struct ieee80211_sta *sta,
 		return -EINVAL;
 
 	if (timer_pending(&baid_data->session_timer))
+#if LINUX_VERSION_IS_GEQ(6,2,1)
 		timer_shutdown_sync(&baid_data->session_timer);
+#else
+		del_timer_sync(&baid_data->session_timer);
+#endif
 
 	iwl_mld_free_reorder_buffer(mld, baid_data);
 

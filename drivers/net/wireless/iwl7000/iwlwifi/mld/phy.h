@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
  * Copyright (C) 2024-2025 Intel Corporation
  */
@@ -48,11 +48,13 @@ int iwl_mld_allocate_fw_phy_id(struct iwl_mld *mld);
 int iwl_mld_phy_fw_action(struct iwl_mld *mld,
 			  struct ieee80211_chanctx_conf *ctx, u32 action);
 struct cfg80211_chan_def *
-iwl_mld_get_chandef_from_chanctx(struct ieee80211_chanctx_conf *ctx);
+iwl_mld_get_chandef_from_chanctx(struct iwl_mld *mld,
+				 struct ieee80211_chanctx_conf *ctx);
 u8 iwl_mld_get_fw_ctrl_pos(const struct cfg80211_chan_def *chandef);
 
-#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
 int iwl_mld_send_phy_cfg_cmd(struct iwl_mld *mld);
-#endif
+
+void iwl_mld_update_phy_chandef(struct iwl_mld *mld,
+				struct ieee80211_chanctx_conf *ctx);
 
 #endif /* __iwl_mld_phy_h__ */

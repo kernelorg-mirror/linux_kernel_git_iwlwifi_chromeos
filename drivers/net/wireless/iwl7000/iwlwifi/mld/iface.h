@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
  * Copyright (C) 2024-2025 Intel Corporation
  */
@@ -10,6 +10,7 @@
 #include "link.h"
 #include "session-protect.h"
 #include "d3.h"
+#include "fw/api/time-event.h"
 
 enum iwl_mld_cca_40mhz_wa_status {
 	CCA_40_MHZ_WA_NONE,
@@ -24,7 +25,6 @@ enum iwl_mld_cca_40mhz_wa_status {
  *
  * @IWL_MLD_EMLSR_BLOCKED_PREVENTION: Prevent repeated EMLSR enter/exit
  * @IWL_MLD_EMLSR_BLOCKED_WOWLAN: WOWLAN is preventing EMLSR
- * @IWL_MLD_EMLSR_BLOCKED_FW: FW did not recommend MLO
  * @IWL_MLD_EMLSR_BLOCKED_ROC: remain-on-channel is preventing EMLSR
  * @IWL_MLD_EMLSR_BLOCKED_NON_BSS: An active non-BSS interface's link is
  *      preventing EMLSR
@@ -36,11 +36,10 @@ enum iwl_mld_cca_40mhz_wa_status {
 enum iwl_mld_emlsr_blocked {
 	IWL_MLD_EMLSR_BLOCKED_PREVENTION	= 0x1,
 	IWL_MLD_EMLSR_BLOCKED_WOWLAN		= 0x2,
-	IWL_MLD_EMLSR_BLOCKED_FW		= 0x4,
-	IWL_MLD_EMLSR_BLOCKED_ROC		= 0x8,
-	IWL_MLD_EMLSR_BLOCKED_NON_BSS		= 0x10,
-	IWL_MLD_EMLSR_BLOCKED_TMP_NON_BSS	= 0x20,
-	IWL_MLD_EMLSR_BLOCKED_TPT		= 0x40,
+	IWL_MLD_EMLSR_BLOCKED_ROC		= 0x4,
+	IWL_MLD_EMLSR_BLOCKED_NON_BSS		= 0x8,
+	IWL_MLD_EMLSR_BLOCKED_TMP_NON_BSS	= 0x10,
+	IWL_MLD_EMLSR_BLOCKED_TPT		= 0x20,
 };
 
 /**
@@ -54,14 +53,14 @@ enum iwl_mld_emlsr_blocked {
  * @IWL_MLD_EMLSR_EXIT_FAIL_ENTRY: FW failed to enter EMLSR
  * @IWL_MLD_EMLSR_EXIT_CSA: EMLSR prevented due to channel switch on link
  * @IWL_MLD_EMLSR_EXIT_EQUAL_BAND: EMLSR prevented as both links share the band
- * @IWL_MLD_EMLSR_EXIT_BANDWIDTH: Bandwidths of primary and secondary links are
- *      not equal
  * @IWL_MLD_EMLSR_EXIT_LOW_RSSI: Link RSSI is unsuitable for EMLSR
  * @IWL_MLD_EMLSR_EXIT_LINK_USAGE: Exit EMLSR due to low TPT on secondary link
  * @IWL_MLD_EMLSR_EXIT_BT_COEX: Exit EMLSR due to BT coexistence
  * @IWL_MLD_EMLSR_EXIT_CHAN_LOAD: Exit EMLSR because the primary channel is not
  *	loaded enough to justify EMLSR.
  * @IWL_MLD_EMLSR_EXIT_RFI: Exit EMLSR due to RFI
+ * @IWL_MLD_EMLSR_EXIT_FW_REQUEST: Exit EMLSR because the FW requested it
+ * @IWL_MLD_EMLSR_EXIT_INVALID: internal exit reason due to invalid data
  */
 enum iwl_mld_emlsr_exit {
 	IWL_MLD_EMLSR_EXIT_BLOCK		= 0x1,
@@ -69,12 +68,13 @@ enum iwl_mld_emlsr_exit {
 	IWL_MLD_EMLSR_EXIT_FAIL_ENTRY		= 0x4,
 	IWL_MLD_EMLSR_EXIT_CSA			= 0x8,
 	IWL_MLD_EMLSR_EXIT_EQUAL_BAND		= 0x10,
-	IWL_MLD_EMLSR_EXIT_BANDWIDTH		= 0x20,
-	IWL_MLD_EMLSR_EXIT_LOW_RSSI		= 0x40,
-	IWL_MLD_EMLSR_EXIT_LINK_USAGE		= 0x80,
-	IWL_MLD_EMLSR_EXIT_BT_COEX		= 0x100,
-	IWL_MLD_EMLSR_EXIT_CHAN_LOAD		= 0x200,
-	IWL_MLD_EMLSR_EXIT_RFI			= 0x400,
+	IWL_MLD_EMLSR_EXIT_LOW_RSSI		= 0x20,
+	IWL_MLD_EMLSR_EXIT_LINK_USAGE		= 0x40,
+	IWL_MLD_EMLSR_EXIT_BT_COEX		= 0x80,
+	IWL_MLD_EMLSR_EXIT_CHAN_LOAD		= 0x100,
+	IWL_MLD_EMLSR_EXIT_RFI			= 0x200,
+	IWL_MLD_EMLSR_EXIT_FW_REQUEST		= 0x400,
+	IWL_MLD_EMLSR_EXIT_INVALID		= 0x800,
 };
 
 /**
@@ -126,8 +126,6 @@ struct iwl_mld_emlsr {
  *	Only valid for STA. (FIXME: needs to be per link)
  * @num_associated_stas: number of associated STAs. Relevant only for AP mode.
  * @ap_ibss_active: whether the AP/IBSS was started
- * @roc_activity: the id of the roc_activity running. Relevant for p2p device
- *	only. Set to %ROC_NUM_ACTIVITIES when not in use.
  * @cca_40mhz_workaround: When we are connected in 2.4 GHz and 40 MHz, and the
  *	environment is too loaded, we work around this by reconnecting to the
  *	same AP with 20 MHz. This manages the status of the workaround.
@@ -135,6 +133,8 @@ struct iwl_mld_emlsr {
  * @low_latency_causes: bit flags, indicating the causes for low-latency,
  *	see @iwl_mld_low_latency_cause.
  * @ps_disabled: indicates that PS is disabled for this interface
+ * @last_link_activation_time: last time a link was activated, for
+ *	deferring MLO scans (to make them more reliable)
  * @mld: pointer to the mld structure.
  * @deflink: default link data, for use in non-MLO,
  * @link: reference to link data for each valid link, for use in MLO.
@@ -143,7 +143,12 @@ struct iwl_mld_emlsr {
  * @use_ps_poll: use ps_poll frames
  * @disable_bf: disable beacon filter
  * @dbgfs_slink: debugfs symlink for this interface
- * @dbgfs_slink_mvm: debugfs symlink for legacy tests support
+ * @ftm_unprotected: if set, use unprotected FTM negotiation even if the peer
+ *	has an active security context.
+ * @roc_activity: the id of the roc_activity running. Relevant for STA and
+ *	p2p device only. Set to %ROC_NUM_ACTIVITIES when not in use.
+ * @aux_sta: station used for remain on channel. Used in P2P device.
+ * @mlo_scan_start_wk: worker to start a deferred MLO scan
  */
 struct iwl_mld_vif {
 	/* Add here fields that need clean up on restart */
@@ -155,13 +160,13 @@ struct iwl_mld_vif {
 		struct ieee80211_key_conf __rcu *bigtks[2];
 		u8 num_associated_stas;
 		bool ap_ibss_active;
-		u32 roc_activity;
 		enum iwl_mld_cca_40mhz_wa_status cca_40mhz_workaround;
 #ifdef CPTCFG_IWLWIFI_DEBUGFS
 		bool beacon_inject_active;
 #endif
 		u8 low_latency_causes;
 		bool ps_disabled;
+		time64_t last_link_activation_time;
 	);
 	/* And here fields that survive a fw restart */
 	struct iwl_mld *mld;
@@ -170,23 +175,31 @@ struct iwl_mld_vif {
 
 	struct iwl_mld_emlsr emlsr;
 
-#if CONFIG_PM_SLEEP
+#ifdef CONFIG_PM_SLEEP
 	struct iwl_mld_wowlan_data wowlan_data;
 #endif
 #ifdef CPTCFG_IWLWIFI_DEBUGFS
 	bool use_ps_poll;
 	bool disable_bf;
 	struct dentry *dbgfs_slink;
-#ifdef HACK_IWLWIFI_DEBUGFS_IWLMVM_SYMLINK
-	struct dentry *dbgfs_slink_mvm;
+	bool ftm_unprotected;
 #endif
-#endif
+	enum iwl_roc_activity roc_activity;
+	struct iwl_mld_int_sta aux_sta;
+
+	struct wiphy_delayed_work mlo_scan_start_wk;
 };
 
 static inline struct iwl_mld_vif *
 iwl_mld_vif_from_mac80211(struct ieee80211_vif *vif)
 {
 	return (void *)vif->drv_priv;
+}
+
+static inline struct ieee80211_vif *
+iwl_mld_vif_to_mac80211(struct iwl_mld_vif *mld_vif)
+{
+	return container_of((void *)mld_vif, struct ieee80211_vif, drv_priv);
 }
 
 #define iwl_mld_link_dereference_check(mld_vif, link_id)		\

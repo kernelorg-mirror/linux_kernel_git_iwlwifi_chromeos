@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2014, 2018-2024 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2025 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -187,7 +187,7 @@ static int iwl_mvm_set_country(struct wiphy *wiphy,
 	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
 	struct iwl_mvm *mvm = IWL_MAC80211_GET_MVM(hw);
 	int retval;
-	int mcc_update_src = mvm->trans->trans_cfg->device_family >
+	int mcc_update_src = mvm->trans->mac_cfg->device_family >
 		IWL_DEVICE_FAMILY_9000 ? MCC_SOURCE_MCC_API :
 		MCC_SOURCE_3G_LTE_HOST;
 
@@ -255,7 +255,7 @@ static int iwl_mvm_vendor_rfim_get_capa(struct wiphy *wiphy,
 	if (!skb)
 		return -ENOMEM;
 
-	if (mvm->trans->trans_cfg->integrated) {
+	if (mvm->trans->mac_cfg->integrated) {
 		if (iwl_mvm_rfi_supported(mvm, mvm->force_enable_rfi, true)) {
 			capa |= IWL_MVM_RFI_DDR_CAPA_ALL;
 			if (iwl_mvm_rfi_desense_supported(mvm))
@@ -1219,7 +1219,7 @@ static int iwl_mvm_vendor_ppag_get_table(struct wiphy *wiphy,
 		goto err;
 	}
 
-	per_chain_size = (mvm->fwrt.ppag_ver == 0) ?
+	per_chain_size = (mvm->fwrt.ppag_bios_rev == 0) ?
 		IWL_NUM_SUB_BANDS_V1 : IWL_NUM_SUB_BANDS_V2;
 
 	for (chain = 0; chain < IWL_NUM_CHAIN_LIMITS; chain++) {
