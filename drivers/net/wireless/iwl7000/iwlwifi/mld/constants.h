@@ -4,6 +4,7 @@
  */
 #ifndef __iwl_mld_constants_h__
 #define __iwl_mld_constants_h__
+#include <fw/api/location.h>
 
 #define IWL_MLD_MISSED_BEACONS_SINCE_RX_THOLD			4
 #define IWL_MLD_MISSED_BEACONS_THRESHOLD			8
@@ -69,7 +70,7 @@
 #define IWL_MLD_LOW_RSSI_THRESH_160MHZ		-72
 
 #define IWL_MLD_ENTER_EMLSR_TPT_THRESH		400
-#define IWL_MLD_CHAN_LOAD_THRESH		2 /* in percentage */
+#define IWL_MLD_EXIT_EMLSR_CHAN_LOAD		2 /* in percentage */
 
 #define IWL_MLD_FTM_INITIATOR_ALGO		IWL_TOF_ALGO_TYPE_MAX_LIKE
 #define IWL_MLD_FTM_INITIATOR_DYNACK		true
@@ -85,6 +86,7 @@
 #define IWL_MLD_FTM_RESP_LMR_FEEDBACK_SUPPORT	true
 #define IWL_MLD_FTM_NON_TB_MIN_TIME_BETWEEN_MSR	7
 #define IWL_MLD_FTM_NON_TB_MAX_TIME_BETWEEN_MSR	1000
+#define IWL_MLD_FTM_INITIATOR_SECURE_LTF	false
 
 #else
 #define IWL_MLD_DIS_RANDOM_FW_ID	        (mld->trans->dbg_cfg.MLD_DIS_RANDOM_FW_ID)
@@ -104,7 +106,7 @@
 #define IWL_MLD_HIGH_RSSI_THRESH_160MHZ		(mld->trans->dbg_cfg.MLD_HIGH_RSSI_THRESH_160MHZ)
 #define IWL_MLD_LOW_RSSI_THRESH_160MHZ		(mld->trans->dbg_cfg.MLD_LOW_RSSI_THRESH_160MHZ)
 #define IWL_MLD_ENTER_EMLSR_TPT_THRESH		(mld->trans->dbg_cfg.MLD_ENTER_EMLSR_TPT_THRESH)
-#define IWL_MLD_CHAN_LOAD_THRESH		(mld->trans->dbg_cfg.MLD_CHAN_LOAD_THRESH)
+#define IWL_MLD_EXIT_EMLSR_CHAN_LOAD		(mld->trans->dbg_cfg.MLD_EXIT_EMLSR_CHAN_LOAD)
 #define IWL_MLD_FTM_INITIATOR_ALGO	    	(mld->trans->dbg_cfg.MLD_FTM_INITIATOR_ALGO)
 #define IWL_MLD_FTM_INITIATOR_DYNACK		(mld->trans->dbg_cfg.MLD_FTM_INITIATOR_DYNACK)
 #define IWL_MLD_FTM_LMR_FEEDBACK_TERMINATE	(mld->trans->dbg_cfg.MLD_FTM_LMR_FEEDBACK_TERMINATE)
@@ -120,6 +122,7 @@
 #define IWL_MLD_FTM_I2R_MAX_TOTAL_LTF           (mld->trans->dbg_cfg.MLD_FTM_I2R_MAX_TOTAL_LTF)
 #define IWL_MLD_FTM_NON_TB_MIN_TIME_BETWEEN_MSR (mld->trans->dbg_cfg.MLD_FTM_NON_TB_MIN_TIME_BETWEEN_MSR)
 #define IWL_MLD_FTM_NON_TB_MAX_TIME_BETWEEN_MSR (mld->trans->dbg_cfg.MLD_FTM_NON_TB_MAX_TIME_BETWEEN_MSR)
+#define IWL_MLD_FTM_INITIATOR_SECURE_LTF        (mld->trans->dbg_cfg.MLD_FTM_INITIATOR_SECURE_LTF)
 #endif
 
 #endif /* __iwl_mld_constants_h__ */

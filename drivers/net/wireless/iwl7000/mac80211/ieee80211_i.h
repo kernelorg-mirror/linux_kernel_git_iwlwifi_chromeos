@@ -200,7 +200,6 @@ enum ieee80211_packet_rx_flags {
 /**
  * enum ieee80211_rx_flags - RX data flags
  *
- * @IEEE80211_RX_CMNTR: received on cooked monitor already
  * @IEEE80211_RX_BEACON_REPORTED: This frame was already reported
  *	to cfg80211_report_obss_beacon().
  *
@@ -208,8 +207,7 @@ enum ieee80211_packet_rx_flags {
  * for a single frame.
  */
 enum ieee80211_rx_flags {
-	IEEE80211_RX_CMNTR		= BIT(0),
-	IEEE80211_RX_BEACON_REPORTED	= BIT(1),
+	IEEE80211_RX_BEACON_REPORTED	= BIT(0),
 };
 
 struct ieee80211_rx_data {
@@ -1229,7 +1227,7 @@ struct ieee80211_sub_if_data *vif_to_sdata(struct ieee80211_vif *p)
 	for (int ___link_id = 0;					\
 	     ___link_id < ARRAY_SIZE(___sdata->link);			\
 	     ___link_id++)						\
-	if ((_link = wiphy_dereference((local)->hw.wiphy,		\
+	if ((_link = wiphy_dereference((_local)->hw.wiphy,		\
 				       ___sdata->link[___link_id])))
 
 static inline int
@@ -1394,7 +1392,7 @@ struct ieee80211_local {
 	spinlock_t queue_stop_reason_lock;
 
 	int open_count;
-	int monitors, cooked_mntrs, tx_mntrs;
+	int monitors, virt_monitors, tx_mntrs;
 	/* number of interfaces with corresponding FIF_ flags */
 	int fif_fcsfail, fif_plcpfail, fif_control, fif_other_bss, fif_pspoll,
 	    fif_probe_req;
@@ -1506,7 +1504,7 @@ struct ieee80211_local {
 
 	/* see iface.c */
 	struct list_head interfaces;
-	struct list_head mon_list; /* only that are IFF_UP && !cooked */
+	struct list_head mon_list; /* only that are IFF_UP */
 	struct mutex iflist_mtx;
 
 	/* Scanning and BSS list */
@@ -2104,8 +2102,7 @@ struct sk_buff *
 ieee80211_build_data_template(struct ieee80211_sub_if_data *sdata,
 			      struct sk_buff *skb, u32 info_flags);
 void ieee80211_tx_monitor(struct ieee80211_local *local, struct sk_buff *skb,
-			  int retry_count, bool send_to_cooked,
-			  struct ieee80211_tx_status *status);
+			  int retry_count, struct ieee80211_tx_status *status);
 
 void ieee80211_check_fast_xmit(struct sta_info *sta);
 void ieee80211_check_fast_xmit_all(struct ieee80211_local *local);
@@ -2138,8 +2135,6 @@ void ieee80211_send_delba(struct ieee80211_sub_if_data *sdata,
 int ieee80211_send_smps_action(struct ieee80211_sub_if_data *sdata,
 			       enum ieee80211_smps_mode smps, const u8 *da,
 			       const u8 *bssid, int link_id);
-bool ieee80211_smps_is_restrictive(enum ieee80211_smps_mode smps_mode_old,
-				   enum ieee80211_smps_mode smps_mode_new);
 void ieee80211_add_addbaext(struct sk_buff *skb,
 			    const u8 req_addba_ext_data,
 			    u16 buf_size);
@@ -2637,6 +2632,8 @@ int ieee80211_put_eht_cap(struct sk_buff *skb,
 			  struct ieee80211_sub_if_data *sdata,
 			  const struct ieee80211_supported_band *sband,
 			  const struct ieee80211_conn_settings *conn);
+int ieee80211_put_reg_conn(struct sk_buff *skb,
+			   enum ieee80211_channel_flags flags);
 
 /* channel management */
 bool ieee80211_chandef_ht_oper(const struct ieee80211_ht_operation *ht_oper,

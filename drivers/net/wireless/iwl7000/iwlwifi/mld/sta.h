@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
  * Copyright (C) 2024-2025 Intel Corporation
  */
@@ -172,9 +172,8 @@ iwl_mld_cleanup_sta(void *data, struct ieee80211_sta *sta)
 		/* Should not happen as link removal should always succeed */
 		WARN_ON(1);
 		RCU_INIT_POINTER(mld_sta->link[link_id], NULL);
-		RCU_INIT_POINTER(
-			mld_sta->mld->fw_id_to_link_sta[mld_link_sta->fw_id],
-			NULL);
+		RCU_INIT_POINTER(mld_sta->mld->fw_id_to_link_sta[mld_link_sta->fw_id],
+				 NULL);
 		if (mld_link_sta != &mld_sta->deflink)
 			kfree_rcu(mld_link_sta, rcu_head);
 	}
@@ -200,7 +199,7 @@ int iwl_mld_update_all_link_stations(struct iwl_mld *mld,
 				     struct ieee80211_sta *sta);
 void iwl_mld_flush_sta_txqs(struct iwl_mld *mld, struct ieee80211_sta *sta);
 void iwl_mld_wait_sta_txqs_empty(struct iwl_mld *mld,
-				struct ieee80211_sta *sta);
+				 struct ieee80211_sta *sta);
 void iwl_mld_count_mpdu_rx(struct ieee80211_link_sta *link_sta, int queue,
 			   u32 count);
 void iwl_mld_count_mpdu_tx(struct ieee80211_link_sta *link_sta, u32 count);
@@ -228,7 +227,7 @@ iwl_mld_init_internal_sta(struct iwl_mld_int_sta *internal_sta)
 
 static inline void
 iwl_mld_free_internal_sta(struct iwl_mld *mld,
-			     struct iwl_mld_int_sta *internal_sta)
+			  struct iwl_mld_int_sta *internal_sta)
 {
 	if (WARN_ON(internal_sta->sta_id == IWL_INVALID_STA))
 		return;
@@ -248,6 +247,10 @@ int iwl_mld_add_mcast_sta(struct iwl_mld *mld,
 int iwl_mld_add_aux_sta(struct iwl_mld *mld,
 			struct iwl_mld_int_sta *internal_sta);
 
+int iwl_mld_add_mon_sta(struct iwl_mld *mld,
+			struct ieee80211_vif *vif,
+			struct ieee80211_bss_conf *link);
+
 void iwl_mld_remove_bcast_sta(struct iwl_mld *mld,
 			      struct ieee80211_vif *vif,
 			      struct ieee80211_bss_conf *link);
@@ -257,12 +260,23 @@ void iwl_mld_remove_mcast_sta(struct iwl_mld *mld,
 			      struct ieee80211_bss_conf *link);
 
 void iwl_mld_remove_aux_sta(struct iwl_mld *mld,
+			    struct ieee80211_vif *vif);
+
+void iwl_mld_remove_mon_sta(struct iwl_mld *mld,
 			    struct ieee80211_vif *vif,
 			    struct ieee80211_bss_conf *link);
-
 
 int iwl_mld_update_link_stas(struct iwl_mld *mld,
 			     struct ieee80211_vif *vif,
 			     struct ieee80211_sta *sta,
 			     u16 old_links, u16 new_links);
+
+int iwl_mld_add_pasn_sta(struct iwl_mld *mld, struct ieee80211_vif *vif,
+			 struct iwl_mld_int_sta *sta, u8 *addr, u32 cipher,
+			 u8 *key, u32 key_len,
+			 struct ieee80211_key_conf *keyconf);
+
+void iwl_mld_remove_pasn_sta(struct iwl_mld *mld, struct ieee80211_vif *vif,
+			     struct iwl_mld_int_sta *sta,
+			     struct ieee80211_key_conf *keyconf);
 #endif /* __iwl_mld_sta_h__ */
