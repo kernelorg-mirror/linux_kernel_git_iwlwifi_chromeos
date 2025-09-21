@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2005-2014, 2018-2024 Intel Corporation
+ * Copyright (C) 2005-2014, 2018-2025 Intel Corporation
  * Copyright (C) 2015-2017 Intel Deutschland GmbH
  */
 #include <linux/module.h>
@@ -15,8 +15,6 @@
 #include "iwl-csr.h"
 #include "xvt.h"
 #include "user-infc.h"
-#include "iwl-dnt-cfg.h"
-#include "iwl-dnt-dispatch.h"
 #include "iwl-io.h"
 #include "iwl-prph.h"
 #include "fw/dbg.h"
@@ -188,13 +186,12 @@ static int iwl_xvt_tm_send_hcmd(void *op_mode, struct iwl_host_cmd *host_cmd)
 }
 
 static struct iwl_op_mode *iwl_xvt_start(struct iwl_trans *trans,
-					 const struct iwl_cfg *cfg,
+					 const struct iwl_rf_cfg *cfg,
 					 const struct iwl_fw *fw,
 					 struct dentry *dbgfs_dir)
 {
 	struct iwl_op_mode *op_mode;
 	struct iwl_xvt *xvt;
-	struct iwl_trans_config trans_cfg = {};
 	static const u8 no_reclaim_cmds[] = {
 		TX_CMD,
 	};
@@ -226,44 +223,47 @@ static struct iwl_op_mode *iwl_xvt_start(struct iwl_trans *trans,
 	 * Populate the state variables that the
 	 * transport layer needs to know about.
 	 */
-	trans_cfg.op_mode = op_mode;
-	trans_cfg.no_reclaim_cmds = no_reclaim_cmds;
-	trans_cfg.n_no_reclaim_cmds = ARRAY_SIZE(no_reclaim_cmds);
-	trans_cfg.command_groups = iwl_xvt_cmd_groups;
-	trans_cfg.command_groups_size = ARRAY_SIZE(iwl_xvt_cmd_groups);
-	trans_cfg.cmd_queue = IWL_MVM_DQA_CMD_QUEUE;
+	BUILD_BUG_ON(sizeof(no_reclaim_cmds) >
+		     sizeof(trans->conf.no_reclaim_cmds));
+	memcpy(trans->conf.no_reclaim_cmds, no_reclaim_cmds,
+	       sizeof(no_reclaim_cmds));
+	trans->conf.n_no_reclaim_cmds = ARRAY_SIZE(no_reclaim_cmds);
+	trans->conf.command_groups = iwl_xvt_cmd_groups;
+	trans->conf.command_groups_size = ARRAY_SIZE(iwl_xvt_cmd_groups);
+	trans->conf.cmd_queue = IWL_MVM_DQA_CMD_QUEUE;
 	IWL_DEBUG_INFO(xvt, "dqa supported\n");
-	trans_cfg.cmd_fifo = IWL_MVM_TX_FIFO_CMD;
-	trans_cfg.bc_table_dword =
-		trans->trans_cfg->device_family < IWL_DEVICE_FAMILY_AX210;
-	trans_cfg.scd_set_active = true;
-	trans->wide_cmd_header = true;
+	trans->conf.cmd_fifo = IWL_MVM_TX_FIFO_CMD;
+	trans->conf.scd_set_active = true;
+	trans->conf.wide_cmd_header = true;
 
-	trans_cfg.rx_buf_size = iwl_amsdu_size_to_rxb_size();
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	trans->conf.fseq_img = &fw->fseq;
+#endif
+
+	trans->conf.rx_buf_size = iwl_amsdu_size_to_rxb_size();
 
 	/* the hardware splits the A-MSDU */
-	if (xvt->trans->trans_cfg->mq_rx_supported)
-		trans_cfg.rx_buf_size = IWL_AMSDU_4K;
+	if (xvt->trans->mac_cfg->mq_rx_supported)
+		trans->conf.rx_buf_size = IWL_AMSDU_4K;
 
-	trans->rx_mpdu_cmd_hdr_size =
-		(trans->trans_cfg->device_family >= IWL_DEVICE_FAMILY_AX210) ?
+	trans->conf.rx_mpdu_cmd = REPLY_RX_MPDU_CMD;
+	trans->conf.rx_mpdu_cmd_hdr_size =
+		(trans->mac_cfg->device_family >= IWL_DEVICE_FAMILY_AX210) ?
 		sizeof(struct iwl_rx_mpdu_desc) : IWL_RX_DESC_SIZE_V1;
 
-	trans_cfg.cb_data_offs = offsetof(struct iwl_xvt_skb_info, trans);
+	trans->conf.cb_data_offs = offsetof(struct iwl_xvt_skb_info, trans);
 
-	trans_cfg.fw_reset_handshake = fw_has_capa(&xvt->fw->ucode_capa,
-						   IWL_UCODE_TLV_CAPA_FW_RESET_HANDSHAKE);
+	trans->conf.fw_reset_handshake =
+		fw_has_capa(&xvt->fw->ucode_capa,
+			    IWL_UCODE_TLV_CAPA_FW_RESET_HANDSHAKE);
 
-	trans_cfg.queue_alloc_cmd_ver =
+	trans->conf.queue_alloc_cmd_ver =
 		iwl_fw_lookup_cmd_ver(xvt->fw,
 				      WIDE_ID(DATA_PATH_GROUP,
 					      SCD_QUEUE_CONFIG_CMD),
 				      0);
 
-	/* Configure transport layer */
-	iwl_trans_configure(xvt->trans, &trans_cfg);
-	trans->command_groups = trans_cfg.command_groups;
-	trans->command_groups_size = trans_cfg.command_groups_size;
+	iwl_trans_op_mode_enter(xvt->trans, op_mode);
 
 	/* set up notification wait support */
 	iwl_notification_wait_init(&xvt->notif_wait);
@@ -276,8 +276,6 @@ static struct iwl_op_mode *iwl_xvt_start(struct iwl_trans *trans,
 		err = -ENOMEM;
 		goto out_free;
 	}
-
-	iwl_dnt_init(xvt->trans, dbgfs_dir);
 
 	for (i = 0; i < NUM_OF_LMACS; i++) {
 		init_waitqueue_head(&xvt->tx_meta_data[i].mod_tx_wq);
@@ -308,6 +306,7 @@ static struct iwl_op_mode *iwl_xvt_start(struct iwl_trans *trans,
 	return op_mode;
 
 out_free:
+	iwl_trans_op_mode_leave(xvt->trans);
 	iwl_fw_runtime_free(&xvt->fwrt);
 	kfree(op_mode);
 
@@ -337,7 +336,6 @@ static void iwl_xvt_stop(struct iwl_op_mode *op_mode)
 
 	iwl_phy_db_free(xvt->phy_db);
 	xvt->phy_db = NULL;
-	iwl_dnt_free(xvt->trans);
 	kfree(op_mode);
 }
 
@@ -581,10 +579,10 @@ static void iwl_xvt_nic_config(struct iwl_op_mode *op_mode)
 	IWL_DEBUG_INFO(xvt, "Radio type=0x%x-0x%x-0x%x\n", radio_cfg_type,
 		       radio_cfg_step, radio_cfg_dash);
 
-	if (xvt->trans->trans_cfg->device_family >= IWL_DEVICE_FAMILY_AX210)
+	if (xvt->trans->mac_cfg->device_family >= IWL_DEVICE_FAMILY_AX210)
 		return;
 
-	reg_val = CSR_HW_REV_STEP_DASH(xvt->trans->hw_rev);
+	reg_val = CSR_HW_REV_STEP_DASH(xvt->trans->info.hw_rev);
 
 	/* radio configuration */
 	reg_val |= radio_cfg_type << CSR_HW_IF_CONFIG_REG_POS_PHY_TYPE;
@@ -602,7 +600,7 @@ static void iwl_xvt_nic_config(struct iwl_op_mode *op_mode)
 	 * unrelated errors. Need to further investigate this, but for now
 	 * we'll separate cases.
 	 */
-	if (xvt->trans->trans_cfg->device_family < IWL_DEVICE_FAMILY_8000)
+	if (xvt->trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_8000)
 		reg_val |= CSR_HW_IF_CONFIG_REG_BIT_RADIO_SI;
 
 	iwl_trans_set_bits_mask(xvt->trans, CSR_HW_IF_CONFIG_REG,
@@ -619,7 +617,7 @@ static void iwl_xvt_nic_config(struct iwl_op_mode *op_mode)
 	 * (PCIe power is lost before PERST# is asserted), causing ME FW
 	 * to lose ownership and not being able to obtain it back.
 	 */
-	if (!xvt->trans->cfg->apmg_not_supported)
+	if (!xvt->trans->mac_cfg->base->apmg_not_supported)
 		iwl_set_bits_mask_prph(xvt->trans, APMG_PS_CTRL_REG,
 				       APMG_PS_CTRL_EARLY_PWR_OFF_RESET_DIS,
 				       ~APMG_PS_CTRL_EARLY_PWR_OFF_RESET_DIS);
@@ -812,7 +810,7 @@ int iwl_xvt_allocate_tx_queue(struct iwl_xvt *xvt, u8 sta_id,
 {
 	int ret = 0;
 	int size = max_t(u32, IWL_DEFAULT_QUEUE_SIZE,
-			 xvt->trans->cfg->min_ba_txq_size);
+			 xvt->trans->mac_cfg->base->min_ba_txq_size);
 
 	if (xvt->tx_meta_data[lmac_id].sta_msk & BIT(sta_id))
 		return ret;

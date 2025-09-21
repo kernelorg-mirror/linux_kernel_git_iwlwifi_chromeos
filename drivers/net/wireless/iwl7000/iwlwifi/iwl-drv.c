@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2005-2014, 2018-2024 Intel Corporation
+ * Copyright (C) 2005-2014, 2018-2025 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -24,6 +24,8 @@
 #include "fw/api/mac.h"
 #include "fw/api/mac-cfg.h"
 #ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+#include "iwl-io.h"
+#include "iwl-prph.h"
 #include "iwl-dbg-cfg.h"
 #endif
 #ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
@@ -244,7 +246,6 @@ int iwl_drv_switch_op_mode(struct iwl_drv *drv, const char *new_op_name)
 
 	return ret;
 }
-IWL_EXPORT_SYMBOL(iwl_drv_switch_op_mode);
 
 /*
  * iwl_drv_sysfs_show - Returns device information to user
@@ -347,9 +348,15 @@ static void iwl_dealloc_ucode(struct iwl_drv *drv)
 	kfree(drv->fw.phy_integration_ver);
 	kfree(drv->trans->dbg.pc_data);
 	drv->trans->dbg.pc_data = NULL;
+	kvfree(drv->fw.pnvm_data);
+	drv->fw.pnvm_data = NULL;
+	drv->fw.pnvm_size = 0;
 
 	for (i = 0; i < IWL_UCODE_TYPE_MAX; i++)
 		iwl_free_fw_img(drv, drv->fw.img + i);
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	iwl_free_fw_img(drv, &drv->fw.fseq);
+#endif
 
 	/* clear the data for the aborted load case */
 	memset(&drv->fw, 0, sizeof(drv->fw));
@@ -387,25 +394,86 @@ static inline char iwl_drv_get_step(int step)
 
 static bool iwl_drv_is_wifi7_supported(struct iwl_trans *trans)
 {
-	return CSR_HW_RFID_TYPE(trans->hw_rf_id) >= IWL_CFG_RF_TYPE_FM;
+	return CSR_HW_RFID_TYPE(trans->info.hw_rf_id) >= IWL_CFG_RF_TYPE_FM;
 }
 
 const char *iwl_drv_get_fwname_pre(struct iwl_trans *trans, char *buf)
 {
 	char mac_step, rf_step;
-	const char *rf, *cdb;
+	const char *mac, *rf, *cdb;
 
 	if (trans->cfg->fw_name_pre)
 		return trans->cfg->fw_name_pre;
 
-	if (WARN_ON(!trans->cfg->fw_name_mac))
-		return "unconfigured";
+	mac_step = iwl_drv_get_step(trans->info.hw_rev_step);
 
-	mac_step = iwl_drv_get_step(trans->hw_rev_step);
+	switch (CSR_HW_REV_TYPE(trans->info.hw_rev)) {
+	case IWL_CFG_MAC_TYPE_PU:
+		mac = "9000-pu";
+		mac_step = 'b';
+		break;
+	case IWL_CFG_MAC_TYPE_TH:
+		mac = "9260-th";
+		mac_step = 'b';
+		break;
+	case IWL_CFG_MAC_TYPE_QU:
+		mac = "Qu";
+		break;
+	case IWL_CFG_MAC_TYPE_CC:
+		/* special case - no RF since it's fixed (discrete) */
+		scnprintf(buf, FW_NAME_PRE_BUFSIZE, "iwlwifi-cc-a0");
+		return buf;
+	case IWL_CFG_MAC_TYPE_QUZ:
+		mac = "QuZ";
+		/* all QuZ use A0 firmware */
+		mac_step = 'a';
+		break;
+	case IWL_CFG_MAC_TYPE_SO:
+	case IWL_CFG_MAC_TYPE_SOF:
+		mac = "so";
+		mac_step = 'a';
+		break;
+	case IWL_CFG_MAC_TYPE_TY:
+		mac = "ty";
+		mac_step = 'a';
+		break;
+	case IWL_CFG_MAC_TYPE_MA:
+		mac = "ma";
+		break;
+	case IWL_CFG_MAC_TYPE_BZ:
+	case IWL_CFG_MAC_TYPE_BZ_W:
+		mac = "bz";
+		break;
+	case IWL_CFG_MAC_TYPE_GL:
+		mac = "gl";
+		break;
+	case IWL_CFG_MAC_TYPE_SC:
+		mac = "sc";
+		break;
+	case IWL_CFG_MAC_TYPE_SC2:
+		mac = "sc2";
+		break;
+	case IWL_CFG_MAC_TYPE_SC2F:
+		mac = "sc2f";
+		break;
+	case IWL_CFG_MAC_TYPE_BR:
+		mac = "br";
+		break;
+	case IWL_CFG_MAC_TYPE_DR:
+		mac = "dr";
+		break;
+	default:
+		return "unknown-mac";
+	}
 
-	rf_step = iwl_drv_get_step(CSR_HW_RFID_STEP(trans->hw_rf_id));
+	rf_step = iwl_drv_get_step(CSR_HW_RFID_STEP(trans->info.hw_rf_id));
 
-	switch (CSR_HW_RFID_TYPE(trans->hw_rf_id)) {
+	switch (CSR_HW_RFID_TYPE(trans->info.hw_rf_id)) {
+	case IWL_CFG_RF_TYPE_JF1:
+	case IWL_CFG_RF_TYPE_JF2:
+		rf = "jf";
+		rf_step = 'b';
+		break;
 	case IWL_CFG_RF_TYPE_HR1:
 	case IWL_CFG_RF_TYPE_HR2:
 		rf = "hr";
@@ -413,29 +481,26 @@ const char *iwl_drv_get_fwname_pre(struct iwl_trans *trans, char *buf)
 		break;
 	case IWL_CFG_RF_TYPE_GF:
 		rf = "gf";
+		rf_step = 'a';
 		break;
 	case IWL_CFG_RF_TYPE_FM:
 		rf = "fm";
 		break;
 	case IWL_CFG_RF_TYPE_WH:
-		if (SILICON_Z_STEP ==
-		    CSR_HW_RFID_STEP(trans->hw_rf_id)) {
-			rf = "whtc";
-			rf_step = 'a';
-		} else {
-			rf = "wh";
-		}
+		rf = "wh";
+		break;
+	case IWL_CFG_RF_TYPE_PE:
+		rf = "pe";
 		break;
 	default:
 		return "unknown-rf";
 	}
 
-	cdb = CSR_HW_RFID_IS_CDB(trans->hw_rf_id) ? "4" : "";
+	cdb = CSR_HW_RFID_IS_CDB(trans->info.hw_rf_id) ? "4" : "";
 
 	scnprintf(buf, FW_NAME_PRE_BUFSIZE,
 		  "iwlwifi-%s-%c0-%s%s-%c0",
-		  trans->cfg->fw_name_mac, mac_step,
-		  rf, cdb, rf_step);
+		  mac, mac_step, rf, cdb, rf_step);
 
 	return buf;
 }
@@ -444,28 +509,53 @@ IWL_EXPORT_SYMBOL(iwl_drv_get_fwname_pre);
 static void iwl_req_fw_callback(const struct firmware *ucode_raw,
 				void *context);
 
+static void iwl_get_ucode_api_versions(struct iwl_trans *trans,
+				       unsigned int *api_min,
+				       unsigned int *api_max)
+{
+	const struct iwl_family_base_params *base = trans->mac_cfg->base;
+	const struct iwl_rf_cfg *cfg = trans->cfg;
+
+	if (!base->ucode_api_max) {
+		*api_min = cfg->ucode_api_min;
+		*api_max = cfg->ucode_api_max;
+		return;
+	}
+
+	if (!cfg->ucode_api_max) {
+		*api_min = base->ucode_api_min;
+		*api_max = base->ucode_api_max;
+		return;
+	}
+
+	*api_min = max(cfg->ucode_api_min, base->ucode_api_min);
+	*api_max = min(cfg->ucode_api_max, base->ucode_api_max);
+}
+
 static int iwl_request_firmware(struct iwl_drv *drv, bool first)
 {
-	const struct iwl_cfg *cfg = drv->trans->cfg;
 	char _fw_name_pre[FW_NAME_PRE_BUFSIZE];
+	unsigned int ucode_api_max, ucode_api_min;
 	const char *fw_name_pre;
 #if defined(CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES)
 	char fw_name_temp[64];
 #endif
 
-	if (drv->trans->trans_cfg->device_family == IWL_DEVICE_FAMILY_9000 &&
-	    (drv->trans->hw_rev_step != SILICON_B_STEP &&
-	     drv->trans->hw_rev_step != SILICON_C_STEP)) {
+	iwl_get_ucode_api_versions(drv->trans, &ucode_api_min, &ucode_api_max);
+
+	if (drv->trans->mac_cfg->device_family == IWL_DEVICE_FAMILY_9000 &&
+	    (drv->trans->info.hw_rev_step != SILICON_B_STEP &&
+	     drv->trans->info.hw_rev_step != SILICON_C_STEP)) {
 		IWL_ERR(drv,
 			"Only HW steps B and C are currently supported (0x%0x)\n",
-			drv->trans->hw_rev);
+			drv->trans->info.hw_rev);
 		return -EINVAL;
 	}
 
 	fw_name_pre = iwl_drv_get_fwname_pre(drv->trans, _fw_name_pre);
 
 	if (first)
-		drv->fw_index = cfg->ucode_api_max;
+		drv->fw_index = ucode_api_max;
 	else
 		drv->fw_index--;
 
@@ -474,25 +564,25 @@ static int iwl_request_firmware(struct iwl_drv *drv, bool first)
 	 * here we always load the 'api_max' version, and once that
 	 * has returned we load the dbg-cfg file.
 	 */
-	if ((drv->fw_index != cfg->ucode_api_max
+	if ((drv->fw_index != ucode_api_max
 #ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
 	     && !drv->trans->dbg_cfg.load_old_fw
 #endif
 	    ) ||
-	    drv->fw_index < cfg->ucode_api_min) {
+	    drv->fw_index < ucode_api_min) {
 #else
-	if (drv->fw_index < cfg->ucode_api_min) {
+	if (drv->fw_index < ucode_api_min) {
 #endif
 		IWL_ERR(drv, "no suitable firmware found!\n");
 
-		if (cfg->ucode_api_min == cfg->ucode_api_max) {
+		if (ucode_api_min == ucode_api_max) {
 			IWL_ERR(drv, "%s-%d is required\n", fw_name_pre,
-				cfg->ucode_api_max);
+				ucode_api_max);
 		} else {
 			IWL_ERR(drv, "minimum version required: %s-%d\n",
-				fw_name_pre, cfg->ucode_api_min);
+				fw_name_pre, ucode_api_min);
 			IWL_ERR(drv, "maximum version supported: %s-%d\n",
-				fw_name_pre, cfg->ucode_api_max);
+				fw_name_pre, ucode_api_max);
 		}
 
 		IWL_ERR(drv,
@@ -564,6 +654,11 @@ struct iwl_firmware_pieces {
 	struct iwl_fw_dbg_mem_seg_tlv *dbg_mem_tlv;
 	size_t n_mem_tlv;
 	u32 major;
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	struct {
+		u32 major, minor;
+	} fseq_ver;
+#endif
 };
 
 static void alloc_sec_data(struct iwl_firmware_pieces *pieces,
@@ -1274,16 +1369,6 @@ fw_dbg_conf:
 				break;
 			}
 
-#ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
-#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
-			if (drv->trans->dbg_cfg.dbm_destination_path) {
-				IWL_ERR(drv,
-					"Ignoring destination, ini file present\n");
-				break;
-			}
-#endif
-#endif
-
 			if (pieces->dbg_dest_tlv_init) {
 				IWL_ERR(drv,
 					"dbg destination ignored, already exists\n");
@@ -1475,10 +1560,23 @@ fw_dbg_conf:
 
 			if (tlv_len != sizeof(*fseq_ver))
 				goto invalid_tlv_len;
-			IWL_INFO(drv, "TLV_FW_FSEQ_VERSION: %.32s\n",
-				 fseq_ver->version);
+			IWL_DEBUG_INFO(drv, "TLV_FW_FSEQ_VERSION: %.32s\n",
+				       fseq_ver->version);
 			}
 			break;
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+		case IWL_UCODE_TLV_FSEQ_BIN_VERSION: {
+			const struct iwl_fw_fseq_bin_version *fseq;
+
+			if (tlv_len != sizeof(*fseq))
+				goto invalid_tlv_len;
+
+			fseq = (const void *)tlv_data;
+			pieces->fseq_ver.major = le32_to_cpu(fseq->major);
+			pieces->fseq_ver.minor = le32_to_cpu(fseq->minor);
+			}
+			break;
+#endif
 		case IWL_UCODE_TLV_FW_NUM_STATIONS:
 			if (tlv_len != sizeof(u32))
 				goto invalid_tlv_len;
@@ -1517,7 +1615,7 @@ fw_dbg_conf:
 
 			if (tlv_len != sizeof(*dbg_ptrs))
 				goto invalid_tlv_len;
-			if (drv->trans->trans_cfg->device_family <
+			if (drv->trans->mac_cfg->device_family <
 			    IWL_DEVICE_FAMILY_22000)
 				break;
 			drv->trans->dbg.umac_error_event_table =
@@ -1533,7 +1631,7 @@ fw_dbg_conf:
 
 			if (tlv_len != sizeof(*dbg_ptrs))
 				goto invalid_tlv_len;
-			if (drv->trans->trans_cfg->device_family <
+			if (drv->trans->mac_cfg->device_family <
 			    IWL_DEVICE_FAMILY_22000)
 				break;
 			drv->trans->dbg.lmac_error_event_table[0] =
@@ -1599,6 +1697,15 @@ fw_dbg_conf:
 			drv->trans->dbg.num_pc =
 				tlv_len / sizeof(struct iwl_pc_data);
 			break;
+		case IWL_UCODE_TLV_PNVM_DATA:
+			if (drv->fw.pnvm_data)
+				break;
+			drv->fw.pnvm_data =
+				kvmemdup(tlv_data, tlv_len, GFP_KERNEL);
+			if (!drv->fw.pnvm_data)
+				return -ENOMEM;
+			drv->fw.pnvm_size = tlv_len;
+			break;
 		default:
 			IWL_DEBUG_INFO(drv, "unknown TLV: %d\n", tlv_type);
 			break;
@@ -1655,7 +1762,7 @@ static int iwl_alloc_ucode(struct iwl_drv *drv,
 
 static int validate_sec_sizes(struct iwl_drv *drv,
 			      struct iwl_firmware_pieces *pieces,
-			      const struct iwl_cfg *cfg)
+			      const struct iwl_rf_cfg *cfg)
 {
 	IWL_DEBUG_INFO(drv, "f/w package hdr runtime inst size = %zd\n",
 		get_sec_size(pieces, IWL_UCODE_REGULAR,
@@ -1767,6 +1874,144 @@ static void _iwl_op_mode_stop(struct iwl_drv *drv)
 	}
 }
 
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+static int iwl_drv_load_fseq_image(struct iwl_trans *trans, struct iwl_fw *fw,
+				   struct iwl_firmware_pieces *pieces)
+{
+	struct fw_img_parsing fseq_pieces = {};
+	const struct iwl_fseq_file *fseq;
+	const struct iwl_ucode_tlv *tlv;
+	const struct firmware *fseq_fw;
+	u32 fseq_major, fseq_minor;
+	u32 tlv_len, tlv_type, len;
+	const u8 *tlv_data, *data;
+	u32 cnvi_id, cnvr_id;
+	char filename[100];
+	int err;
+
+#define FSEQ_ID(v)	(CNVI_AUX_MISC_CHIP_MAC_STEP(v) << 12 | \
+			 CNVI_AUX_MISC_CHIP_PROD_TYPE(v))
+
+	cnvi_id = trans->info.hw_cnv_id;
+	cnvr_id = iwl_read_prph_no_grab(trans, CNVR_AUX_MISC_CHIP);
+	scnprintf(filename, sizeof(filename), IWL_FSEQ_FILE,
+		  FSEQ_ID(cnvi_id), FSEQ_ID(cnvr_id));
+
+	if (request_firmware(&fseq_fw, filename, trans->dev))
+		return 0;
+
+	if (fseq_fw->size < sizeof(*fseq)) {
+		IWL_ERR(trans, "invalid FSEQ file size\n");
+		err = -EINVAL;
+		goto out;
+	}
+
+	fseq = (const void *)fseq_fw->data;
+
+	if (memcmp(fseq->magic, IWL_FSEQ_MAGIC, sizeof(fseq->magic))) {
+		IWL_ERR(trans, "invalid image magic\n");
+		err = -EINVAL;
+		goto out;
+	}
+
+	if (fseq_fw->size < sizeof(*fseq) +
+			    le32_to_cpu(fseq->bt_len) +
+			    le32_to_cpu(fseq->wifi_len)) {
+		IWL_ERR(trans, "invalid image sizes or file size\n");
+		err = -EINVAL;
+		goto out;
+	}
+
+	len = le32_to_cpu(fseq->wifi_len);
+	data = fseq->data + le32_to_cpu(fseq->bt_len);
+
+	while (len >= sizeof(*tlv)) {
+		len -= sizeof(*tlv);
+
+		tlv = (const void *)data;
+		tlv_len = le32_to_cpu(tlv->length);
+		tlv_type = le32_to_cpu(tlv->type);
+		tlv_data = tlv->data;
+
+		if (len < tlv_len) {
+			IWL_ERR(trans, "invalid TLV len: %u/%u\n",
+				len, tlv_len);
+			err = -EINVAL;
+			goto out;
+		}
+		len -= ALIGN(tlv_len, 4);
+		data += sizeof(*tlv) + ALIGN(tlv_len, 4);
+
+		switch (tlv_type) {
+		case IWL_UCODE_TLV_SEC_RT:
+			iwl_store_ucode_sec(&fseq_pieces, tlv_data, tlv_len);
+			break;
+		case IWL_UCODE_TLV_FW_FSEQ_VERSION: {
+			const struct {
+				u8 version[32];
+				u8 sha1[20];
+			} *fseq_ver = (const void *)tlv_data;
+
+			if (tlv_len != sizeof(*fseq_ver))
+				goto invalid_tlv_len;
+			IWL_INFO(trans, "External FSEQ Version: %.32s\n",
+				 fseq_ver->version);
+			}
+			break;
+		case IWL_UCODE_TLV_FSEQ_BIN_VERSION: {
+			const struct iwl_fw_fseq_bin_version *ver;
+
+			if (tlv_len != sizeof(*ver))
+				goto invalid_tlv_len;
+
+			ver = (const void *)tlv_data;
+			fseq_major = le32_to_cpu(ver->major);
+			fseq_minor = le32_to_cpu(ver->minor);
+			}
+			break;
+		default:
+			IWL_DEBUG_INFO(trans, "unknown FSEQ image TLV: %d\n",
+				       tlv_type);
+			break;
+		}
+	}
+
+	if (len) {
+		IWL_ERR(trans, "bad FSEQ image parsing remainder: %u\n", len);
+		iwl_print_hex_dump(trans, IWL_DL_FW, data, len);
+		err = -EINVAL;
+		goto out;
+	}
+
+	if (!fseq_pieces.sec_counter) {
+		IWL_ERR(trans, "FSEQ image file without sections\n");
+		err = -EINVAL;
+		goto out;
+	}
+
+	/* use external image if major version is different or minor is newer */
+	if (fseq_major == pieces->fseq_ver.major &&
+	    fseq_minor <= pieces->fseq_ver.minor) {
+		err = 0;
+		goto out;
+	}
+
+	IWL_INFO(trans, "Using external FSEQ %.16s\n", fseq->version);
+
+	err = iwl_alloc_ucode_mem(&fw->fseq, &fseq_pieces);
+	goto out;
+
+ invalid_tlv_len:
+	err = -EINVAL;
+	IWL_ERR(trans, "TLV %d has invalid size: %u\n", tlv_type, tlv_len);
+	iwl_print_hex_dump(trans, IWL_DL_FW, tlv_data, tlv_len);
+ out:
+	kfree(fseq_pieces.sec);
+	release_firmware(fseq_fw);
+	return err;
+}
+#endif
+
 #define IWL_MLD_SUPPORTED_FW_VERSION 97
 
 /*
@@ -1783,8 +2028,7 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 	struct iwlwifi_opmode_table *op;
 	int err;
 	struct iwl_firmware_pieces *pieces;
-	const unsigned int api_max = drv->trans->cfg->ucode_api_max;
-	const unsigned int api_min = drv->trans->cfg->ucode_api_min;
+	unsigned int api_min, api_max;
 	size_t trigger_tlv_sz[FW_DBG_TRIGGER_MAX];
 	u32 api_ver;
 	int i;
@@ -1794,6 +2038,8 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 	const struct firmware *fw_dbg_config;
 	int load_fw_dbg_err = -ENOENT;
 #endif
+
+	iwl_get_ucode_api_versions(drv->trans, &api_min, &api_max);
 
 	fw->ucode_capa.max_probe_length = IWL_DEFAULT_MAX_PROBE_LENGTH;
 	fw->ucode_capa.standard_phy_calibration_size =
@@ -2005,14 +2251,14 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 		fw->init_evtlog_size = (pieces->init_evtlog_size - 16)/12;
 	else
 		fw->init_evtlog_size =
-			drv->trans->trans_cfg->base_params->max_event_log_size;
+			drv->trans->mac_cfg->base->max_event_log_size;
 	fw->init_errlog_ptr = pieces->init_errlog_ptr;
 	fw->inst_evtlog_ptr = pieces->inst_evtlog_ptr;
 	if (pieces->inst_evtlog_size)
 		fw->inst_evtlog_size = (pieces->inst_evtlog_size - 16)/12;
 	else
 		fw->inst_evtlog_size =
-			drv->trans->trans_cfg->base_params->max_event_log_size;
+			drv->trans->mac_cfg->base->max_event_log_size;
 	fw->inst_errlog_ptr = pieces->inst_errlog_ptr;
 
 	/*
@@ -2030,6 +2276,12 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 #ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
 	if (!load_fw_dbg_err)
 		release_firmware(fw_dbg_config);
+
+	if (drv->trans->dbg_cfg.load_external_fseq &&
+	    fw_has_capa(&fw->ucode_capa,
+			IWL_UCODE_TLV_CAPA_EXT_FSEQ_IMAGE_SUPPORT) &&
+	    iwl_drv_load_fseq_image(drv->trans, fw, pieces))
+		goto out_unbind;
 #endif
 
 	iwl_dbg_tlv_load_bin(drv->trans->dev, drv->trans);
@@ -2051,7 +2303,6 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 	if (pieces->major >= IWL_MLD_SUPPORTED_FW_VERSION &&
 	    iwl_drv_is_wifi7_supported(drv->trans))
 		op = &iwlwifi_opmode_table[MLD_OP_MODE];
-	else
 #else
 	if (pieces->major >= IWL_MLD_SUPPORTED_FW_VERSION &&
 	    iwl_drv_is_wifi7_supported(drv->trans)) {

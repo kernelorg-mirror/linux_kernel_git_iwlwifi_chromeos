@@ -204,66 +204,6 @@ void iwl_mld_ipv6_addr_change(struct ieee80211_hw *hw,
 }
 #endif
 
-enum rt_status {
-	FW_ALIVE,
-	FW_NEEDS_RESET,
-	FW_ERROR,
-};
-
-static enum rt_status iwl_mld_check_err_tables(struct iwl_mld *mld,
-					       struct ieee80211_vif *vif)
-{
-	u32 err_id;
-
-	/* check for lmac1 error */
-	if (iwl_fwrt_read_err_table(mld->trans,
-				    mld->trans->dbg.lmac_error_event_table[0],
-				    &err_id)) {
-		if (err_id == RF_KILL_INDICATOR_FOR_WOWLAN && vif) {
-			struct cfg80211_wowlan_wakeup wakeup = {
-				.rfkill_release = true,
-			};
-			ieee80211_report_wowlan_wakeup(vif, &wakeup,
-						       GFP_KERNEL);
-
-			return FW_NEEDS_RESET;
-		}
-		return FW_ERROR;
-	}
-
-	/* check if we have lmac2 set and check for error */
-	if (iwl_fwrt_read_err_table(mld->trans,
-				    mld->trans->dbg.lmac_error_event_table[1],
-				    NULL))
-		return FW_ERROR;
-
-	/* check for umac error */
-	if (iwl_fwrt_read_err_table(mld->trans,
-				    mld->trans->dbg.umac_error_event_table,
-				    NULL))
-		return FW_ERROR;
-
-	return FW_ALIVE;
-}
-
-static bool iwl_mld_fw_needs_restart(struct iwl_mld *mld,
-				     struct ieee80211_vif *vif)
-{
-	enum rt_status rt_status = iwl_mld_check_err_tables(mld, vif);
-
-	if (rt_status == FW_ALIVE)
-		return false;
-
-	if (rt_status == FW_ERROR) {
-		IWL_ERR(mld, "FW Error occurred during suspend\n");
-		iwl_fwrt_dump_error_logs(&mld->fwrt);
-		iwl_dbg_tlv_time_point(&mld->fwrt,
-				       IWL_FW_INI_TIME_POINT_FW_ASSERT, NULL);
-	}
-
-	return true;
-}
-
 static int
 iwl_mld_netdetect_config(struct iwl_mld *mld,
 			 struct ieee80211_vif *vif,
@@ -487,7 +427,6 @@ iwl_mld_handle_wowlan_info_notif(struct iwl_mld *mld,
 			 wowlan_status->tid_offloaded_tx))
 		return true;
 
-
 	iwl_mld_convert_gtk_resume_data(mld, wowlan_status, notif->gtk,
 					&notif->gtk[0].sc);
 	iwl_mld_convert_ptk_resume_seq(mld, wowlan_status, &notif->gtk[0].sc);
@@ -517,7 +456,7 @@ iwl_mld_handle_wake_pkt_notif(struct iwl_mld *mld,
 	u32 expected_size = le32_to_cpu(notif->wake_packet_length);
 
 	if (IWL_FW_CHECK(mld, len < sizeof(*notif),
-			 "Invalid WoWLAN wake packet notification (expected size=%ld got=%d)\n",
+			 "Invalid WoWLAN wake packet notification (expected size=%zu got=%u)\n",
 			 sizeof(*notif), len))
 		return true;
 
@@ -775,7 +714,7 @@ iwl_mld_update_ptk_rx_seq(struct iwl_mld *mld,
 		return;
 
 	for (int tid = 0; tid < IWL_MAX_TID_COUNT; tid++) {
-		for (int i = 1; i < mld->trans->num_rx_queues; i++)
+		for (int i = 1; i < mld->trans->info.num_rxqs; i++)
 			memcpy(mld_ptk_pn->q[i].pn[tid],
 			       wowlan_status->ptk.aes_seq[tid].ccmp.pn,
 			       IEEE80211_CCMP_PN_LEN);
@@ -929,7 +868,7 @@ iwl_mld_add_mcast_rekey(struct ieee80211_vif *vif,
 	return true;
 }
 
-static bool
+static void
 iwl_mld_add_all_rekeys(struct ieee80211_vif *vif,
 		       struct iwl_mld_wowlan_status *wowlan_status,
 		       struct iwl_mld_resume_key_iter_data *key_iter_data,
@@ -942,21 +881,19 @@ iwl_mld_add_all_rekeys(struct ieee80211_vif *vif,
 					     &wowlan_status->gtk[i],
 					     link_conf,
 					     key_iter_data->gtk_cipher))
-			return false;
+			return;
 
 	if (!iwl_mld_add_mcast_rekey(vif, key_iter_data->mld,
 				     &wowlan_status->igtk,
 				     link_conf, key_iter_data->igtk_cipher))
-		return false;
+		return;
 
 	for (i = 0; i < ARRAY_SIZE(wowlan_status->bigtk); i++)
 		if (!iwl_mld_add_mcast_rekey(vif, key_iter_data->mld,
 					     &wowlan_status->bigtk[i],
 					     link_conf,
 					     key_iter_data->bigtk_cipher))
-			return false;
-
-	return true;
+			return;
 }
 
 static bool
@@ -1315,6 +1252,13 @@ int iwl_mld_no_wowlan_suspend(struct iwl_mld *mld)
 	struct iwl_d3_manager_config d3_cfg_cmd_data = {};
 	int ret;
 
+	if (mld->debug_max_sleep) {
+		d3_cfg_cmd_data.wakeup_host_timer =
+			cpu_to_le32(mld->debug_max_sleep);
+		d3_cfg_cmd_data.wakeup_flags =
+			cpu_to_le32(IWL_WAKEUP_D3_HOST_TIMER);
+	}
+
 	lockdep_assert_wiphy(mld->wiphy);
 
 	IWL_DEBUG_WOWLAN(mld, "Starting the no wowlan suspend flow\n");
@@ -1345,7 +1289,8 @@ int iwl_mld_no_wowlan_suspend(struct iwl_mld *mld)
 	if (ret) {
 		IWL_ERR(mld, "d3 suspend: trans_d3_suspend failed %d\n", ret);
 	} else {
-		mld->trans->system_pm_mode = IWL_PLAT_PM_MODE_D3;
+		/* Async notification might send hcmds, which is not allowed in suspend */
+		iwl_mld_cancel_async_notifications(mld);
 		mld->fw_status.in_d3 = true;
 	}
 
@@ -1370,14 +1315,10 @@ int iwl_mld_no_wowlan_resume(struct iwl_mld *mld)
 
 	IWL_DEBUG_WOWLAN(mld, "Starting the no wowlan resume flow\n");
 
-	mld->trans->system_pm_mode = IWL_PLAT_PM_MODE_DISABLED;
 	mld->fw_status.in_d3 = false;
 	iwl_fw_dbg_read_d3_debug_data(&mld->fwrt);
 
-	if (iwl_mld_fw_needs_restart(mld, NULL))
-		ret = -ENODEV;
-	else
-		ret = iwl_mld_wait_d3_notif(mld, &resume_data, false);
+	ret = iwl_mld_wait_d3_notif(mld, &resume_data, false);
 
 	if (!ret && (resume_data.d3_end_flags & IWL_D0I3_RESET_REQUIRE))
 		return -ENODEV;
@@ -1436,7 +1377,7 @@ iwl_mld_suspend_set_ucast_pn(struct iwl_mld *mld, struct ieee80211_sta *sta,
 		ieee80211_get_key_rx_seq(key, tid, &seq);
 
 		/* and use the internal data for all queues */
-		for (int que = 1; que < mld->trans->num_rx_queues; que++) {
+		for (int que = 1; que < mld->trans->info.num_rxqs; que++) {
 			u8 *cur_pn = mld_ptk_pn->q[que].pn[tid];
 
 			if (memcmp(max_pn, cur_pn, IEEE80211_CCMP_PN_LEN) < 0)
@@ -1897,13 +1838,11 @@ int iwl_mld_wowlan_resume(struct iwl_mld *mld)
 	int link_id;
 	int ret;
 	bool fw_err = false;
-	bool keep_connection;
 
 	lockdep_assert_wiphy(mld->wiphy);
 
 	IWL_DEBUG_WOWLAN(mld, "Starting the wowlan resume flow\n");
 
-	mld->trans->system_pm_mode = IWL_PLAT_PM_MODE_DISABLED;
 	if (!mld->fw_status.in_d3) {
 		IWL_DEBUG_WOWLAN(mld,
 				 "Device_powered_off() was called during wowlan\n");
@@ -1929,15 +1868,10 @@ int iwl_mld_wowlan_resume(struct iwl_mld *mld)
 
 	iwl_fw_dbg_read_d3_debug_data(&mld->fwrt);
 
-	if (iwl_mld_fw_needs_restart(mld, bss_vif)) {
-		fw_err = true;
-		goto err;
-	}
-
 	resume_data.wowlan_status = kzalloc(sizeof(*resume_data.wowlan_status),
 					    GFP_KERNEL);
 	if (!resume_data.wowlan_status)
-		return -1;
+		return -ENOMEM;
 
 	if (mld->netdetect)
 		resume_data.notifs_expected |= IWL_D3_ND_MATCH_INFO;
@@ -1967,7 +1901,7 @@ int iwl_mld_wowlan_resume(struct iwl_mld *mld)
 		iwl_mld_process_netdetect_res(mld, bss_vif, &resume_data);
 		mld->netdetect = false;
 	} else {
-		keep_connection =
+		bool keep_connection =
 			iwl_mld_process_wowlan_status(mld, bss_vif,
 						      resume_data.wowlan_status);
 
@@ -1975,10 +1909,9 @@ int iwl_mld_wowlan_resume(struct iwl_mld *mld)
 		if (keep_connection)
 			iwl_mld_unblock_emlsr(mld, bss_vif,
 					      IWL_MLD_EMLSR_BLOCKED_WOWLAN);
+		else
+			ieee80211_resume_disconnect(bss_vif);
 	}
-
-	if (!mld->netdetect && !keep_connection)
-		ieee80211_resume_disconnect(bss_vif);
 
 	goto out;
 

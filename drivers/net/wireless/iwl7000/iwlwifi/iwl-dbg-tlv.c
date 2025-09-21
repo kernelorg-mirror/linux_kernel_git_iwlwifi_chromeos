@@ -232,11 +232,11 @@ static int iwl_dbg_tlv_alloc_region(struct iwl_trans *trans,
 
 	if (type == IWL_FW_INI_REGION_DEVICE_MEMORY &&
 	    reg->sub_type == IWL_FW_INI_REGION_DEVICE_MEMORY_SUBTYPE_SW_SMEM &&
-	    (CSR_HW_RFID_TYPE(trans->hw_rf_id) ==
+	    (CSR_HW_RFID_TYPE(trans->info.hw_rf_id) ==
 	     CSR_HW_RFID_TYPE(CSR_HW_RF_ID_TYPE_HR) ||
-	     CSR_HW_RFID_TYPE(trans->hw_rf_id) ==
+	     CSR_HW_RFID_TYPE(trans->info.hw_rf_id) ==
 	     CSR_HW_RFID_TYPE(CSR_HW_RF_ID_TYPE_GF) ||
-	     CSR_HW_REV_TYPE(trans->hw_rf_id) ==
+	     CSR_HW_REV_TYPE(trans->info.hw_rev) ==
 	     IWL_CFG_MAC_TYPE_CC)) {
 		IWL_DEBUG_FW(trans, "WRT: skipping SW-SMEM region\n");
 		return 0;
@@ -531,7 +531,7 @@ void iwl_dbg_tlv_load_bin(struct device *dev, struct iwl_trans *trans)
 	int res;
 
 	if (!iwlwifi_mod_params.enable_ini ||
-	    trans->trans_cfg->device_family <= IWL_DEVICE_FAMILY_8000)
+	    trans->mac_cfg->device_family <= IWL_DEVICE_FAMILY_8000)
 		return;
 
 	res = firmware_request_nowarn(&fw, yoyo_bin, dev);
@@ -631,11 +631,11 @@ static int iwl_dbg_tlv_alloc_fragments(struct iwl_fw_runtime *fwrt,
 		return 0;
 
 	num_frags = le32_to_cpu(fw_mon_cfg->max_frags_num);
-	if (fwrt->trans->trans_cfg->device_family < IWL_DEVICE_FAMILY_AX210) {
+	if (fwrt->trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_AX210) {
 		if (alloc_id != IWL_FW_INI_ALLOCATION_ID_DBGC1)
 			return -EIO;
 		num_frags = 1;
-	} else if (fwrt->trans->trans_cfg->device_family < IWL_DEVICE_FAMILY_BZ &&
+	} else if (fwrt->trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_BZ &&
 			   alloc_id > IWL_FW_INI_ALLOCATION_ID_DBGC3) {
 		return -EIO;
 	}
@@ -1269,7 +1269,7 @@ iwl_dbg_tlv_tp_trigger(struct iwl_fw_runtime *fwrt, bool sync,
 
 		fwrt->trans->dbg.restart_required = false;
 
-		if (fwrt->trans->trans_cfg->device_family ==
+		if (fwrt->trans->mac_cfg->device_family ==
 		    IWL_DEVICE_FAMILY_9000) {
 			fwrt->trans->dbg.restart_required = true;
 		} else if (tp == IWL_FW_INI_TIME_POINT_FW_ASSERT &&

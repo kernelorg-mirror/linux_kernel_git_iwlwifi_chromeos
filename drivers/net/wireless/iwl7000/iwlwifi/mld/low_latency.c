@@ -7,6 +7,7 @@
 #include "low_latency.h"
 #include "hcmd.h"
 #include "power.h"
+#include "mlo.h"
 
 #define MLD_LL_WK_INTERVAL_MSEC 500
 #define MLD_LL_PERIOD (HZ * MLD_LL_WK_INTERVAL_MSEC / 1000)
@@ -20,7 +21,7 @@ static bool iwl_mld_calc_low_latency(struct iwl_mld *mld,
 {
 	struct iwl_mld_low_latency *ll = &mld->low_latency;
 	bool global_low_latency = false;
-	u8 num_rx_q = mld->trans->num_rx_queues;
+	u8 num_rx_q = mld->trans->info.num_rxqs;
 
 	for (int mac_id = 0; mac_id < NUM_MAC_INDEX_DRIVER; mac_id++) {
 		u32 total_vo_vi_pkts = 0;
@@ -130,12 +131,12 @@ int iwl_mld_low_latency_init(struct iwl_mld *mld)
 	struct iwl_mld_low_latency *ll = &mld->low_latency;
 	unsigned long ts = jiffies;
 
-	ll->pkts_counters = kcalloc(mld->trans->num_rx_queues,
+	ll->pkts_counters = kcalloc(mld->trans->info.num_rxqs,
 				    sizeof(*ll->pkts_counters), GFP_KERNEL);
 	if (!ll->pkts_counters)
 		return -ENOMEM;
 
-	for (int q = 0; q < mld->trans->num_rx_queues; q++)
+	for (int q = 0; q < mld->trans->info.num_rxqs; q++)
 		spin_lock_init(&ll->pkts_counters[q].lock);
 
 	wiphy_delayed_work_init(&ll->work, iwl_mld_low_latency_wk);
@@ -166,7 +167,7 @@ void iwl_mld_low_latency_restart_cleanup(struct iwl_mld *mld)
 	memset(ll->window_start, 0, sizeof(ll->window_start));
 	memset(ll->result, 0, sizeof(ll->result));
 
-	for (int q = 0; q < mld->trans->num_rx_queues; q++)
+	for (int q = 0; q < mld->trans->info.num_rxqs; q++)
 		memset(ll->pkts_counters[q].vo_vi, 0,
 		       sizeof(ll->pkts_counters[q].vo_vi));
 }
@@ -230,6 +231,9 @@ void iwl_mld_vif_update_low_latency(struct iwl_mld *mld,
 		return;
 
 	iwl_mld_update_mac_power(mld, vif, false);
+
+	if (low_latency)
+		iwl_mld_retry_emlsr(mld, vif);
 }
 
 static bool iwl_mld_is_vo_vi_pkt(struct ieee80211_hdr *hdr)
@@ -272,7 +276,7 @@ void iwl_mld_low_latency_update_counters(struct iwl_mld *mld,
 		return;
 
 	if (WARN_ON_ONCE(fw_id >= ARRAY_SIZE(counters->vo_vi) ||
-			 queue >= mld->trans->num_rx_queues))
+			 queue >= mld->trans->info.num_rxqs))
 		return;
 
 	if (mld->low_latency.stopped)
@@ -320,7 +324,7 @@ void iwl_mld_low_latency_restart(struct iwl_mld *mld)
 		ll->window_start[mac] = 0;
 		low_latency |= ll->result[mac];
 
-		for (int q = 0; q < mld->trans->num_rx_queues; q++) {
+		for (int q = 0; q < mld->trans->info.num_rxqs; q++) {
 			spin_lock_bh(&ll->pkts_counters[q].lock);
 			ll->pkts_counters[q].vo_vi[mac] = 0;
 			spin_unlock_bh(&ll->pkts_counters[q].lock);

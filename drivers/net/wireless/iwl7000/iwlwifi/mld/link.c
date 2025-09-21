@@ -67,7 +67,7 @@ static void iwl_mld_fill_rates(struct iwl_mld *mld,
 			       __le32 *cck_rates, __le32 *ofdm_rates)
 {
 	struct cfg80211_chan_def *chandef =
-		iwl_mld_get_chandef_from_chanctx(chan_ctx);
+		iwl_mld_get_chandef_from_chanctx(mld, chan_ctx);
 	struct ieee80211_supported_band *sband =
 		mld->hw->wiphy->bands[chandef->chan->band];
 	unsigned long basic = link->basic_rates;
@@ -423,6 +423,7 @@ int iwl_mld_activate_link(struct iwl_mld *mld,
 			  struct ieee80211_bss_conf *link)
 {
 	struct iwl_mld_link *mld_link = iwl_mld_link_from_mac80211(link);
+	struct iwl_mld_vif *mld_vif = iwl_mld_vif_from_mac80211(mld_link->vif);
 	int ret;
 
 	lockdep_assert_wiphy(mld->wiphy);
@@ -437,6 +438,9 @@ int iwl_mld_activate_link(struct iwl_mld *mld,
 					LINK_CONTEXT_MODIFY_ACTIVE);
 	if (ret)
 		mld_link->active = false;
+	else
+		mld_vif->last_link_activation_time =
+			ktime_get_boottime_seconds();
 
 	return ret;
 }
@@ -474,7 +478,7 @@ void iwl_mld_deactivate_link(struct iwl_mld *mld,
 					       mld_link->fw_id);
 }
 
-static int
+static void
 iwl_mld_rm_link_from_fw(struct iwl_mld *mld, struct ieee80211_bss_conf *link)
 {
 	struct iwl_mld_link *mld_link = iwl_mld_link_from_mac80211(link);
@@ -483,13 +487,13 @@ iwl_mld_rm_link_from_fw(struct iwl_mld *mld, struct ieee80211_bss_conf *link)
 	lockdep_assert_wiphy(mld->wiphy);
 
 	if (WARN_ON(!mld_link))
-		return -EINVAL;
+		return;
 
 	cmd.link_id = cpu_to_le32(mld_link->fw_id);
 	cmd.spec_link_id = link->link_id;
 	cmd.phy_id = cpu_to_le32(FW_CTXT_ID_INVALID);
 
-	return iwl_mld_send_link_cmd(mld, &cmd, FW_CTXT_ACTION_REMOVE);
+	iwl_mld_send_link_cmd(mld, &cmd, FW_CTXT_ACTION_REMOVE);
 }
 
 static void iwl_mld_omi_bw_update(struct iwl_mld *mld,
@@ -605,7 +609,7 @@ iwl_mld_get_omi_bw_reduction_pointers(struct iwl_mld *mld,
 	/* omi_bw_mode == 1 forces even for older HW */
 	if (mld->trans->dbg_cfg.omi_bw_mode == -1)
 #endif
-	if (mld->trans->trans_cfg->device_family < IWL_DEVICE_FAMILY_SC)
+	if (mld->trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_SC)
 		return NULL;
 
 	vif = iwl_mld_get_bss_vif(mld);
@@ -785,8 +789,8 @@ void iwl_mld_check_omi_bw_reduction(struct iwl_mld *mld)
 		return;
 	}
 
-	if (time_is_before_jiffies(mld_link->rx_omi.exit_ts +
-				   msecs_to_jiffies(IWL_MLD_OMI_EXIT_PROTECTION)))
+	if (time_is_after_jiffies(mld_link->rx_omi.exit_ts +
+				  msecs_to_jiffies(IWL_MLD_OMI_EXIT_PROTECTION)))
 		return;
 
 	/* reduce bandwidth to 80 MHz to save power */
@@ -807,10 +811,11 @@ iwl_mld_init_link(struct iwl_mld *mld, struct ieee80211_bss_conf *link,
 
 	iwl_mld_init_internal_sta(&mld_link->bcast_sta);
 	iwl_mld_init_internal_sta(&mld_link->mcast_sta);
-	iwl_mld_init_internal_sta(&mld_link->aux_sta);
+	iwl_mld_init_internal_sta(&mld_link->mon_sta);
 
-	wiphy_delayed_work_init(&mld_link->rx_omi.finished_work,
-				iwl_mld_omi_bw_finished_work);
+	if (!mld->fw_status.in_hw_restart)
+		wiphy_delayed_work_init(&mld_link->rx_omi.finished_work,
+					iwl_mld_omi_bw_finished_work);
 
 	return iwl_mld_allocate_link_fw_id(mld, &mld_link->fw_id, link);
 }
@@ -857,18 +862,17 @@ free:
 }
 
 /* Remove link from fw, unmap the bss_conf, and destroy the link structure */
-int iwl_mld_remove_link(struct iwl_mld *mld,
-			struct ieee80211_bss_conf *bss_conf)
+void iwl_mld_remove_link(struct iwl_mld *mld,
+			 struct ieee80211_bss_conf *bss_conf)
 {
 	struct iwl_mld_vif *mld_vif = iwl_mld_vif_from_mac80211(bss_conf->vif);
 	struct iwl_mld_link *link = iwl_mld_link_from_mac80211(bss_conf);
 	bool is_deflink = link == &mld_vif->deflink;
-	int ret;
 
 	if (WARN_ON(!link || link->active))
-		return -EINVAL;
+		return;
 
-	ret = iwl_mld_rm_link_from_fw(mld, bss_conf);
+	iwl_mld_rm_link_from_fw(mld, bss_conf);
 	/* Continue cleanup on failure */
 
 	if (!is_deflink)
@@ -879,11 +883,9 @@ int iwl_mld_remove_link(struct iwl_mld *mld,
 	wiphy_delayed_work_cancel(mld->wiphy, &link->rx_omi.finished_work);
 
 	if (WARN_ON(link->fw_id >= mld->fw->ucode_capa.num_links))
-		return -EINVAL;
+		return;
 
 	RCU_INIT_POINTER(mld->fw_id_to_bss_conf[link->fw_id], NULL);
-
-	return ret;
 }
 
 void iwl_mld_handle_missed_beacon_notif(struct iwl_mld *mld,
@@ -945,7 +947,7 @@ void iwl_mld_handle_missed_beacon_notif(struct iwl_mld *mld,
 	if (hweight16(vif->active_links) <= 1)
 		return;
 
-	/* We are processing a notification before before link activation */
+	/* We are processing a notification before link activation */
 	if (le32_to_cpu(notif->other_link_id) == FW_CTXT_ID_INVALID)
 		return;
 

@@ -301,7 +301,6 @@ static int ieee80211_change_mac(struct net_device *dev, void *addr)
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 	struct ieee80211_local *local = sdata->local;
-	int ret;
 
 	/*
 	 * This happens during unregistration if there's a bond device
@@ -311,11 +310,9 @@ static int ieee80211_change_mac(struct net_device *dev, void *addr)
 	if (!dev->ieee80211_ptr->registered)
 		return 0;
 
-	wiphy_lock(local->hw.wiphy);
-	ret = _ieee80211_change_mac(sdata, addr);
-	wiphy_unlock(local->hw.wiphy);
+	guard(wiphy)(local->hw.wiphy);
 
-	return ret;
+	return _ieee80211_change_mac(sdata, addr);
 }
 
 static inline int identical_mac_addr_allowed(int type1, int type2)
@@ -451,16 +448,13 @@ static int ieee80211_open(struct net_device *dev)
 	if (!is_valid_ether_addr(dev->dev_addr))
 		return -EADDRNOTAVAIL;
 
-	wiphy_lock(sdata->local->hw.wiphy);
+	guard(wiphy)(sdata->local->hw.wiphy);
+
 	err = ieee80211_check_concurrent_iface(sdata, sdata->vif.type);
 	if (err)
-		goto out;
+		return err;
 
-	err = ieee80211_do_open(&sdata->wdev, true);
-out:
-	wiphy_unlock(sdata->local->hw.wiphy);
-
-	return err;
+	return ieee80211_do_open(&sdata->wdev, true);
 }
 
 static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_down)
@@ -495,8 +489,6 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_do
 		ieee80211_ibss_stop(sdata);
 		break;
 	case NL80211_IFTYPE_MONITOR:
-		if (sdata->u.mntr.flags & MONITOR_FLAG_COOK_FRAMES)
-			break;
 		list_del_rcu(&sdata->u.mntr.list);
 		break;
 	default:
@@ -540,7 +532,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_do
 		netif_addr_unlock_bh(sdata->dev);
 	}
 
-	del_timer_sync(&local->dynamic_ps_timer);
+	timer_delete_sync(&local->dynamic_ps_timer);
 	wiphy_work_cancel(local->hw.wiphy, &local->dynamic_ps_enable_work);
 
 	WARN(ieee80211_vif_is_mld(&sdata->vif),
@@ -596,18 +588,19 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_do
 		/* no need to tell driver */
 		break;
 	case NL80211_IFTYPE_MONITOR:
-		if (sdata->u.mntr.flags & MONITOR_FLAG_COOK_FRAMES) {
-			local->cooked_mntrs--;
-			break;
-		}
-
 		local->monitors--;
-		if (local->monitors == 0) {
-			local->hw.conf.flags &= ~IEEE80211_CONF_MONITOR;
-			hw_reconf_flags |= IEEE80211_CONF_CHANGE_MONITOR;
-		}
 
-		ieee80211_adjust_monitor_flags(sdata, -1);
+		if (!(sdata->u.mntr.flags & MONITOR_FLAG_ACTIVE) &&
+		    !ieee80211_hw_check(&local->hw, NO_VIRTUAL_MONITOR)) {
+
+			local->virt_monitors--;
+			if (local->virt_monitors == 0) {
+				local->hw.conf.flags &= ~IEEE80211_CONF_MONITOR;
+				hw_reconf_flags |= IEEE80211_CONF_CHANGE_MONITOR;
+			}
+
+			ieee80211_adjust_monitor_flags(sdata, -1);
+		}
 		break;
 	case NL80211_IFTYPE_NAN:
 		/* clean all the functions */
@@ -698,7 +691,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_do
 	case NL80211_IFTYPE_AP_VLAN:
 		break;
 	case NL80211_IFTYPE_MONITOR:
-		if (local->monitors == 0)
+		if (local->virt_monitors == 0)
 			ieee80211_del_virtual_monitor(local);
 
 		ieee80211_recalc_idle(local);
@@ -735,7 +728,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata, bool going_do
 	ieee80211_configure_filter(local);
 	ieee80211_hw_config(local, hw_reconf_flags);
 
-	if (local->monitors == local->open_count)
+	if (local->virt_monitors == local->open_count)
 		ieee80211_add_virtual_monitor(local);
 }
 
@@ -781,11 +774,11 @@ static int ieee80211_stop(struct net_device *dev)
 		ieee80211_stop_mbssid(sdata);
 	}
 
-	wiphy_lock(sdata->local->hw.wiphy);
+	guard(wiphy)(sdata->local->hw.wiphy);
+
 	wiphy_work_cancel(sdata->local->hw.wiphy, &sdata->activate_links_work);
 
 	ieee80211_do_stop(sdata, true);
-	wiphy_unlock(sdata->local->hw.wiphy);
 
 	return 0;
 }
@@ -1034,7 +1027,7 @@ static bool ieee80211_set_sdata_offload_flags(struct ieee80211_sub_if_data *sdat
 		    local->hw.wiphy->frag_threshold != (u32)-1)
 			flags &= ~IEEE80211_OFFLOAD_ENCAP_ENABLED;
 
-		if (local->monitors)
+		if (local->virt_monitors)
 			flags &= ~IEEE80211_OFFLOAD_ENCAP_ENABLED;
 	} else {
 		flags &= ~IEEE80211_OFFLOAD_ENCAP_ENABLED;
@@ -1044,7 +1037,7 @@ static bool ieee80211_set_sdata_offload_flags(struct ieee80211_sub_if_data *sdat
 	    ieee80211_iftype_supports_hdr_offload(sdata->vif.type)) {
 		flags |= IEEE80211_OFFLOAD_DECAP_ENABLED;
 
-		if (local->monitors &&
+		if (local->virt_monitors &&
 		    !ieee80211_hw_check(&local->hw, SUPPORTS_CONC_MON_RX_DECAP))
 			flags &= ~IEEE80211_OFFLOAD_DECAP_ENABLED;
 	} else {
@@ -1164,6 +1157,8 @@ static void ieee80211_sdata_init(struct ieee80211_local *local,
 {
 	sdata->local = local;
 
+	INIT_LIST_HEAD(&sdata->key_list);
+
 	/*
 	 * Initialize the default link, so we can use link_id 0 for non-MLD,
 	 * and that continues to work for non-MLD-aware drivers that use just
@@ -1261,15 +1256,16 @@ void ieee80211_del_virtual_monitor(struct ieee80211_local *local)
 		return;
 	}
 
-	RCU_INIT_POINTER(local->monitor_sdata, NULL);
-	mutex_unlock(&local->iflist_mtx);
-
-	synchronize_net();
-
+	clear_bit(SDATA_STATE_RUNNING, &sdata->state);
 	ieee80211_link_release_channel(&sdata->deflink);
 
 	if (ieee80211_hw_check(&local->hw, WANT_MONITOR_VIF))
 		drv_remove_interface(local, sdata);
+
+	RCU_INIT_POINTER(local->monitor_sdata, NULL);
+	mutex_unlock(&local->iflist_mtx);
+
+	synchronize_net();
 
 	kfree(sdata);
 }
@@ -1381,28 +1377,27 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 		}
 		break;
 	case NL80211_IFTYPE_MONITOR:
-		if (sdata->u.mntr.flags & MONITOR_FLAG_COOK_FRAMES) {
-			local->cooked_mntrs++;
-			break;
-		}
-
 		if ((sdata->u.mntr.flags & MONITOR_FLAG_ACTIVE) ||
 		    ieee80211_hw_check(&local->hw, NO_VIRTUAL_MONITOR)) {
 			res = drv_add_interface(local, sdata);
 			if (res)
 				goto err_stop;
-		} else if (local->monitors == 0 && local->open_count == 0) {
-			res = ieee80211_add_virtual_monitor(local);
-			if (res)
-				goto err_stop;
+		} else {
+			if (local->virt_monitors == 0 && local->open_count == 0) {
+				res = ieee80211_add_virtual_monitor(local);
+				if (res)
+					goto err_stop;
+			}
+			local->virt_monitors++;
+
+			/* must be before the call to ieee80211_configure_filter */
+			if (local->virt_monitors == 1) {
+				local->hw.conf.flags |= IEEE80211_CONF_MONITOR;
+				hw_reconf_flags |= IEEE80211_CONF_CHANGE_MONITOR;
+			}
 		}
 
-		/* must be before the call to ieee80211_configure_filter */
 		local->monitors++;
-		if (local->monitors == 1) {
-			local->hw.conf.flags |= IEEE80211_CONF_MONITOR;
-			hw_reconf_flags |= IEEE80211_CONF_CHANGE_MONITOR;
-		}
 
 		ieee80211_adjust_monitor_flags(sdata, 1);
 		ieee80211_configure_filter(local);
@@ -1478,8 +1473,6 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 		rcu_assign_pointer(local->p2p_sdata, sdata);
 		break;
 	case NL80211_IFTYPE_MONITOR:
-		if (sdata->u.mntr.flags & MONITOR_FLAG_COOK_FRAMES)
-			break;
 		list_add_tail_rcu(&sdata->u.mntr.list, &local->mon_list);
 		break;
 	default:
@@ -2230,8 +2223,6 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
 
 	ieee80211_init_frag_cache(&sdata->frags);
 
-	INIT_LIST_HEAD(&sdata->key_list);
-
 	wiphy_delayed_work_init(&sdata->dec_tailroom_needed_wk,
 				ieee80211_delayed_tailroom_dec);
 
@@ -2354,7 +2345,7 @@ void ieee80211_remove_interfaces(struct ieee80211_local *local)
 	 */
 	cfg80211_shutdown_all_interfaces(local->hw.wiphy);
 
-	wiphy_lock(local->hw.wiphy);
+	guard(wiphy)(local->hw.wiphy);
 
 	WARN(local->open_count, "%s: open count remains %d\n",
 	     wiphy_name(local->hw.wiphy), local->open_count);
@@ -2384,7 +2375,6 @@ void ieee80211_remove_interfaces(struct ieee80211_local *local)
 		if (!netdev)
 			kfree(sdata);
 	}
-	wiphy_unlock(local->hw.wiphy);
 }
 
 static int netdev_notify(struct notifier_block *nb,

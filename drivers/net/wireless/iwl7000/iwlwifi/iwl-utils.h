@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  */
 #ifndef __iwl_utils_h__
 #define __iwl_utils_h__
@@ -16,8 +16,9 @@
  * @mpdus_skbs: list to hold the segmented subframes.
  *
  * This function segments a large TCP packet into subframes.
- * Returns 0 on success and subframes are added to the mpdus_skbs list,
- * or negative value on failure.
+ * subframes are added to the mpdus_skbs list
+ *
+ * Returns: 0 on success and negative value on failure.
  */
 int iwl_tx_tso_segment(struct sk_buff *skb, unsigned int num_subframes,
 		       netdev_features_t netdev_flags,
@@ -51,5 +52,7 @@ u32 iwl_find_ie_offset(u8 *beacon, u8 eid, u32 frame_size)
 
 	return ie - beacon;
 }
+
+s8 iwl_average_neg_dbm(const u8 *neg_dbm_values, u8 len);
 
 #endif /* __iwl_utils_h__ */

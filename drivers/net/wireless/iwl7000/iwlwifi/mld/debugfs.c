@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
  * Copyright (C) 2024-2025 Intel Corporation
  */
@@ -14,6 +14,7 @@
 #include "notif.h"
 #include "ap.h"
 #include "iwl-utils.h"
+#include "scan.h"
 #include "rfi.h"
 #ifdef CONFIG_THERMAL
 #include "thermal.h"
@@ -22,14 +23,15 @@
 #include "fw/api/rs.h"
 #include "fw/api/dhc.h"
 #include "fw/api/rfi.h"
+#include "fw/dhc-utils.h"
+#include <linux/dmi.h>
 
 #define MLD_DEBUGFS_READ_FILE_OPS(name, bufsz)				\
 	_MLD_DEBUGFS_READ_FILE_OPS(name, bufsz, struct iwl_mld)
 
-#define MLD_DEBUGFS_ADD_FILE_ALIAS(alias, name, parent, mode) do {	\
+#define MLD_DEBUGFS_ADD_FILE_ALIAS(alias, name, parent, mode)		\
 	debugfs_create_file(alias, mode, parent, mld,			\
-			    &iwl_dbgfs_##name##_ops);			\
-	} while (0)
+			    &iwl_dbgfs_##name##_ops)
 #define MLD_DEBUGFS_ADD_FILE(name, parent, mode)			\
 	MLD_DEBUGFS_ADD_FILE_ALIAS(#name, name, parent, mode)
 
@@ -180,8 +182,7 @@ iwl_dbgfs_he_sniffer_params_write(struct iwl_mld *mld, char *buf,
 }
 
 static ssize_t
-iwl_dbgfs_he_sniffer_params_read(struct iwl_mld *mld, size_t count,
-				 char *buf)
+iwl_dbgfs_he_sniffer_params_read(struct iwl_mld *mld, char *buf, size_t count)
 {
 	return scnprintf(buf, count,
 			 "%d %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx\n",
@@ -218,7 +219,7 @@ iwl_dbgfs_rfi_freq_table_write(struct iwl_mld *mld, char *buf, size_t count)
 				IWL_RFI_DESENSE_BUF_SIZE + 32)
 
 static ssize_t
-iwl_dbgfs_rfi_freq_table_read(struct iwl_mld *mld, size_t count, char *buf)
+iwl_dbgfs_rfi_freq_table_read(struct iwl_mld *mld, char *buf, size_t count)
 {
 	const struct iwl_rfi_freq_table_resp_cmd *fw_table;
 	ssize_t pos = 0;
@@ -291,12 +292,241 @@ iwl_dbgfs_rfi_freq_table_read(struct iwl_mld *mld, size_t count, char *buf)
 	return pos;
 }
 
+static size_t iwl_mld_dump_tas_resp(struct iwl_dhc_tas_status_resp *resp,
+				    size_t count, u8 *buf)
+{
+	const char * const tas_dis_reason[TAS_DISABLED_REASON_MAX] = {
+		[TAS_DISABLED_DUE_TO_BIOS] =
+			"Due To BIOS",
+		[TAS_DISABLED_DUE_TO_SAR_6DBM] =
+			"Due To SAR Limit Less Than 6 dBm",
+		[TAS_DISABLED_REASON_INVALID] =
+			"N/A",
+		[TAS_DISABLED_DUE_TO_TABLE_SOURCE_INVALID] =
+			"Due to table source invalid"
+	};
+	const char * const tas_current_status[TAS_DYNA_STATUS_MAX] = {
+		[TAS_DYNA_INACTIVE] = "INACTIVE",
+		[TAS_DYNA_INACTIVE_MVM_MODE] =
+			"inactive due to mvm mode",
+		[TAS_DYNA_INACTIVE_TRIGGER_MODE] =
+			"inactive due to trigger mode",
+		[TAS_DYNA_INACTIVE_BLOCK_LISTED] =
+			"inactive due to block listed",
+		[TAS_DYNA_INACTIVE_UHB_NON_US] =
+			"inactive due to uhb non US",
+		[TAS_DYNA_ACTIVE] = "ACTIVE",
+	};
+	ssize_t pos = 0;
+
+	if (resp->header.version != 1) {
+		pos += scnprintf(buf + pos, count - pos,
+				 "Unsupported TAS response version:%d",
+				 resp->header.version);
+		return pos;
+	}
+
+	pos += scnprintf(buf + pos, count - pos, "TAS Report\n");
+	switch (resp->tas_config_info.table_source) {
+	case BIOS_SOURCE_NONE:
+		pos += scnprintf(buf + pos, count - pos,
+				 "BIOS SOURCE NONE ");
+		break;
+	case BIOS_SOURCE_ACPI:
+		pos += scnprintf(buf + pos, count - pos,
+				 "BIOS SOURCE ACPI ");
+		break;
+	case BIOS_SOURCE_UEFI:
+		pos += scnprintf(buf + pos, count - pos,
+				 "BIOS SOURCE UEFI ");
+		break;
+	default:
+		pos += scnprintf(buf + pos, count - pos,
+				 "BIOS SOURCE UNKNOWN (%d) ",
+				 resp->tas_config_info.table_source);
+		break;
+	}
+
+	pos += scnprintf(buf + pos, count - pos,
+			 "revision is: %d data is: 0x%08x\n",
+			 resp->tas_config_info.table_revision,
+			 resp->tas_config_info.value);
+	pos += scnprintf(buf + pos, count - pos, "Current MCC: 0x%x\n",
+			 le16_to_cpu(resp->curr_mcc));
+
+	pos += scnprintf(buf + pos, count - pos, "Block list entries:");
+	for (int i = 0; i < ARRAY_SIZE(resp->mcc_block_list); i++)
+		pos += scnprintf(buf + pos, count - pos, " 0x%x",
+				 le16_to_cpu(resp->mcc_block_list[i]));
+
+	pos += scnprintf(buf + pos, count - pos,
+			 "\nDo TAS Support Dual Radio?: %s\n",
+			 hweight8(resp->valid_radio_mask) > 1 ?
+			 "TRUE" : "FALSE");
+
+	for (int i = 0; i < ARRAY_SIZE(resp->tas_status_radio); i++) {
+		int tmp;
+		unsigned long dynamic_status;
+
+		if (!(resp->valid_radio_mask & BIT(i)))
+			continue;
+
+		pos += scnprintf(buf + pos, count - pos,
+				 "TAS report for radio:%d\n", i + 1);
+		pos += scnprintf(buf + pos, count - pos,
+				 "Static status: %sabled\n",
+				 resp->tas_status_radio[i].static_status ?
+				 "En" : "Dis");
+		if (!resp->tas_status_radio[i].static_status) {
+			u8 static_disable_reason =
+				resp->tas_status_radio[i].static_disable_reason;
+
+			pos += scnprintf(buf + pos, count - pos,
+					 "\tStatic Disabled Reason: ");
+			if (static_disable_reason >= TAS_DISABLED_REASON_MAX) {
+				pos += scnprintf(buf + pos, count - pos,
+						 "unsupported value (%d)\n",
+						 static_disable_reason);
+				continue;
+			}
+
+			pos += scnprintf(buf + pos, count - pos,
+					 "%s (%d)\n",
+					 tas_dis_reason[static_disable_reason],
+					 static_disable_reason);
+			continue;
+		}
+
+		pos += scnprintf(buf + pos, count - pos, "\tANT A %s and ",
+				 (resp->tas_status_radio[i].dynamic_status_ant_a
+				  & BIT(TAS_DYNA_ACTIVE)) ? "ON" : "OFF");
+
+		pos += scnprintf(buf + pos, count - pos, "ANT B %s for ",
+				 (resp->tas_status_radio[i].dynamic_status_ant_b
+				  & BIT(TAS_DYNA_ACTIVE)) ? "ON" : "OFF");
+
+		switch (resp->tas_status_radio[i].band) {
+		case PHY_BAND_5:
+			pos += scnprintf(buf + pos, count - pos, "HB\n");
+			break;
+		case PHY_BAND_24:
+			pos += scnprintf(buf + pos, count - pos, "LB\n");
+			break;
+		case PHY_BAND_6:
+			pos += scnprintf(buf + pos, count - pos, "UHB\n");
+			break;
+		default:
+			pos += scnprintf(buf + pos, count - pos,
+					 "Unsupported band (%d)\n",
+					 resp->tas_status_radio[i].band);
+			break;
+		}
+
+		pos += scnprintf(buf + pos, count - pos,
+				 "Is near disconnection?: %s\n",
+				 resp->tas_status_radio[i].near_disconnection ?
+				 "True" : "False");
+
+		pos += scnprintf(buf + pos, count - pos,
+				 "Dynamic status antenna A:\n");
+		dynamic_status = resp->tas_status_radio[i].dynamic_status_ant_a;
+		for_each_set_bit(tmp, &dynamic_status, TAS_DYNA_STATUS_MAX) {
+			pos += scnprintf(buf + pos, count - pos, "\t%s (%d)\n",
+					 tas_current_status[tmp], tmp);
+		}
+		pos += scnprintf(buf + pos, count - pos,
+				 "\nDynamic status antenna B:\n");
+		dynamic_status = resp->tas_status_radio[i].dynamic_status_ant_b;
+		for_each_set_bit(tmp, &dynamic_status, TAS_DYNA_STATUS_MAX) {
+			pos += scnprintf(buf + pos, count - pos, "\t%s (%d)\n",
+					 tas_current_status[tmp], tmp);
+		}
+
+		tmp = le16_to_cpu(resp->tas_status_radio[i].max_reg_pwr_limit_ant_a);
+		pos += scnprintf(buf + pos, count - pos,
+				 "Max antenna A regulatory pwr limit (dBm): %d.%03d\n",
+				 tmp / 8, 125 * (tmp % 8));
+		tmp = le16_to_cpu(resp->tas_status_radio[i].max_reg_pwr_limit_ant_b);
+		pos += scnprintf(buf + pos, count - pos,
+				 "Max antenna B regulatory pwr limit (dBm): %d.%03d\n",
+				 tmp / 8, 125 * (tmp % 8));
+
+		tmp = le16_to_cpu(resp->tas_status_radio[i].sar_limit_ant_a);
+		pos += scnprintf(buf + pos, count - pos,
+				 "Antenna A SAR limit (dBm): %d.%03d\n",
+				 tmp / 8, 125 * (tmp % 8));
+		tmp = le16_to_cpu(resp->tas_status_radio[i].sar_limit_ant_b);
+		pos += scnprintf(buf + pos, count - pos,
+				 "Antenna B SAR limit (dBm): %d.%03d\n",
+				 tmp / 8, 125 * (tmp % 8));
+	}
+
+	return pos;
+}
+
+static ssize_t iwl_dbgfs_tas_get_status_read(struct iwl_mld *mld, char *buf,
+					     size_t count)
+{
+	struct iwl_dhc_cmd cmd = {
+		.index_and_mask = cpu_to_le32(DHC_TABLE_TOOLS |
+					      DHC_TARGET_UMAC |
+					      DHC_TOOLS_UMAC_GET_TAS_STATUS),
+	};
+	struct iwl_host_cmd hcmd = {
+		.id = WIDE_ID(LEGACY_GROUP, DEBUG_HOST_COMMAND),
+		.flags = CMD_WANT_SKB,
+		.len[0] = sizeof(cmd),
+		.data[0] = &cmd,
+	};
+	struct iwl_dhc_tas_status_resp *resp = NULL;
+	ssize_t pos = 0;
+	u32 resp_len;
+	u32 status;
+	int ret;
+
+	if (iwl_mld_dbgfs_fw_cmd_disabled(mld))
+		return -EIO;
+
+	ret = iwl_mld_send_cmd(mld, &hcmd);
+	if (ret)
+		return ret;
+
+	pos += scnprintf(buf + pos, count - pos, "\nOEM name: %s\n",
+			 dmi_get_system_info(DMI_SYS_VENDOR) ?: "<unknown>");
+	pos += scnprintf(buf + pos, count - pos,
+			 "\tVendor In Approved List: %s\n",
+			 iwl_is_tas_approved() ? "YES" : "NO");
+
+	status = iwl_dhc_resp_status(mld->fwrt.fw, hcmd.resp_pkt);
+	if (status != 1) {
+		pos += scnprintf(buf + pos, count - pos,
+				 "response status is not success: %d\n",
+				 status);
+		goto out;
+	}
+
+	resp = iwl_dhc_resp_data(mld->fwrt.fw, hcmd.resp_pkt, &resp_len);
+	if (IS_ERR(resp) || resp_len != sizeof(*resp)) {
+		pos += scnprintf(buf + pos, count - pos,
+			"Invalid size for TAS response (%u instead of %zd)\n",
+			resp_len, sizeof(*resp));
+		goto out;
+	}
+
+	pos += iwl_mld_dump_tas_resp(resp, count - pos, buf + pos);
+
+out:
+	iwl_free_resp(&hcmd);
+	return pos;
+}
+
 WIPHY_DEBUGFS_WRITE_FILE_OPS_MLD(fw_nmi, 10);
 WIPHY_DEBUGFS_WRITE_FILE_OPS_MLD(fw_restart, 10);
 WIPHY_DEBUGFS_READ_WRITE_FILE_OPS_MLD(he_sniffer_params, 32);
 WIPHY_DEBUGFS_READ_WRITE_FILE_OPS_MLD(rfi_freq_table, IWL_RFI_BUF_SIZE);
 WIPHY_DEBUGFS_WRITE_FILE_OPS_MLD(fw_dbg_clear, 10);
 WIPHY_DEBUGFS_WRITE_FILE_OPS_MLD(send_echo_cmd, 8);
+WIPHY_DEBUGFS_READ_FILE_OPS_MLD(tas_get_status, 2048);
 
 static ssize_t iwl_dbgfs_wifi_6e_enable_read(struct iwl_mld *mld,
 					     size_t count, u8 *buf)
@@ -330,6 +560,10 @@ static ssize_t iwl_dbgfs_inject_packet_write(struct iwl_mld *mld,
 	rxb._page = alloc_pages(GFP_KERNEL, 0);
 	if (!rxb._page)
 		return -ENOMEM;
+
+	/* for RX path, if RX is injected via this debugfs */
+	rxb.map_len = PAGE_SIZE;
+
 	pkt = rxb_addr(&rxb);
 
 	ret = hex2bin(page_address(rxb._page), buf, n_bytes);
@@ -394,11 +628,20 @@ iwl_mld_add_debugfs_files(struct iwl_mld *mld, struct dentry *debugfs_dir)
 	MLD_DEBUGFS_ADD_FILE(rfi_freq_table, debugfs_dir, 0600);
 	MLD_DEBUGFS_ADD_FILE(fw_dbg_clear, debugfs_dir, 0200);
 	MLD_DEBUGFS_ADD_FILE(send_echo_cmd, debugfs_dir, 0200);
+	MLD_DEBUGFS_ADD_FILE(tas_get_status, debugfs_dir, 0400);
 #ifdef CONFIG_THERMAL
 	MLD_DEBUGFS_ADD_FILE(start_ctdp, debugfs_dir, 0200);
 	MLD_DEBUGFS_ADD_FILE(stop_ctdp, debugfs_dir, 0200);
 #endif
 	MLD_DEBUGFS_ADD_FILE(inject_packet, debugfs_dir, 0200);
+
+#ifdef CONFIG_PM_SLEEP
+	debugfs_create_u32("max_sleep", 0600, debugfs_dir,
+			   &mld->debug_max_sleep);
+#endif
+
+	debugfs_create_bool("rx_ts_ptp", 0600, debugfs_dir,
+			    &mld->monitor.ptp_time);
 
 	/* Create a symlink with mac80211. It will be removed when mac80211
 	 * exits (before the opmode exits which removes the target.)
@@ -418,11 +661,10 @@ iwl_mld_add_debugfs_files(struct iwl_mld *mld, struct dentry *debugfs_dir)
 #define VIF_DEBUGFS_READ_WRITE_FILE_OPS(name, bufsz)			    \
 	IEEE80211_WIPHY_DEBUGFS_READ_WRITE_FILE_OPS(vif_##name, bufsz, vif) \
 
-#define VIF_DEBUGFS_ADD_FILE_ALIAS(alias, name, parent, mode) do {	\
-	debugfs_create_file(alias, mode, parent, vif,			\
-			    &iwl_dbgfs_vif_##name##_ops);		\
-	} while (0)
-#define VIF_DEBUGFS_ADD_FILE(name, parent, mode)			\
+#define VIF_DEBUGFS_ADD_FILE_ALIAS(alias, name, parent, mode)	\
+	debugfs_create_file(alias, mode, parent, vif,		\
+			    &iwl_dbgfs_vif_##name##_ops)
+#define VIF_DEBUGFS_ADD_FILE(name, parent, mode)		\
 	VIF_DEBUGFS_ADD_FILE_ALIAS(#name, name, parent, mode)
 
 static ssize_t iwl_dbgfs_vif_bf_params_write(struct iwl_mld *mld, char *buf,
@@ -461,8 +703,8 @@ static ssize_t iwl_dbgfs_vif_bf_params_write(struct iwl_mld *mld, char *buf,
 }
 
 static ssize_t iwl_dbgfs_vif_pm_params_write(struct iwl_mld *mld,
-					  char *buf,
-					  size_t count, void *data)
+					     char *buf,
+					     size_t count, void *data)
 {
 	struct ieee80211_vif *vif = data;
 	struct iwl_mld_vif *mld_vif = iwl_mld_vif_from_mac80211(vif);
@@ -643,8 +885,8 @@ iwl_dbgfs_vif_twt_setup_write(struct iwl_mld *mld, char *buf, size_t count,
 	};
 	struct ieee80211_vif *vif = data;
 	struct iwl_mld_vif *mld_vif = iwl_mld_vif_from_mac80211(vif);
+	struct iwl_dhc_cmd *cmd __free(kfree) = NULL;
 	struct iwl_dhc_twt_operation *dhc_twt_cmd;
-	struct iwl_dhc_cmd *cmd __free(kfree);
 	u64 target_wake_time;
 	u32 twt_operation, interval_exp, interval_mantissa, min_wake_duration;
 	u8 trigger, flow_type, flow_id, protection, tenth_param;
@@ -730,7 +972,8 @@ iwl_dbgfs_vif_twt_operation_write(struct iwl_mld *mld, char *buf, size_t count,
 	if (hweight16(vif->active_links) > 1)
 		return -EOPNOTSUPP;
 
-	ret = sscanf(buf, "%u %llu %u %u %u %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu",
+	ret = sscanf(buf,
+		     "%u %llu %u %u %u %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu",
 		     &twt_cmd.twt_operation, &twt_cmd.target_wake_time,
 		     &twt_cmd.interval_exponent, &twt_cmd.interval_mantissa,
 		     &twt_cmd.minimum_wake_duration, &twt_cmd.trigger,
@@ -756,6 +999,33 @@ iwl_dbgfs_vif_twt_operation_write(struct iwl_mld *mld, char *buf, size_t count,
 
 VIF_DEBUGFS_WRITE_FILE_OPS(twt_operation, 256);
 
+static ssize_t iwl_dbgfs_vif_int_mlo_scan_write(struct iwl_mld *mld, char *buf,
+						size_t count, void *data)
+{
+	struct ieee80211_vif *vif = data;
+	u32 action;
+	int ret;
+
+	if (!vif->cfg.assoc || !ieee80211_vif_is_mld(vif))
+		return -EINVAL;
+
+	if (kstrtou32(buf, 0, &action))
+		return -EINVAL;
+
+	if (action == 0) {
+		ret = iwl_mld_scan_stop(mld, IWL_MLD_SCAN_INT_MLO, false);
+	} else if (action == 1) {
+		iwl_mld_int_mlo_scan(mld, vif);
+		ret = 0;
+	} else {
+		ret = -EINVAL;
+	}
+
+	return ret ?: count;
+}
+
+VIF_DEBUGFS_WRITE_FILE_OPS(int_mlo_scan, 32);
+
 void iwl_mld_add_vif_debugfs(struct ieee80211_hw *hw,
 			     struct ieee80211_vif *vif)
 {
@@ -776,12 +1046,12 @@ void iwl_mld_add_vif_debugfs(struct ieee80211_hw *hw,
 	snprintf(name, sizeof(name), "%pd", vif->debugfs_dir);
 	snprintf(target, sizeof(target), "../../../%pd3/iwlmld",
 		 vif->debugfs_dir);
-	mld_vif->dbgfs_slink =
-		debugfs_create_symlink(name, mld->debugfs_dir, target);
+	if (!mld_vif->dbgfs_slink)
+		mld_vif->dbgfs_slink =
+			debugfs_create_symlink(name, mld->debugfs_dir, target);
 
 #ifdef HACK_IWLWIFI_DEBUGFS_IWLMVM_SYMLINK
-	mld_vif->dbgfs_slink_mvm =
-		debugfs_create_symlink("iwlmvm", vif->debugfs_dir, "iwlmld");
+	debugfs_create_symlink("iwlmvm", vif->debugfs_dir, "iwlmld");
 #endif
 
 	if (iwlmld_mod_params.power_scheme != IWL_POWER_SCHEME_CAM &&
@@ -800,15 +1070,17 @@ void iwl_mld_add_vif_debugfs(struct ieee80211_hw *hw,
 
 	VIF_DEBUGFS_ADD_FILE(twt_setup, mld_vif_dbgfs, 0200);
 	VIF_DEBUGFS_ADD_FILE(twt_operation, mld_vif_dbgfs, 0200);
+	VIF_DEBUGFS_ADD_FILE(int_mlo_scan, mld_vif_dbgfs, 0200);
+	debugfs_create_bool("ftm_unprotected", 0200, mld_vif_dbgfs,
+			    &mld_vif->ftm_unprotected);
 }
 
 #define LINK_DEBUGFS_WRITE_FILE_OPS(name, bufsz)			\
 	WIPHY_DEBUGFS_WRITE_FILE_OPS(link_##name, bufsz, bss_conf)
 
-#define LINK_DEBUGFS_ADD_FILE_ALIAS(alias, name, parent, mode) do {	\
+#define LINK_DEBUGFS_ADD_FILE_ALIAS(alias, name, parent, mode)		\
 	debugfs_create_file(alias, mode, parent, link_conf,		\
-			    &iwl_dbgfs_link_##name##_ops);		\
-	} while (0)
+			    &iwl_dbgfs_link_##name##_ops)
 #define LINK_DEBUGFS_ADD_FILE(name, parent, mode)			\
 	LINK_DEBUGFS_ADD_FILE_ALIAS(#name, name, parent, mode)
 
@@ -840,8 +1112,8 @@ void iwl_mld_add_link_debugfs(struct ieee80211_hw *hw,
 
 }
 
-static ssize_t iwl_dbgfs_fixed_rate_write(struct iwl_mld *mld, char *buf,
-					  size_t count, void *data)
+static ssize_t _iwl_dbgfs_fixed_rate_write(struct iwl_mld *mld, char *buf,
+					   size_t count, void *data, bool v3)
 {
 	struct ieee80211_link_sta *link_sta = data;
 	struct iwl_mld_link_sta *mld_link_sta;
@@ -863,6 +1135,10 @@ static ssize_t iwl_dbgfs_fixed_rate_write(struct iwl_mld *mld, char *buf,
 	if (iwl_mld_dbgfs_fw_cmd_disabled(mld))
 		return -EIO;
 
+	/* input is in FW format (v2 or v3) so convert to v3 */
+	rate = iwl_v3_rate_from_v2_v3(cpu_to_le32(rate), v3);
+	rate = le32_to_cpu(iwl_v3_rate_to_v2_v3(rate, mld->fw_rates_ver_3));
+
 	ret = iwl_mld_send_tlc_dhc(mld, fw_sta_id,
 				   partial ? IWL_TLC_DEBUG_PARTIAL_FIXED_RATE :
 					     IWL_TLC_DEBUG_FIXED_RATE,
@@ -874,6 +1150,18 @@ static ssize_t iwl_dbgfs_fixed_rate_write(struct iwl_mld *mld, char *buf,
 		       fw_sta_id, pretty_rate, partial, ret);
 
 	return ret ? : count;
+}
+
+static ssize_t iwl_dbgfs_fixed_rate_write(struct iwl_mld *mld, char *buf,
+					  size_t count, void *data)
+{
+	return _iwl_dbgfs_fixed_rate_write(mld, buf, count, data, false);
+}
+
+static ssize_t iwl_dbgfs_fixed_rate_v3_write(struct iwl_mld *mld, char *buf,
+					     size_t count, void *data)
+{
+	return _iwl_dbgfs_fixed_rate_write(mld, buf, count, data, true);
 }
 
 static ssize_t iwl_dbgfs_tlc_dhc_write(struct iwl_mld *mld, char *buf,
@@ -904,10 +1192,9 @@ static ssize_t iwl_dbgfs_tlc_dhc_write(struct iwl_mld *mld, char *buf,
 	return ret ? : count;
 }
 
-#define LINK_STA_DEBUGFS_ADD_FILE_ALIAS(alias, name, parent, mode) do {	\
+#define LINK_STA_DEBUGFS_ADD_FILE_ALIAS(alias, name, parent, mode)	\
 	debugfs_create_file(alias, mode, parent, link_sta,		\
-			    &iwl_dbgfs_##name##_ops);			\
-	} while (0)
+			    &iwl_dbgfs_##name##_ops)
 #define LINK_STA_DEBUGFS_ADD_FILE(name, parent, mode)			\
 	LINK_STA_DEBUGFS_ADD_FILE_ALIAS(#name, name, parent, mode)
 
@@ -916,6 +1203,7 @@ static ssize_t iwl_dbgfs_tlc_dhc_write(struct iwl_mld *mld, char *buf,
 
 LINK_STA_WIPHY_DEBUGFS_WRITE_OPS(tlc_dhc, 64);
 LINK_STA_WIPHY_DEBUGFS_WRITE_OPS(fixed_rate, 64);
+LINK_STA_WIPHY_DEBUGFS_WRITE_OPS(fixed_rate_v3, 64);
 
 void iwl_mld_add_link_sta_debugfs(struct ieee80211_hw *hw,
 				  struct ieee80211_vif *vif,
@@ -923,5 +1211,6 @@ void iwl_mld_add_link_sta_debugfs(struct ieee80211_hw *hw,
 				  struct dentry *dir)
 {
 	LINK_STA_DEBUGFS_ADD_FILE(fixed_rate, dir, 0200);
+	LINK_STA_DEBUGFS_ADD_FILE(fixed_rate_v3, dir, 0200);
 	LINK_STA_DEBUGFS_ADD_FILE(tlc_dhc, dir, 0200);
 }

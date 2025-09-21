@@ -27,9 +27,44 @@ static inline bool iwl7000_wiphy_ext_feature_isset(struct wiphy *wiphy,
 #define wiphy_ext_feature_set iwl7000_wiphy_ext_feature_set
 #define wiphy_ext_feature_isset iwl7000_wiphy_ext_feature_isset
 
+
 static inline void
 cfg80211_epcs_changed(struct net_device *netdev, bool enabled)
 {
 }
 
+DEFINE_GUARD(wiphy, struct wiphy *,
+        mutex_lock(&_T->mtx),
+        mutex_unlock(&_T->mtx))
+
+static inline int __printf(2, 3) debugfs_change_name(struct dentry *dentry, const char *fmt, ...)
+{
+	const char *new_name;
+	struct dentry *parent;
+	va_list ap;
+
+	va_start(ap, fmt);
+	new_name = kvasprintf_const(GFP_KERNEL, fmt, ap);
+	va_end(ap);
+	if (!new_name)
+		return -ENOMEM;
+
+	parent = dentry->d_parent;
+
+	debugfs_rename(parent, dentry, parent, new_name);
+
+	kfree_const(new_name);
+	/* We never checked the succession of debugfs_rename anyway */
+	return 0;
+}
+
 #define NL80211_RRF_ALLOW_20MHZ_ACTIVITY    BIT(25)
+
+static inline int cfg80211_chandef_get_width(const struct cfg80211_chan_def *c)
+{
+	return nl80211_chan_width_to_mhz(c->width);
+}
+
+#ifndef MAC_ADDR_STR_LEN
+#define MAC_ADDR_STR_LEN (3 * ETH_ALEN - 1)
+#endif

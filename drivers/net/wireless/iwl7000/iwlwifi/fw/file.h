@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2008-2014, 2018-2024 Intel Corporation
+ * Copyright (C) 2008-2014, 2018-2025 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -102,6 +102,10 @@ enum iwl_ucode_tlv_type {
 	IWL_UCODE_TLV_SEC_TABLE_ADDR		= 66,
 	IWL_UCODE_TLV_D3_KEK_KCK_ADDR		= 67,
 	IWL_UCODE_TLV_CURRENT_PC		= 68,
+	IWL_UCODE_TLV_FSEQ_BIN_VERSION		= 72,
+
+	/* contains sub-sections like PNVM file does (did) */
+	IWL_UCODE_TLV_PNVM_DATA			= 74,
 
 	IWL_UCODE_TLV_FW_NUM_STATIONS		= IWL_UCODE_TLV_CONST_BASE + 0,
 	IWL_UCODE_TLV_FW_NUM_LINKS		= IWL_UCODE_TLV_CONST_BASE + 1,
@@ -414,6 +418,9 @@ typedef unsigned int __bitwise iwl_ucode_tlv_capa_t;
  * @IWL_UCODE_TLV_CAPA_BIOS_OVERRIDE_5G9_FOR_CA: supports (de)activating 5G9
  *	for CA from BIOS.
  * @IWL_UCODE_TLV_CAPA_UHB_CANADA_TAS_SUPPORT: supports %TAS_UHB_ALLOWED_CANADA
+ * @IWL_UCODE_TLV_CAPA_EXT_FSEQ_IMAGE_SUPPORT: external FSEQ image support
+ * @IWL_UCODE_TLV_CAPA_RESTRICTED_TWT_SUPPORT: Supports restricted TWT operation
+ * @IWL_UCODE_TLV_CAPA_TOF_320MHZ_SUPPORT: Supports 320 MHz ranging
  *
  * @NUM_IWL_UCODE_TLV_CAPA: number of bits used
  */
@@ -520,6 +527,16 @@ enum iwl_ucode_tlv_capa {
 	IWL_UCODE_TLV_CAPA_MONITOR_PASSIVE_CHANS	= (__force iwl_ucode_tlv_capa_t)122,
 	IWL_UCODE_TLV_CAPA_BIOS_OVERRIDE_5G9_FOR_CA	= (__force iwl_ucode_tlv_capa_t)123,
 	IWL_UCODE_TLV_CAPA_UHB_CANADA_TAS_SUPPORT	= (__force iwl_ucode_tlv_capa_t)124,
+	IWL_UCODE_TLV_CAPA_EXT_FSEQ_IMAGE_SUPPORT	= (__force iwl_ucode_tlv_capa_t)125,
+	IWL_UCODE_TLV_CAPA_RESTRICTED_TWT_SUPPORT	= (__force iwl_ucode_tlv_capa_t)126,
+	IWL_UCODE_TLV_CAPA_TOF_320MHZ_SUPPORT		= (__force iwl_ucode_tlv_capa_t)127,
+
+	/* set 4 */
+	/**
+	 * @IWL_UCODE_TLV_CAPA_RESET_DURING_ASSERT: FW reset handshake is needed
+	 *	during assert handling even if the dump isn't split
+	 */
+	IWL_UCODE_TLV_CAPA_RESET_DURING_ASSERT		= (__force iwl_ucode_tlv_capa_t)(4 * 32 +  0),
 	NUM_IWL_UCODE_TLV_CAPA
 /*
  * This construction make both sparse (which cannot increment the previous
@@ -1012,6 +1029,10 @@ struct iwl_fw_dump_exclude {
 	__le32 addr, size;
 };
 
+struct iwl_fw_fseq_bin_version {
+	__le32 major, minor;
+}; /* FW_TLV_FSEQ_BIN_VERSION_S */
+
 static inline size_t _iwl_tlv_array_len(const struct iwl_ucode_tlv *tlv,
 					size_t fixed_size, size_t var_size)
 {
@@ -1029,4 +1050,18 @@ static inline size_t _iwl_tlv_array_len(const struct iwl_ucode_tlv *tlv,
 
 #define iwl_tlv_array_len_with_size(_tlv_ptr, _struct_ptr, _size)	\
 	_iwl_tlv_array_len((_tlv_ptr), sizeof(*(_struct_ptr)), _size)
+
+/* external FSEQ file */
+#define IWL_FSEQ_FILE	"intel/fseq-%04x-%04x"
+#define IWL_FSEQ_MAGIC	"INTEL-CNV-FSEQ\n\0"
+
+struct iwl_fseq_file {
+	char magic[16];
+	char version[16];
+	__le32 bt_len;
+	__le32 wifi_len;
+	u8 reserved[8];
+	u8 data[];
+} __packed;
+
 #endif  /* __iwl_fw_file_h__ */
