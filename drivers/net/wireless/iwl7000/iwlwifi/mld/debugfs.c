@@ -709,6 +709,18 @@ iwl_dbgfs_vif_twt_setup_write(struct iwl_mld *mld, char *buf, size_t count,
 
 VIF_DEBUGFS_WRITE_FILE_OPS(twt_setup, 256);
 
+static ssize_t iwl_dbgfs_vif_test_twt_policy_write(struct iwl_mld *mld,
+						   char *buf, size_t count,
+						   void *data)
+{
+	struct ieee80211_vif *vif = data;
+	struct iwl_mld_vif *mld_vif = iwl_mld_vif_from_mac80211(vif);
+
+	return kstrtobool(buf, &mld_vif->force_twt_support) ?: count;
+}
+
+VIF_DEBUGFS_WRITE_FILE_OPS(test_twt_policy, 32);
+
 static ssize_t
 iwl_dbgfs_vif_twt_operation_write(struct iwl_mld *mld, char *buf, size_t count,
 				  void *data)
@@ -799,6 +811,7 @@ void iwl_mld_add_vif_debugfs(struct ieee80211_hw *hw,
 	VIF_DEBUGFS_ADD_FILE(low_latency, mld_vif_dbgfs, 0600);
 
 	VIF_DEBUGFS_ADD_FILE(twt_setup, mld_vif_dbgfs, 0200);
+	VIF_DEBUGFS_ADD_FILE(test_twt_policy, mld_vif_dbgfs, 0200);
 	VIF_DEBUGFS_ADD_FILE(twt_operation, mld_vif_dbgfs, 0200);
 }
 
