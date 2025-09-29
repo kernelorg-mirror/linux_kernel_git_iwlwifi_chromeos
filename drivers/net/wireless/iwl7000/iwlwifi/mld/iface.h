@@ -174,6 +174,7 @@ struct iwl_mld_vif {
 	struct iwl_mld_wowlan_data wowlan_data;
 #endif
 #ifdef CPTCFG_IWLWIFI_DEBUGFS
+	bool force_twt_support;
 	bool use_ps_poll;
 	bool disable_bf;
 	struct dentry *dbgfs_slink;

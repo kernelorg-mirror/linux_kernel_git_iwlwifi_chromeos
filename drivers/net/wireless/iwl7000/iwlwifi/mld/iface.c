@@ -214,6 +214,10 @@ static void iwl_mld_fill_mac_cmd_sta(struct iwl_mld *mld,
 
 		if (link->twt_requester)
 			twt_policy |= TWT_SUPPORTED;
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
+		if (iwl_mld_vif_from_mac80211(vif)->force_twt_support)
+			twt_policy |= TWT_SUPPORTED;
+#endif
 		if (link->twt_protected)
 			twt_policy |= PROTECTED_TWT_SUPPORTED;
 		if (link->twt_broadcast)
