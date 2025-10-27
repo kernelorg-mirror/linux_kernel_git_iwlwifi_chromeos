@@ -36,7 +36,9 @@
 #include "pnode.h"
 #include "internal.h"
 
+#ifdef __aarch64__
 #include <trace/events/cros_file.h>
+#endif
 
 /* Maximum number of mounts in a mount namespace */
 unsigned int sysctl_mount_max __read_mostly = 100000;
@@ -588,15 +590,11 @@ int __legitimize_mnt(struct vfsmount *bastard, unsigned seq)
 		return 0;
 	mnt = real_mount(bastard);
 	mnt_add_count(mnt, 1);
-	smp_mb();			// see mntput_no_expire()
+	smp_mb();		// see mntput_no_expire() and do_umount()
 	if (likely(!read_seqretry(&mount_lock, seq)))
 		return 0;
-	if (bastard->mnt_flags & MNT_SYNC_UMOUNT) {
-		mnt_add_count(mnt, -1);
-		return 1;
-	}
 	lock_mount_hash();
-	if (unlikely(bastard->mnt_flags & MNT_DOOMED)) {
+	if (unlikely(bastard->mnt_flags & (MNT_SYNC_UMOUNT | MNT_DOOMED))) {
 		mnt_add_count(mnt, -1);
 		unlock_mount_hash();
 		return 1;
@@ -1672,6 +1670,7 @@ static int do_umount(struct mount *mnt, int flags)
 			umount_tree(mnt, UMOUNT_PROPAGATE);
 		retval = 0;
 	} else {
+		smp_mb(); // paired with __legitimize_mnt()
 		shrink_submounts(mnt);
 		retval = -EBUSY;
 		if (!propagate_mount_busy(mnt, 2)) {
@@ -1742,6 +1741,7 @@ static void warn_mandlock(void)
 static int can_umount(const struct path *path, int flags)
 {
 	struct mount *mnt = real_mount(path->mnt);
+	struct super_block *sb = path->dentry->d_sb;
 
 	if (!may_mount())
 		return -EPERM;
@@ -1751,7 +1751,7 @@ static int can_umount(const struct path *path, int flags)
 		return -EINVAL;
 	if (mnt->mnt.mnt_flags & MNT_LOCKED) /* Check optimistically */
 		return -EINVAL;
-	if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
+	if (flags & MNT_FORCE && !ns_capable(sb->s_user_ns, CAP_SYS_ADMIN))
 		return -EPERM;
 	return 0;
 }
@@ -1761,8 +1761,9 @@ int path_umount(struct path *path, int flags)
 {
 	struct mount *mnt = real_mount(path->mnt);
 	int ret;
-
+#ifdef __aarch64__
 	trace_cros_path_umount_entry(path, flags);
+#endif
 	ret = can_umount(path, flags);
 	if (!ret)
 		ret = do_umount(mnt, flags);
@@ -1770,7 +1771,9 @@ int path_umount(struct path *path, int flags)
 	/* we mustn't call path_put() as that would clear mnt_expiry_mark */
 	dput(path->dentry);
 	mntput_no_expire(mnt);
+#ifdef __aarch64__
 	trace_cros_path_umount_exit(path, flags, ret);
+#endif
 	return ret;
 }
 
@@ -2303,6 +2306,19 @@ static int graft_tree(struct mount *mnt, struct mount *p, struct mountpoint *mp)
 	return attach_recursive_mnt(mnt, p, mp, false);
 }
 
+static int may_change_propagation(const struct mount *m)
+{
+        struct mnt_namespace *ns = m->mnt_ns;
+
+	 // it must be mounted in some namespace
+	 if (IS_ERR_OR_NULL(ns))         // is_mounted()
+		 return -EINVAL;
+	 // and the caller must be admin in userns of that namespace
+	 if (!ns_capable(ns->user_ns, CAP_SYS_ADMIN))
+		 return -EPERM;
+	 return 0;
+}
+
 /*
  * Sanity check the flags to change_mnt_propagation.
  */
@@ -2339,6 +2355,10 @@ static int do_change_type(struct path *path, int ms_flags)
 		return -EINVAL;
 
 	namespace_lock();
+	err = may_change_propagation(mnt);
+	if (err)
+		goto out_unlock;
+
 	if (type == MS_SHARED) {
 		err = invent_group_ids(mnt, recurse);
 		if (err)
@@ -2579,20 +2599,25 @@ static void mnt_warn_timestamp_expiry(struct path *mountpoint, struct vfsmount *
 	if (!__mnt_is_readonly(mnt) &&
 	   (!(sb->s_iflags & SB_I_TS_EXPIRY_WARNED)) &&
 	   (ktime_get_real_seconds() + TIME_UPTIME_SEC_MAX > sb->s_time_max)) {
-		char *buf = (char *)__get_free_page(GFP_KERNEL);
-		char *mntpath = buf ? d_path(mountpoint, buf, PAGE_SIZE) : ERR_PTR(-ENOMEM);
-		struct tm tm;
+		char *buf, *mntpath;
 
-		time64_to_tm(sb->s_time_max, 0, &tm);
+		buf = (char *)__get_free_page(GFP_KERNEL);
+		if (buf)
+			mntpath = d_path(mountpoint, buf, PAGE_SIZE);
+		else
+			mntpath = ERR_PTR(-ENOMEM);
+		if (IS_ERR(mntpath))
+			mntpath = "(unknown)";
 
-		pr_warn("%s filesystem being %s at %s supports timestamps until %04ld (0x%llx)\n",
+		pr_warn("%s filesystem being %s at %s supports timestamps until %ptTd (0x%llx)\n",
 			sb->s_type->name,
 			is_mounted(mnt) ? "remounted" : "mounted",
-			mntpath,
-			tm.tm_year+1900, (unsigned long long)sb->s_time_max);
+			mntpath, &sb->s_time_max,
+			(unsigned long long)sb->s_time_max);
 
-		free_page((unsigned long)buf);
 		sb->s_iflags |= SB_I_TS_EXPIRY_WARNED;
+		if (buf)
+			free_page((unsigned long)buf);
 	}
 }
 
@@ -2728,18 +2753,11 @@ static int do_set_group(struct path *from_path, struct path *to_path)
 
 	namespace_lock();
 
-	err = -EINVAL;
-	/* To and From must be mounted */
-	if (!is_mounted(&from->mnt))
+	err = may_change_propagation(from);
+	if (err)
 		goto out;
-	if (!is_mounted(&to->mnt))
-		goto out;
-
-	err = -EPERM;
-	/* We should be allowed to modify mount namespaces of both mounts */
-	if (!ns_capable(from->mnt_ns->user_ns, CAP_SYS_ADMIN))
-		goto out;
-	if (!ns_capable(to->mnt_ns->user_ns, CAP_SYS_ADMIN))
+	err = may_change_propagation(to);
+	if (err)
 		goto out;
 
 	err = -EINVAL;
@@ -2772,7 +2790,7 @@ static int do_set_group(struct path *from_path, struct path *to_path)
 	if (IS_MNT_SLAVE(from)) {
 		struct mount *m = from->mnt_master;
 
-		list_add(&to->mnt_slave, &m->mnt_slave_list);
+		list_add(&to->mnt_slave, &from->mnt_slave);
 		to->mnt_master = m;
 	}
 
@@ -3284,17 +3302,23 @@ int path_mount(const char *dev_name, struct path *path,
 		((char *)data_page)[PAGE_SIZE - 1] = 0;
 
 	if (flags & MS_NOUSER) {
+#ifdef __aarch64__
 		trace_cros_path_mount_exit(dev_name, path, type_page, flags, data_page, -EINVAL);
+#endif
 		return -EINVAL;
 	}
 
 	ret = security_sb_mount(dev_name, path, type_page, flags, data_page);
 	if (ret) {
+#ifdef __aarch64__
 		trace_cros_path_mount_exit(dev_name, path, type_page, flags, data_page, -EPERM);
+#endif
 		return ret;
 		}
 	if (!may_mount()) {
+#ifdef __aarch64__
 		trace_cros_path_mount_exit(dev_name, path, type_page, flags, data_page, -EPERM);
+#endif
 		return -EPERM;
 	}
 	if (flags & SB_MANDLOCK)
@@ -3359,33 +3383,45 @@ int path_mount(const char *dev_name, struct path *path,
 
 	if ((flags & (MS_REMOUNT | MS_BIND)) == (MS_REMOUNT | MS_BIND)) {
 		ret = do_reconfigure_mnt(path, mnt_flags);
+#ifdef __aarch64__
 		trace_cros_path_mount_exit(dev_name, path, type_page, flags, data_page, ret);
+#endif
 		return ret;
 	}
 	if (flags & MS_REMOUNT) {
 		ret = do_remount(path, flags, sb_flags, mnt_flags, data_page);
+#ifdef __aarch64__
 		trace_cros_path_mount_exit(dev_name, path, type_page, flags, data_page, ret);
+#endif
 		return ret;
 	}
 	if (flags & MS_BIND) {
 		ret = do_loopback(path, dev_name, flags & MS_REC);
+#ifdef __aarch64__
 		trace_cros_path_mount_exit(dev_name, path, type_page, flags, data_page, ret);
+#endif
 		return ret;
 	}
 	if (flags & (MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE)) {
 		ret = do_change_type(path, flags);
+#ifdef __aarch64__
 		trace_cros_path_mount_exit(dev_name, path, type_page, flags, data_page, ret);
+#endif
 		return ret;
 	}
 	if (flags & MS_MOVE) {
 		ret = do_move_mount_old(path, dev_name);
+#ifdef __aarch64__
 		trace_cros_path_mount_exit(dev_name, path, type_page, flags, data_page, ret);
+#endif
 		return ret;
 	}
 
 	ret = do_new_mount(path, type_page, sb_flags, mnt_flags, dev_name,
 			    data_page);
+#ifdef __aarch64__
 	trace_cros_path_mount_exit(dev_name, path, type_page, flags, data_page, ret);
+#endif
 	return ret;
 }
 
