@@ -43,6 +43,9 @@
 #include "internal.h"
 #include "mount.h"
 
+#ifdef __aarch64__
+#include <trace/events/cros_file.h>
+#endif
 #define CREATE_TRACE_POINTS
 #include <trace/events/namei.h>
 
@@ -4383,12 +4386,20 @@ int vfs_rename(struct renamedata *rd)
 	struct name_snapshot old_name;
 	bool lock_old_subdir, lock_new_subdir;
 
-	if (source == target)
+	if (source == target) {
+#ifdef __aarch64__
+		trace_cros_vfs_rename_exit(rd, 0);
+#endif
 		return 0;
+	}
 
 	error = may_delete(old_dir, old_dentry, is_dir);
-	if (error)
+	if (error) {
+#ifdef __aarch64__
+		trace_cros_vfs_rename_exit(rd, error);
+#endif
 		return error;
+	}
 
 	if (!target) {
 		error = may_create(new_dir, new_dentry);
@@ -4400,11 +4411,19 @@ int vfs_rename(struct renamedata *rd)
 		else
 			error = may_delete(new_dir, new_dentry, new_is_dir);
 	}
-	if (error)
+	if (error) {
+#ifdef __aarch64__
+		trace_cros_vfs_rename_exit(rd, error);
+#endif
 		return error;
+	}
 
-	if (!old_dir->i_op->rename)
+	if (!old_dir->i_op->rename) {
+#ifdef __aarch64__
+		trace_cros_vfs_rename_exit(rd, -EPERM);
+#endif
 		return -EPERM;
+	}
 
 	/*
 	 * If we are going to change the parent - check write permissions,
@@ -4413,20 +4432,32 @@ int vfs_rename(struct renamedata *rd)
 	if (new_dir != old_dir) {
 		if (is_dir) {
 			error = inode_permission(source, MAY_WRITE);
-			if (error)
+			if (error) {
+#ifdef __aarch64__
+				trace_cros_vfs_rename_exit(rd, error);
+#endif
 				return error;
+			}
 		}
 		if ((flags & RENAME_EXCHANGE) && new_is_dir) {
 			error = inode_permission(target, MAY_WRITE);
-			if (error)
+			if (error) {
+#ifdef __aarch64__
+				trace_cros_vfs_rename_exit(rd, error);
+#endif
 				return error;
+			}
 		}
 	}
 
 	error = security_inode_rename(old_dir, old_dentry, new_dir, new_dentry,
 				      flags);
-	if (error)
+	if (error) {
+#ifdef __aarch64__
+		trace_cros_vfs_rename_exit(rd, error);
+#endif
 		return error;
+	}
 
 	take_dentry_name_snapshot(&old_name, old_dentry);
 	dget(new_dentry);
@@ -4514,7 +4545,9 @@ out:
 		}
 	}
 	release_dentry_name_snapshot(&old_name);
-
+#ifdef __aarch64__
+	trace_cros_vfs_rename_exit(rd, error);
+#endif
 	return error;
 }
 EXPORT_SYMBOL(vfs_rename);
@@ -4768,10 +4801,9 @@ const char *vfs_get_link(struct dentry *dentry, struct delayed_call *done)
 EXPORT_SYMBOL(vfs_get_link);
 
 /* get the link contents into pagecache */
-const char *page_get_link(struct dentry *dentry, struct inode *inode,
-			  struct delayed_call *callback)
+static char *__page_get_link(struct dentry *dentry, struct inode *inode,
+			     struct delayed_call *callback)
 {
-	char *kaddr;
 	struct page *page;
 	struct address_space *mapping = inode->i_mapping;
 
@@ -4790,8 +4822,23 @@ const char *page_get_link(struct dentry *dentry, struct inode *inode,
 	}
 	set_delayed_call(callback, page_put_link, page);
 	BUG_ON(mapping_gfp_mask(mapping) & __GFP_HIGHMEM);
-	kaddr = page_address(page);
-	nd_terminate_link(kaddr, inode->i_size, PAGE_SIZE - 1);
+	return page_address(page);
+}
+
+const char *page_get_link_raw(struct dentry *dentry, struct inode *inode,
+			      struct delayed_call *callback)
+{
+	return __page_get_link(dentry, inode, callback);
+}
+EXPORT_SYMBOL_GPL(page_get_link_raw);
+
+const char *page_get_link(struct dentry *dentry, struct inode *inode,
+					struct delayed_call *callback)
+{
+	char *kaddr = __page_get_link(dentry, inode, callback);
+
+	if (!IS_ERR(kaddr))
+		nd_terminate_link(kaddr, inode->i_size, PAGE_SIZE - 1);
 	return kaddr;
 }
 
