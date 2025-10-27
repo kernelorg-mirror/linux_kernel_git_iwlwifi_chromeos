@@ -1,48 +1,40 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * cros_ec_sensors_activity - Driver for activities/gesture recognition.
+ * cros_ec_activity - Driver for activities/gesture recognition.
  *
- * Copyright (C) 2015 Google, Inc
+ * Copyright 2025 Google, Inc
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * This driver uses the cros-ec interface to communicate with the Chrome OS
- * EC about accelerometer data. Accelerometer access is presented through
- * iio sysfs.
+ * This driver uses the cros-ec interface to communicate with the ChromeOS
+ * EC about activity data.
  */
 
-#include <linux/delay.h>
-#include <linux/device.h>
+#include <linux/bits.h>
+#include <linux/cleanup.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/platform_device.h>
+#include <linux/types.h>
+
+#include <linux/platform_data/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_proto.h>
+
 #include <linux/iio/common/cros_ec_sensors_core.h>
 #include <linux/iio/events.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/trigger_consumer.h>
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/platform_data/cros_ec_commands.h>
-#include <linux/platform_data/cros_ec_proto.h>
-#include <linux/platform_device.h>
-#include <linux/slab.h>
 
 #define DRV_NAME "cros-ec-activity"
 
-/* st data for ec_sensors iio driver. */
+/* state data for ec_sensors iio driver. */
 struct cros_ec_sensors_state {
 	/* Shared by all sensors */
 	struct cros_ec_sensors_core_state core;
 
 	struct iio_chan_spec *channels;
-	unsigned nb_activities;
 
 	int body_detection_channel_index;
 	int sig_motion_channel_index;
-	int double_tap_channel_index;
 };
 
 static const struct iio_event_spec cros_ec_activity_single_shot[] = {
@@ -51,68 +43,48 @@ static const struct iio_event_spec cros_ec_activity_single_shot[] = {
 		/* significant motion trigger when we get out of still. */
 		.dir = IIO_EV_DIR_FALLING,
 		.mask_separate = BIT(IIO_EV_INFO_ENABLE),
-	 },
+	},
 };
+
 static const struct iio_event_spec cros_ec_body_detect_events[] = {
 	{
 		.type = IIO_EV_TYPE_CHANGE,
 		.dir = IIO_EV_DIR_EITHER,
 		.mask_separate = BIT(IIO_EV_INFO_ENABLE),
-	 },
+	},
 };
 
-static int ec_sensors_read(struct iio_dev *indio_dev,
-			  struct iio_chan_spec const *chan,
-			  int *val, int *val2, long mask)
+static int cros_ec_activity_sensors_read_raw(struct iio_dev *indio_dev,
+					     struct iio_chan_spec const *chan,
+					     int *val, int *val2, long mask)
 {
 	struct cros_ec_sensors_state *st = iio_priv(indio_dev);
 	int ret;
 
-	mutex_lock(&st->core.cmd_lock);
-	switch (chan->type) {
-	case IIO_PROXIMITY:
-		switch (mask) {
-		case IIO_CHAN_INFO_RAW:
-			st->core.param.cmd = MOTIONSENSE_CMD_GET_ACTIVITY;
-			st->core.param.get_activity.activity =
-					MOTIONSENSE_ACTIVITY_BODY_DETECTION;
-			if (cros_ec_motion_send_host_cmd(&st->core, 0) !=
-			    EC_RES_SUCCESS) {
-				ret = -EIO;
-			} else {
-				*val = st->core.resp->get_activity.state;
-				ret = IIO_VAL_INT;
-			}
-			break;
-		default:
-			ret = -EINVAL;
-		}
-		break;
-	case IIO_ACTIVITY:
-		dev_warn(&indio_dev->dev, "%s: Not Expected: %d\n", __func__,
-			 chan->channel2);
-		ret = -ENOSYS;
-		break;
-	default:
-		ret = -EINVAL;
-	}
-	mutex_unlock(&st->core.cmd_lock);
-	return ret;
+	if (chan->type != IIO_PROXIMITY || mask != IIO_CHAN_INFO_RAW)
+		return -EINVAL;
+
+	guard(mutex)(&st->core.cmd_lock);
+	st->core.param.cmd = MOTIONSENSE_CMD_GET_ACTIVITY;
+	st->core.param.get_activity.activity =
+		MOTIONSENSE_ACTIVITY_BODY_DETECTION;
+	ret = cros_ec_motion_send_host_cmd(&st->core, 0);
+	if (ret)
+		return ret;
+
+	/*
+	 * EC actually report if a body is near (1) or far (0).
+	 * Units for proximity sensor after scale is in meter,
+	 * so invert the result to return 0m when near and 1m when far.
+	 */
+	*val = !st->core.resp->get_activity.state;
+	return IIO_VAL_INT;
 }
 
-static int ec_sensors_write(struct iio_dev *indio_dev,
-			       struct iio_chan_spec const *chan,
-			       int val, int val2, long mask)
-{
-	dev_warn(&indio_dev->dev, "%s: Not Expected: %d\n", __func__,
-		 chan->channel2);
-	return -ENOSYS;
-}
-
-static int cros_ec_read_event_config(struct iio_dev *indio_dev,
-				     const struct iio_chan_spec *chan,
-				     enum iio_event_type type,
-				     enum iio_event_direction dir)
+static int cros_ec_activity_read_event_config(struct iio_dev *indio_dev,
+					      const struct iio_chan_spec *chan,
+					      enum iio_event_type type,
+					      enum iio_event_direction dir)
 {
 	struct cros_ec_sensors_state *st = iio_priv(indio_dev);
 	int ret;
@@ -120,54 +92,41 @@ static int cros_ec_read_event_config(struct iio_dev *indio_dev,
 	if (chan->type != IIO_ACTIVITY && chan->type != IIO_PROXIMITY)
 		return -EINVAL;
 
-	mutex_lock(&st->core.cmd_lock);
+	guard(mutex)(&st->core.cmd_lock);
 	st->core.param.cmd = MOTIONSENSE_CMD_LIST_ACTIVITIES;
 	ret = cros_ec_motion_send_host_cmd(&st->core, 0);
 	if (ret)
-		goto done;
+		return ret;
+
 	switch (chan->type) {
 	case IIO_PROXIMITY:
-		ret = !!(st->core.resp->list_activities.enabled &
+		return !!(st->core.resp->list_activities.enabled &
 			 (1 << MOTIONSENSE_ACTIVITY_BODY_DETECTION));
-		break;
 	case IIO_ACTIVITY:
-		switch (chan->channel2) {
-		case IIO_MOD_STILL:
-			ret = !!(st->core.resp->list_activities.enabled &
+		if (chan->channel2 == IIO_MOD_STILL) {
+			return !!(st->core.resp->list_activities.enabled &
 				 (1 << MOTIONSENSE_ACTIVITY_SIG_MOTION));
-			break;
-		case IIO_MOD_DOUBLE_TAP:
-			ret = !!(st->core.resp->list_activities.enabled &
-				 (1 << MOTIONSENSE_ACTIVITY_DOUBLE_TAP));
-			break;
-		default:
-			dev_warn(&indio_dev->dev, "Unknown activity: %d\n",
-				 chan->channel2);
-			ret = -EINVAL;
 		}
-		break;
+
+		dev_warn(&indio_dev->dev, "Unknown activity: %d\n",
+			 chan->channel2);
+		return -EINVAL;
 	default:
 		dev_warn(&indio_dev->dev, "Unknown channel type: %d\n",
 			 chan->type);
-		ret = -EINVAL;
+		return -EINVAL;
 	}
-done:
-	mutex_unlock(&st->core.cmd_lock);
-	return ret;
 }
 
-static int cros_ec_write_event_config(struct iio_dev *indio_dev,
-				      const struct iio_chan_spec *chan,
-				      enum iio_event_type type,
-				      enum iio_event_direction dir, int state)
+static int cros_ec_activity_write_event_config(struct iio_dev *indio_dev,
+					       const struct iio_chan_spec *chan,
+					       enum iio_event_type type,
+					       enum iio_event_direction dir,
+					       int state)
 {
 	struct cros_ec_sensors_state *st = iio_priv(indio_dev);
-	int ret;
 
-	if (chan->type != IIO_ACTIVITY && chan->type != IIO_PROXIMITY)
-		return -EINVAL;
-
-	mutex_lock(&st->core.cmd_lock);
+	guard(mutex)(&st->core.cmd_lock);
 	st->core.param.cmd = MOTIONSENSE_CMD_SET_ACTIVITY;
 	switch (chan->type) {
 	case IIO_PROXIMITY:
@@ -175,47 +134,34 @@ static int cros_ec_write_event_config(struct iio_dev *indio_dev,
 			MOTIONSENSE_ACTIVITY_BODY_DETECTION;
 		break;
 	case IIO_ACTIVITY:
-		switch (chan->channel2) {
-		case IIO_MOD_STILL:
+		if (chan->channel2 == IIO_MOD_STILL) {
 			st->core.param.set_activity.activity =
 				MOTIONSENSE_ACTIVITY_SIG_MOTION;
 			break;
-		case IIO_MOD_DOUBLE_TAP:
-			st->core.param.set_activity.activity =
-				MOTIONSENSE_ACTIVITY_DOUBLE_TAP;
-			break;
-		default:
-			dev_warn(&indio_dev->dev, "Unknown activity: %d\n",
-				 chan->channel2);
 		}
-		break;
+		dev_warn(&indio_dev->dev, "Unknown activity: %d\n",
+			 chan->channel2);
+		return -EINVAL;
 	default:
 		dev_warn(&indio_dev->dev, "Unknown channel type: %d\n",
 			 chan->type);
+		return -EINVAL;
 	}
 	st->core.param.set_activity.enable = state;
-
-	ret = cros_ec_motion_send_host_cmd(&st->core, 0);
-
-	mutex_unlock(&st->core.cmd_lock);
-	return ret;
+	return cros_ec_motion_send_host_cmd(&st->core, 0);
 }
 
-static int cros_ec_activity_push_data(
-		struct iio_dev *indio_dev,
-		s16 *data,
-		s64 timestamp)
+static int cros_ec_activity_push_data(struct iio_dev *indio_dev,
+				      s16 *data, s64 timestamp)
 {
 	struct ec_response_activity_data *activity_data =
 			(struct ec_response_activity_data *)data;
 	enum motionsensor_activity activity = activity_data->activity;
-	uint8_t state = activity_data->state;
+	u8 state = activity_data->state;
 	const struct cros_ec_sensors_state *st = iio_priv(indio_dev);
 	const struct iio_chan_spec *chan;
-	const struct iio_event_spec *event;
 	enum iio_event_direction dir;
 	int index;
-	u64 ev;
 
 	switch (activity) {
 	case MOTIONSENSE_ACTIVITY_BODY_DETECTION:
@@ -226,19 +172,14 @@ static int cros_ec_activity_push_data(
 		index = st->sig_motion_channel_index;
 		dir = IIO_EV_DIR_FALLING;
 		break;
-	case MOTIONSENSE_ACTIVITY_DOUBLE_TAP:
-		index = st->double_tap_channel_index;
-		dir = IIO_EV_DIR_FALLING;
-		break;
 	default:
 		dev_warn(&indio_dev->dev, "Unknown activity: %d\n", activity);
 		return 0;
 	}
 	chan = &st->channels[index];
-	event = &chan->event_spec[0];
-
-	ev = IIO_UNMOD_EVENT_CODE(chan->type, index, event->type, dir);
-	iio_push_event(indio_dev, ev, timestamp);
+	iio_push_event(indio_dev,
+		       IIO_UNMOD_EVENT_CODE(chan->type, index, chan->event_spec[0].type, dir),
+		       timestamp);
 	return 0;
 }
 
@@ -247,42 +188,19 @@ static irqreturn_t cros_ec_activity_capture(int irq, void *p)
 	struct iio_poll_func *pf = p;
 	struct iio_dev *indio_dev = pf->indio_dev;
 
+	/*
+	 * This callback would be called when a software trigger is
+	 * used. But when this virtual sensor is present, it is guaranteed
+	 * the sensor hub is advanced enough to not need a software trigger.
+	 */
 	dev_warn(&indio_dev->dev, "%s: Not Expected\n", __func__);
 	return IRQ_NONE;
 }
 
-/* Not implemented */
-static int cros_ec_read_event_value(struct iio_dev *indio_dev,
-				    const struct iio_chan_spec *chan,
-				    enum iio_event_type type,
-				    enum iio_event_direction dir,
-				    enum iio_event_info info,
-				    int *val, int *val2)
-{
-	dev_warn(&indio_dev->dev, "%s: Not Expected: %d\n", __func__,
-		 chan->channel2);
-	return -ENOSYS;
-}
-
-static int cros_ec_write_event_value(struct iio_dev *indio_dev,
-				     const struct iio_chan_spec *chan,
-				     enum iio_event_type type,
-				     enum iio_event_direction dir,
-				     enum iio_event_info info,
-				     int val, int val2)
-{
-	dev_warn(&indio_dev->dev, "%s: Not Expected: %d\n", __func__,
-		 chan->channel2);
-	return -ENOSYS;
-}
-
 static const struct iio_info ec_sensors_info = {
-	.read_raw = &ec_sensors_read,
-	.write_raw = &ec_sensors_write,
-	.read_event_config = cros_ec_read_event_config,
-	.write_event_config = cros_ec_write_event_config,
-	.read_event_value = cros_ec_read_event_value,
-	.write_event_value = cros_ec_write_event_value,
+	.read_raw = &cros_ec_activity_sensors_read_raw,
+	.read_event_config = cros_ec_activity_read_event_config,
+	.write_event_config = cros_ec_activity_write_event_config,
 };
 
 static int cros_ec_sensors_probe(struct platform_device *pdev)
@@ -296,11 +214,11 @@ static int cros_ec_sensors_probe(struct platform_device *pdev)
 	int i, index, ret, nb_activities;
 
 	if (!ec_device) {
-		dev_warn(&pdev->dev, "No CROS EC device found.\n");
+		dev_warn(dev, "No CROS EC device found.\n");
 		return -EINVAL;
 	}
 
-	indio_dev = devm_iio_device_alloc(&pdev->dev, sizeof(*st));
+	indio_dev = devm_iio_device_alloc(dev, sizeof(*st));
 	if (!indio_dev)
 		return -ENOMEM;
 
@@ -312,23 +230,21 @@ static int cros_ec_sensors_probe(struct platform_device *pdev)
 	indio_dev->info = &ec_sensors_info;
 	st = iio_priv(indio_dev);
 	st->core.type = st->core.resp->info.type;
+	st->core.read_ec_sensors_data = cros_ec_sensors_read_cmd;
 
-	/*
-	 * List all available activities
-	 */
 	st->core.param.cmd = MOTIONSENSE_CMD_LIST_ACTIVITIES;
 	ret = cros_ec_motion_send_host_cmd(&st->core, 0);
 	if (ret)
 		return ret;
+
 	activities = st->core.resp->list_activities.enabled |
 		     st->core.resp->list_activities.disabled;
-	nb_activities = hweight_long(activities) + 1;
-
 	if (!activities)
 		return -ENODEV;
 
 	/* Allocate a channel per activity and one for timestamp */
-	st->channels = devm_kcalloc(&pdev->dev, nb_activities,
+	nb_activities = hweight_long(activities) + 1;
+	st->channels = devm_kcalloc(dev, nb_activities,
 				    sizeof(*st->channels), GFP_KERNEL);
 	if (!st->channels)
 		return -ENOMEM;
@@ -336,41 +252,31 @@ static int cros_ec_sensors_probe(struct platform_device *pdev)
 	channel = &st->channels[0];
 	index = 0;
 	for_each_set_bit(i, &activities, BITS_PER_LONG) {
-		channel->scan_index = index;
-
-		/* List all available activities */
+		/* List all available triggers */
 		if (i == MOTIONSENSE_ACTIVITY_BODY_DETECTION) {
 			channel->type = IIO_PROXIMITY;
 			channel->info_mask_separate = BIT(IIO_CHAN_INFO_RAW);
-			channel->modified = 0;
 			channel->event_spec = cros_ec_body_detect_events;
 			channel->num_event_specs =
-					ARRAY_SIZE(cros_ec_body_detect_events);
+				ARRAY_SIZE(cros_ec_body_detect_events);
 			st->body_detection_channel_index = index;
 		} else {
 			channel->type = IIO_ACTIVITY;
 			channel->modified = 1;
 			channel->event_spec = cros_ec_activity_single_shot;
-			channel->num_event_specs = ARRAY_SIZE(
-					cros_ec_activity_single_shot);
-			switch (i) {
-			case MOTIONSENSE_ACTIVITY_SIG_MOTION:
+			channel->num_event_specs =
+				ARRAY_SIZE(cros_ec_activity_single_shot);
+			if (i == MOTIONSENSE_ACTIVITY_SIG_MOTION) {
 				channel->channel2 = IIO_MOD_STILL;
 				st->sig_motion_channel_index = index;
-				break;
-			case MOTIONSENSE_ACTIVITY_DOUBLE_TAP:
-				channel->channel2 = IIO_MOD_DOUBLE_TAP;
-				st->double_tap_channel_index = index;
-				break;
-			default:
-				dev_warn(&pdev->dev,
-					 "Unknown activity: %d\n", i);
+			} else {
+				dev_warn(dev, "Unknown activity: %d\n", i);
 				continue;
 			}
 		}
 		channel->ext_info = cros_ec_sensors_limited_info;
+		channel->scan_index = index++;
 		channel++;
-		index++;
 	}
 
 	/* Timestamp */
@@ -384,18 +290,8 @@ static int cros_ec_sensors_probe(struct platform_device *pdev)
 	indio_dev->channels = st->channels;
 	indio_dev->num_channels = index + 1;
 
-	st->core.read_ec_sensors_data = cros_ec_sensors_read_cmd;
-
 	return cros_ec_sensors_core_register(dev, indio_dev,
 					     cros_ec_activity_push_data);
-}
-
-static int cros_ec_sensors_remove(struct platform_device *pdev)
-{
-	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
-
-	iio_device_unregister(indio_dev);
-	return 0;
 }
 
 static struct platform_driver cros_ec_sensors_platform_driver = {
@@ -403,7 +299,6 @@ static struct platform_driver cros_ec_sensors_platform_driver = {
 		.name	= DRV_NAME,
 	},
 	.probe		= cros_ec_sensors_probe,
-	.remove		= cros_ec_sensors_remove,
 };
 module_platform_driver(cros_ec_sensors_platform_driver);
 

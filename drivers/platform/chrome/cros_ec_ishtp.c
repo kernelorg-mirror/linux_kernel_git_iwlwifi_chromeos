@@ -12,6 +12,7 @@
 #include <linux/pci.h>
 #include <linux/platform_data/cros_ec_commands.h>
 #include <linux/platform_data/cros_ec_proto.h>
+#include <linux/revocable.h>
 #include <linux/intel-ish-client-if.h>
 
 #include "cros_ec.h"
@@ -572,6 +573,10 @@ static int cros_ec_dev_init(struct ishtp_cl_data *client_data)
 	if (!ec_dev)
 		return -ENOMEM;
 
+	ec_dev->revocable_provider = devm_revocable_provider_alloc(dev, ec_dev);
+	if (!ec_dev->revocable_provider)
+		return -ENOMEM;
+
 	client_data->ec_dev = ec_dev;
 	dev->driver_data = ec_dev;
 
@@ -582,7 +587,7 @@ static int cros_ec_dev_init(struct ishtp_cl_data *client_data)
 	ec_dev->phys_name = dev_name(dev);
 	ec_dev->din_size = sizeof(struct cros_ish_in_msg) +
 			   sizeof(struct ec_response_get_protocol_info);
-	ec_dev->dout_size = sizeof(struct cros_ish_out_msg);
+	ec_dev->dout_size = sizeof(struct cros_ish_out_msg) + sizeof(struct ec_params_rwsig_action);
 
 	return cros_ec_register(ec_dev);
 }

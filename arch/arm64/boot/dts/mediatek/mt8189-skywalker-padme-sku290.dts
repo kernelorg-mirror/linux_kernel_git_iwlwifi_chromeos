@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Copyright (C) 2025 Google Inc.
+ *
+ * Sku id: cached_sku_code & 0xFFFFFF00 | panel_id
+ * panel_id:
+ *	MIPI_TIANMA_TL121BVMS07_00 0x22
+ */
+/dts-v1/;
+#include "mt8189-skywalker-padme.dtsi"
+
+/ {
+	model = "Google Padme sku290 board";
+	compatible = "google,padme-sku290", "google,padme-sku1570",
+		     "google,padme", "mediatek,mt8189";
+};
+
+&ap_sar_sensor {
+	status = "disabled";
+};
+
+&usb_a0 {
+	status = "disabled";
+};
+
+&usb_a1 {
+	status = "disabled";
+};
+
+&usb_hub_2_x {
+	status = "disabled";
+};
+
+&usb_hub_3_x {
+	status = "disabled";
+};

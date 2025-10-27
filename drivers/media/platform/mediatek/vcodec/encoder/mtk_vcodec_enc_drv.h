@@ -11,15 +11,18 @@
 #include "../common/mtk_vcodec_dbgfs.h"
 #include "../common/mtk_vcodec_fw_priv.h"
 #include "../common/mtk_vcodec_util.h"
+#include "mtk_vcodec_enc_dvfs.h"
 
 #define MTK_VCODEC_ENC_NAME	"mtk-vcodec-enc"
 
 #define MTK_ENC_CTX_IS_EXT(ctx) ((ctx)->dev->venc_pdata->uses_ext)
 #define MTK_ENC_IOVA_IS_34BIT(ctx) ((ctx)->dev->venc_pdata->uses_34bit)
+#define MTK_ENC_DRV_IS_COMM(ctx) (((ctx)->dev->venc_pdata->uses_comm))
 
 /**
  * struct mtk_vcodec_enc_pdata - compatible data for each IC
  *
+ * @venc_model_num: encoder model number
  * @uses_ext: whether the encoder uses the extended firmware messaging format
  * @min_bitrate: minimum supported encoding bitrate
  * @max_bitrate: maximum supported encoding bitrate
@@ -29,8 +32,11 @@
  * @num_output_formats: number of entries in output_formats
  * @core_id: stand for h264 or vp8 encode index
  * @uses_34bit: whether the encoder uses 34-bit iova
+ * @uses_comm: whether the encoder uses common driver interface
+ * @dvfs_cfg: encoder dvfs configurations
  */
 struct mtk_vcodec_enc_pdata {
+	u16 venc_model_num;
 	bool uses_ext;
 	u64 min_bitrate;
 	u64 max_bitrate;
@@ -40,6 +46,8 @@ struct mtk_vcodec_enc_pdata {
 	size_t num_output_formats;
 	u8 core_id;
 	bool uses_34bit;
+	bool uses_comm;
+	const struct venc_dvfs_config dvfs_cfg;
 };
 
 /*
@@ -69,8 +77,8 @@ enum mtk_encode_param {
  * @framerate_denom: frame rate denominator. ex: framerate_num=30 and
  *		     framerate_denom=1 means FPS is 30
  * @h264_max_qp: Max value for H.264 quantization parameter
- * @h264_profile: V4L2 defined H.264 profile
- * @h264_level: V4L2 defined H.264 level
+ * @profile: V4L2 defined profile
+ * @level: V4L2 defined level
  * @force_intra: force/insert intra frame
  */
 struct mtk_enc_params {
@@ -84,8 +92,8 @@ struct mtk_enc_params {
 	unsigned int	framerate_num;
 	unsigned int	framerate_denom;
 	unsigned int	h264_max_qp;
-	unsigned int	h264_profile;
-	unsigned int	h264_level;
+	unsigned int	profile;
+	unsigned int	level;
 	unsigned int	force_intra;
 };
 
@@ -187,6 +195,10 @@ struct mtk_vcodec_enc_ctx {
  * @pm: power management control
  * @enc_capability: used to identify encode capability
  * @dbgfs: debug log related information
+ *
+ * @vencsys: encoder syscon
+ * @dvfs_mux: encoder dvfs lock
+ * @venc_dvfs: encoder dvfs parameters
  */
 struct mtk_vcodec_enc_dev {
 	struct v4l2_device v4l2_dev;
@@ -215,6 +227,10 @@ struct mtk_vcodec_enc_dev {
 	struct mtk_vcodec_pm pm;
 	unsigned int enc_capability;
 	struct mtk_vcodec_dbgfs dbgfs;
+
+	struct regmap *vencsys;
+	struct mutex dvfs_mux;
+	struct mtk_vcodec_enc_dvfs venc_dvfs;
 };
 
 static inline struct mtk_vcodec_enc_ctx *fh_to_enc_ctx(struct v4l2_fh *fh)

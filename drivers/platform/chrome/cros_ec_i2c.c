@@ -12,6 +12,7 @@
 #include <linux/platform_data/cros_ec_commands.h>
 #include <linux/platform_data/cros_ec_proto.h>
 #include <linux/platform_device.h>
+#include <linux/revocable.h>
 #include <linux/slab.h>
 
 #include "cros_ec.h"
@@ -296,6 +297,10 @@ static int cros_ec_i2c_probe(struct i2c_client *client)
 	if (!ec_dev)
 		return -ENOMEM;
 
+	ec_dev->revocable_provider = devm_revocable_provider_alloc(dev, ec_dev);
+	if (!ec_dev->revocable_provider)
+		return -ENOMEM;
+
 	i2c_set_clientdata(client, ec_dev);
 	ec_dev->dev = dev;
 	ec_dev->priv = client;
@@ -305,7 +310,8 @@ static int cros_ec_i2c_probe(struct i2c_client *client)
 	ec_dev->phys_name = client->adapter->name;
 	ec_dev->din_size = sizeof(struct ec_host_response_i2c) +
 			   sizeof(struct ec_response_get_protocol_info);
-	ec_dev->dout_size = sizeof(struct ec_host_request_i2c);
+	ec_dev->dout_size = sizeof(struct ec_host_request_i2c) +
+			    sizeof(struct ec_params_rwsig_action);
 
 	err = cros_ec_register(ec_dev);
 	if (err) {

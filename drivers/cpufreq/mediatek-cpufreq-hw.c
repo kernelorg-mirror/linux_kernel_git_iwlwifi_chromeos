@@ -22,6 +22,7 @@
 #define CPUFREQ_HW_STATUS		BIT(0)
 #define SVS_HW_STATUS			BIT(1)
 #define POLL_USEC			1000
+#define CPU_DMA_LATENCY			10000
 #define TIMEOUT_USEC			300000
 
 enum {
@@ -41,6 +42,7 @@ struct mtk_cpufreq_data {
 	struct resource *res;
 	void __iomem *base;
 	int nr_opp;
+	struct pm_qos_request cpufreq_lpm_qos_request;
 };
 
 static const u16 cpufreq_mtk_offsets[REG_ARRAY_SIZE] = {
@@ -62,7 +64,7 @@ mtk_cpufreq_get_cpu_power(struct device *cpu_dev, unsigned long *uW,
 
 	policy = cpufreq_cpu_get_raw(cpu_dev->id);
 	if (!policy)
-		return 0;
+		return -EINVAL;
 
 	data = policy->driver_data;
 
@@ -227,6 +229,11 @@ static int mtk_cpufreq_hw_cpu_init(struct cpufreq_policy *policy)
 	unsigned int latency;
 	int ret;
 
+	if (!pdev) {
+		pr_err("cpufreq_get_driver_data returned NULL\n");
+		return -ENODEV;
+	}
+
 	/* Get the bases of cpufreq for domains */
 	ret = mtk_cpu_resources_init(pdev, policy, platform_get_drvdata(pdev));
 	if (ret) {
@@ -242,6 +249,9 @@ static int mtk_cpufreq_hw_cpu_init(struct cpufreq_policy *policy)
 
 	policy->cpuinfo.transition_latency = latency;
 	policy->fast_switch_possible = true;
+
+	if (policy->cpu == 0)
+		cpu_latency_qos_add_request(&data->cpufreq_lpm_qos_request, CPU_DMA_LATENCY);
 
 	/* HW should be in enabled state to proceed now */
 	writel_relaxed(0x1, data->reg_bases[REG_FREQ_ENABLE]);

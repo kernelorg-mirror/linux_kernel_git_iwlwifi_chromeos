@@ -1111,7 +1111,7 @@ mt7615_mcu_uni_add_dev(struct mt7615_phy *phy, struct ieee80211_vif *vif,
 {
 	struct mt7615_vif *mvif = (struct mt7615_vif *)vif->drv_priv;
 
-	return mt76_connac_mcu_uni_add_dev(phy->mt76, &vif->bss_conf,
+	return mt76_connac_mcu_uni_add_dev(phy->mt76, &vif->bss_conf, &mvif->mt76,
 					   &mvif->sta.wcid, enable);
 }
 
@@ -1876,16 +1876,6 @@ int mt7615_mcu_set_dbdc(struct mt7615_dev *dev)
 out:
 	return mt76_mcu_send_msg(&dev->mt76, MCU_EXT_CMD(DBDC_CTRL), &req,
 				 sizeof(req), true);
-}
-
-int mt7615_mcu_del_wtbl_all(struct mt7615_dev *dev)
-{
-	struct wtbl_req_hdr req = {
-		.operation = WTBL_RESET_ALL,
-	};
-
-	return mt76_mcu_send_msg(&dev->mt76, MCU_EXT_CMD(WTBL_UPDATE),
-				 &req, sizeof(req), true);
 }
 
 int mt7615_mcu_set_fcc5_lpn(struct mt7615_dev *dev, int val)

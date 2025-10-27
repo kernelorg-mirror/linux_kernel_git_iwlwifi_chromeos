@@ -82,11 +82,11 @@ static int vidioc_venc_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_MPEG_VIDEO_H264_PROFILE:
 		mtk_v4l2_venc_dbg(2, ctx, "V4L2_CID_MPEG_VIDEO_H264_PROFILE val = %d", ctrl->val);
-		p->h264_profile = ctrl->val;
+		p->profile = ctrl->val;
 		break;
 	case V4L2_CID_MPEG_VIDEO_H264_LEVEL:
 		mtk_v4l2_venc_dbg(2, ctx, "V4L2_CID_MPEG_VIDEO_H264_LEVEL val = %d", ctrl->val);
-		p->h264_level = ctrl->val;
+		p->level = ctrl->val;
 		break;
 	case V4L2_CID_MPEG_VIDEO_H264_I_PERIOD:
 		mtk_v4l2_venc_dbg(2, ctx, "V4L2_CID_MPEG_VIDEO_H264_I_PERIOD val = %d", ctrl->val);
@@ -199,34 +199,15 @@ static int vidioc_enum_fmt_vid_out(struct file *file, void *priv,
 			       pdata->num_output_formats);
 }
 
-static int mtk_vcodec_enc_get_chip_name(void *priv)
-{
-	struct mtk_vcodec_enc_ctx *ctx = fh_to_enc_ctx(priv);
-	struct device *dev = &ctx->dev->plat_dev->dev;
-
-	if (of_device_is_compatible(dev->of_node, "mediatek,mt8173-vcodec-enc"))
-		return 8173;
-	else if (of_device_is_compatible(dev->of_node, "mediatek,mt8183-vcodec-enc"))
-		return 8183;
-	else if (of_device_is_compatible(dev->of_node, "mediatek,mt8192-vcodec-enc"))
-		return 8192;
-	else if (of_device_is_compatible(dev->of_node, "mediatek,mt8195-vcodec-enc"))
-		return 8195;
-	else if (of_device_is_compatible(dev->of_node, "mediatek,mt8188-vcodec-enc"))
-		return 8188;
-	else
-		return 8173;
-}
-
 static int vidioc_venc_querycap(struct file *file, void *priv,
 				struct v4l2_capability *cap)
 {
 	struct mtk_vcodec_enc_ctx *ctx = fh_to_enc_ctx(priv);
+	const struct mtk_vcodec_enc_pdata *pdata = ctx->dev->venc_pdata;
 	struct device *dev = &ctx->dev->plat_dev->dev;
-	int platform_name = mtk_vcodec_enc_get_chip_name(priv);
 
 	strscpy(cap->driver, dev->driver->name, sizeof(cap->driver));
-	snprintf(cap->card, sizeof(cap->card), "MT%d video encoder", platform_name);
+	snprintf(cap->card, sizeof(cap->card), "MT%d video encoder", pdata->venc_model_num);
 
 	return 0;
 }
@@ -387,8 +368,8 @@ static void mtk_venc_set_param(struct mtk_vcodec_enc_ctx *ctx,
 		mtk_v4l2_venc_err(ctx, "Unsupported fourcc =%d", q_data_src->fmt->fourcc);
 		break;
 	}
-	param->h264_profile = enc_params->h264_profile;
-	param->h264_level = enc_params->h264_level;
+	param->profile = enc_params->profile;
+	param->level = enc_params->level;
 
 	/* Config visible resolution */
 	param->width = q_data_src->visible_width;
@@ -404,8 +385,8 @@ static void mtk_venc_set_param(struct mtk_vcodec_enc_ctx *ctx,
 
 	mtk_v4l2_venc_dbg(0, ctx,
 			  "fmt 0x%x, P/L %d/%d w/h %d/%d buf %d/%d fps/bps %d/%d gop %d i_per %d",
-			  param->input_yuv_fmt, param->h264_profile,
-			  param->h264_level, param->width, param->height,
+			  param->input_yuv_fmt, param->profile,
+			  param->level, param->width, param->height,
 			  param->buf_width, param->buf_height,
 			  param->frm_rate, param->bitrate,
 			  param->gop_size, param->intra_period);
@@ -909,6 +890,13 @@ static int vb2ops_venc_start_streaming(struct vb2_queue *q, unsigned int count)
 		ctx->state = MTK_STATE_HEADER;
 	}
 
+#if IS_ENABLED(CONFIG_MTK_MMDVFS)
+	mutex_lock(&ctx->dev->dvfs_mux);
+	mtk_venc_dvfs_begin_inst(ctx);
+	mtk_venc_pmqos_begin_inst(ctx);
+	mutex_unlock(&ctx->dev->dvfs_mux);
+#endif
+
 	return 0;
 
 err_start_stream:
@@ -992,6 +980,13 @@ static void vb2ops_venc_stop_streaming(struct vb2_queue *q)
 	ret = venc_if_deinit(ctx);
 	if (ret)
 		mtk_v4l2_venc_err(ctx, "venc_if_deinit failed=%d", ret);
+
+#if IS_ENABLED(CONFIG_MTK_MMDVFS)
+	mutex_lock(&ctx->dev->dvfs_mux);
+	mtk_venc_dvfs_end_inst(ctx);
+	mtk_venc_pmqos_end_inst(ctx);
+	mutex_unlock(&ctx->dev->dvfs_mux);
+#endif
 
 	ctx->state = MTK_STATE_FREE;
 }
@@ -1186,6 +1181,8 @@ static void mtk_venc_worker(struct work_struct *work)
 				(size_t)src_buf->vb2_buf.planes[i].length -
 			src_buf->planes[i].data_offset;
 	}
+	frm_buf.num_planes = src_buf->vb2_buf.num_planes;
+
 	bs_buf.va = vb2_plane_vaddr(&dst_buf->vb2_buf, 0);
 	bs_buf.dma_addr = vb2_dma_contig_plane_dma_addr(&dst_buf->vb2_buf, 0);
 	bs_buf.size = (size_t)dst_buf->vb2_buf.planes[0].length;

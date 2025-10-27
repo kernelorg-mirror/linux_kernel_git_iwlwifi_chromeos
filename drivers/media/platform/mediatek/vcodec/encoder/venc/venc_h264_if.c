@@ -594,7 +594,11 @@ static int h264_enc_init(struct mtk_vcodec_enc_ctx *ctx)
 
 	inst->ctx = ctx;
 	inst->vpu_inst.ctx = ctx;
-	inst->vpu_inst.id = is_ext ? SCP_IPI_VENC_H264 : IPI_VENC_H264;
+	if (is_ext)
+		inst->vpu_inst.id = SCP_IPI_VENC_H264;
+	else
+		inst->vpu_inst.id = IPI_VENC_H264;
+
 	inst->hw_base = mtk_vcodec_get_reg_addr(inst->ctx->dev->reg_base, VENC_SYS);
 
 	ret = vpu_enc_init(&inst->vpu_inst);
@@ -719,9 +723,9 @@ static void h264_enc_set_vsi_configs(struct venc_h264_inst *inst,
 	inst->vsi->config.framerate = enc_prm->frm_rate;
 	inst->vsi->config.intra_period = enc_prm->intra_period;
 	inst->vsi->config.profile =
-		h264_get_profile(inst, enc_prm->h264_profile);
+		h264_get_profile(inst, enc_prm->profile);
 	inst->vsi->config.level =
-		h264_get_level(inst, enc_prm->h264_level);
+		h264_get_level(inst, enc_prm->level);
 	inst->vsi->config.wfd = 0;
 }
 
@@ -738,9 +742,9 @@ static void h264_enc_set_vsi_34_configs(struct venc_h264_inst *inst,
 	inst->vsi_34->config.framerate = enc_prm->frm_rate;
 	inst->vsi_34->config.intra_period = enc_prm->intra_period;
 	inst->vsi_34->config.profile =
-		h264_get_profile(inst, enc_prm->h264_profile);
+		h264_get_profile(inst, enc_prm->profile);
 	inst->vsi_34->config.level =
-		h264_get_level(inst, enc_prm->h264_level);
+		h264_get_level(inst, enc_prm->level);
 	inst->vsi_34->config.wfd = 0;
 }
 

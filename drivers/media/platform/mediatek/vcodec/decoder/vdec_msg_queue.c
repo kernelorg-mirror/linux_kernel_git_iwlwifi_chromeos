@@ -235,6 +235,20 @@ void vdec_msg_queue_deinit(struct vdec_msg_queue *msg_queue,
 		cancel_work_sync(&msg_queue->core_work);
 }
 
+void vdec_msg_queue_wait_core_is_zero(struct mtk_vcodec_dec_ctx *ctx)
+{
+	if (ctx->is_secure_playback)
+		atomic_inc(&ctx->dev->secure_frame_cnt);
+	else
+		atomic_inc(&ctx->dev->normal_frame_cnt);
+
+	if (ctx->is_secure_playback && atomic_read(&ctx->dev->normal_frame_cnt) >= 1)
+		wait_event(ctx->dev->sync_decode, !atomic_read(&ctx->dev->normal_frame_cnt));
+
+	if (!ctx->is_secure_playback && atomic_read(&ctx->dev->secure_frame_cnt) >= 1)
+		wait_event(ctx->dev->sync_decode, !atomic_read(&ctx->dev->secure_frame_cnt));
+}
+
 static void vdec_msg_queue_core_work(struct work_struct *work)
 {
 	struct vdec_msg_queue *msg_queue =
@@ -261,14 +275,22 @@ static void vdec_msg_queue_core_work(struct work_struct *work)
 	}
 
 	ctx = lat_buf->ctx;
-	mtk_vcodec_dec_enable_hardware(ctx, MTK_VDEC_CORE);
+	mtk_vcodec_dec_lock_hardware(ctx, MTK_VDEC_CORE, true);
 	mtk_vcodec_set_curr_ctx(dev, ctx, MTK_VDEC_CORE);
 
 	lat_buf->core_decode(lat_buf);
 
 	mtk_vcodec_set_curr_ctx(dev, NULL, MTK_VDEC_CORE);
-	mtk_vcodec_dec_disable_hardware(ctx, MTK_VDEC_CORE);
+	mtk_vcodec_dec_unlock_hardware(ctx, MTK_VDEC_CORE, true);
 	vdec_msg_queue_qbuf(&ctx->msg_queue.lat_ctx, lat_buf);
+
+	if (ctx->is_secure_playback)
+		atomic_dec(&ctx->dev->secure_frame_cnt);
+	else
+		atomic_dec(&ctx->dev->normal_frame_cnt);
+
+	if (!atomic_read(&ctx->dev->secure_frame_cnt) || !atomic_read(&ctx->dev->normal_frame_cnt))
+		wake_up(&ctx->dev->sync_decode);
 
 	if (!(ctx->msg_queue.status & CONTEXT_LIST_QUEUED) &&
 	    atomic_read(&msg_queue->core_list_cnt)) {
@@ -308,8 +330,13 @@ int vdec_msg_queue_init(struct vdec_msg_queue *msg_queue,
 		msg_queue->wdma_addr.size = 0;
 		return -ENOMEM;
 	}
-	msg_queue->wdma_rptr_addr = msg_queue->wdma_addr.dma_addr;
-	msg_queue->wdma_wptr_addr = msg_queue->wdma_addr.dma_addr;
+	if (ctx->is_secure_playback) {
+		msg_queue->wdma_rptr_addr = 0;
+		msg_queue->wdma_wptr_addr = 0;
+	} else {
+		msg_queue->wdma_rptr_addr = msg_queue->wdma_addr.dma_addr;
+		msg_queue->wdma_wptr_addr = msg_queue->wdma_addr.dma_addr;
+	}
 
 	msg_queue->empty_lat_buf.ctx = ctx;
 	msg_queue->empty_lat_buf.core_decode = NULL;

@@ -14708,6 +14708,34 @@ const u8 rtw89_8852b_tx_shape_lmt[RTW89_BAND_NUM][RTW89_RS_TX_SHAPE_NUM]
 };
 
 static
+const u8 rtw89_8852b_tx_shape_lmt_ru[RTW89_BAND_NUM][RTW89_REGD_NUM] = {
+	[0][RTW89_ACMA] = 0,
+	[0][RTW89_CHILE] = 0,
+	[0][RTW89_CN] = 0,
+	[0][RTW89_ETSI] = 0,
+	[0][RTW89_FCC] = 3,
+	[0][RTW89_IC] = 3,
+	[0][RTW89_KCC] = 0,
+	[0][RTW89_MEXICO] = 3,
+	[0][RTW89_MKK] = 0,
+	[0][RTW89_QATAR] = 0,
+	[0][RTW89_UK] = 0,
+	[0][RTW89_UKRAINE] = 0,
+	[1][RTW89_ACMA] = 0,
+	[1][RTW89_CHILE] = 0,
+	[1][RTW89_CN] = 0,
+	[1][RTW89_ETSI] = 0,
+	[1][RTW89_FCC] = 3,
+	[1][RTW89_IC] = 3,
+	[1][RTW89_KCC] = 0,
+	[1][RTW89_MEXICO] = 3,
+	[1][RTW89_MKK] = 0,
+	[1][RTW89_QATAR] = 0,
+	[1][RTW89_UK] = 0,
+	[1][RTW89_UKRAINE] = 0,
+};
+
+static
 const s8 rtw89_8852b_txpwr_lmt_2g[RTW89_2G_BW_NUM][RTW89_NTX_NUM]
 				 [RTW89_RS_LMT_NUM][RTW89_BF_NUM]
 				 [RTW89_REGD_NUM][RTW89_2G_CH_NUM] = {
@@ -22892,5 +22920,8 @@ const struct rtw89_rfe_parms rtw89_8852b_dflt_parms = {
 		.lmt = &rtw89_8852b_txpwr_lmt_5g,
 		.lmt_ru = &rtw89_8852b_txpwr_lmt_ru_5g,
 	},
-	.tx_shape = &rtw89_8852b_tx_shape_lmt,
+	.tx_shape = {
+		.lmt = &rtw89_8852b_tx_shape_lmt,
+		.lmt_ru = &rtw89_8852b_tx_shape_lmt_ru,
+	},
 };

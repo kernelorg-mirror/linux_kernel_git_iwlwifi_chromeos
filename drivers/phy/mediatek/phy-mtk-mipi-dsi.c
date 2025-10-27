@@ -147,7 +147,9 @@ static int mtk_mipi_tx_probe(struct platform_device *pdev)
 		mipi_tx->mipitx_drive = clamp_val(mipi_tx->mipitx_drive, 3000,
 						  6000);
 	}
-
+	mipi_tx->is_cphy = of_property_read_bool(dev->of_node, "mediatek,is-cphy");
+	mipi_tx->pre_emphasis_en = of_property_read_bool(dev->of_node,
+							"mediatek,pre-emphasis-en");
 	ref_clk_name = __clk_get_name(ref_clk);
 
 	ret = of_property_read_string(dev->of_node, "clock-output-names",
@@ -183,6 +185,8 @@ static const struct of_device_id mtk_mipi_tx_match[] = {
 	{ .compatible = "mediatek,mt2701-mipi-tx", .data = &mt2701_mipitx_data },
 	{ .compatible = "mediatek,mt8173-mipi-tx", .data = &mt8173_mipitx_data },
 	{ .compatible = "mediatek,mt8183-mipi-tx", .data = &mt8183_mipitx_data },
+	{ .compatible = "mediatek,mt8189-mipi-tx", .data = &mt8183_mipitx_data },
+	{ .compatible = "mediatek,mt8196-mipi-tx", .data = &mt8196_mipitx_data },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mtk_mipi_tx_match);

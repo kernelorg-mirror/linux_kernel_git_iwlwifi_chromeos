@@ -922,6 +922,8 @@ static int ov7251_set_power_on(struct device *dev)
 		return ret;
 	}
 
+	usleep_range(1000, 1100);
+
 	gpiod_set_value_cansleep(ov7251->enable_gpio, 1);
 
 	/* wait at least 65536 external clock cycles */
@@ -1139,7 +1141,7 @@ __ov7251_get_pad_format(struct ov7251 *ov7251,
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&ov7251->sd, sd_state, pad);
+		return v4l2_subdev_state_get_format(sd_state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &ov7251->fmt;
 	default:
@@ -1169,7 +1171,7 @@ __ov7251_get_pad_crop(struct ov7251 *ov7251,
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_crop(&ov7251->sd, sd_state, pad);
+		return v4l2_subdev_state_get_crop(sd_state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &ov7251->crop;
 	default:
@@ -1282,8 +1284,8 @@ exit:
 	return ret;
 }
 
-static int ov7251_entity_init_cfg(struct v4l2_subdev *subdev,
-				  struct v4l2_subdev_state *sd_state)
+static int ov7251_init_state(struct v4l2_subdev *subdev,
+			     struct v4l2_subdev_state *sd_state)
 {
 	struct v4l2_subdev_format fmt = {
 		.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY
@@ -1340,9 +1342,11 @@ static int ov7251_s_stream(struct v4l2_subdev *subdev, int enable)
 	mutex_lock(&ov7251->lock);
 
 	if (enable) {
-		ret = pm_runtime_get_sync(ov7251->dev);
-		if (ret < 0)
-			goto err_power_down;
+		ret = pm_runtime_resume_and_get(ov7251->dev);
+		if (ret) {
+			mutex_unlock(&ov7251->lock);
+			return ret;
+		}
 
 		ret = ov7251_pll_configure(ov7251);
 		if (ret) {
@@ -1439,7 +1443,6 @@ static const struct v4l2_subdev_video_ops ov7251_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops ov7251_subdev_pad_ops = {
-	.init_cfg = ov7251_entity_init_cfg,
 	.enum_mbus_code = ov7251_enum_mbus_code,
 	.enum_frame_size = ov7251_enum_frame_size,
 	.enum_frame_interval = ov7251_enum_frame_ival,
@@ -1451,6 +1454,10 @@ static const struct v4l2_subdev_pad_ops ov7251_subdev_pad_ops = {
 static const struct v4l2_subdev_ops ov7251_subdev_ops = {
 	.video = &ov7251_video_ops,
 	.pad = &ov7251_subdev_pad_ops,
+};
+
+static const struct v4l2_subdev_internal_ops ov7251_internal_ops = {
+	.init_state = ov7251_init_state,
 };
 
 static int ov7251_check_hwcfg(struct ov7251 *ov7251)
@@ -1675,7 +1682,7 @@ static int ov7251_probe(struct i2c_client *client)
 		return PTR_ERR(ov7251->analog_regulator);
 	}
 
-	ov7251->enable_gpio = devm_gpiod_get(dev, "enable", GPIOD_OUT_HIGH);
+	ov7251->enable_gpio = devm_gpiod_get(dev, "enable", GPIOD_OUT_LOW);
 	if (IS_ERR(ov7251->enable_gpio)) {
 		dev_err(dev, "cannot get enable gpio\n");
 		return PTR_ERR(ov7251->enable_gpio);
@@ -1691,6 +1698,7 @@ static int ov7251_probe(struct i2c_client *client)
 	}
 
 	v4l2_i2c_subdev_init(&ov7251->sd, client, &ov7251_subdev_ops);
+	ov7251->sd.internal_ops = &ov7251_internal_ops;
 	ov7251->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	ov7251->pad.flags = MEDIA_PAD_FL_SOURCE;
 	ov7251->sd.dev = &client->dev;
@@ -1748,7 +1756,7 @@ static int ov7251_probe(struct i2c_client *client)
 		goto free_entity;
 	}
 
-	ov7251_entity_init_cfg(&ov7251->sd, NULL);
+	ov7251_init_state(&ov7251->sd, NULL);
 
 	return 0;
 

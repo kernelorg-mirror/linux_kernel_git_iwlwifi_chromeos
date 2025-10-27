@@ -41,6 +41,7 @@
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_probe_helper.h>
+#include <drm/drm_panel.h>
 #include <drm/drm_rect.h>
 #include <drm/drm_vblank.h>
 #include <drm/drm_vblank_work.h>
@@ -369,6 +370,9 @@ struct intel_vbt_panel_data {
 };
 
 struct intel_panel {
+	/* Simple drm_panel */
+	struct drm_panel *base;
+
 	/* Fixed EDID for eDP and LVDS. May hold ERR_PTR for invalid EDID. */
 	const struct drm_edid *fixed_edid;
 
@@ -703,6 +707,8 @@ struct intel_atomic_state {
 	struct i915_sw_fence commit_ready;
 
 	struct llist_node freed;
+
+	struct work_struct cleanup_work;
 };
 
 struct intel_plane_state {
@@ -2039,6 +2045,19 @@ static inline bool intel_encoder_is_dp(struct intel_encoder *encoder)
 	case INTEL_OUTPUT_DDI:
 		/* Skip pure HDMI/DVI DDI encoders */
 		return i915_mmio_reg_valid(enc_to_intel_dp(encoder)->output_reg);
+	default:
+		return false;
+	}
+}
+
+static inline bool intel_encoder_is_hdmi(struct intel_encoder *encoder)
+{
+	switch (encoder->type) {
+	case INTEL_OUTPUT_HDMI:
+		return true;
+	case INTEL_OUTPUT_DDI:
+		/* See if the HDMI encoder is valid. */
+		return i915_mmio_reg_valid(enc_to_intel_hdmi(encoder)->hdmi_reg);
 	default:
 		return false;
 	}

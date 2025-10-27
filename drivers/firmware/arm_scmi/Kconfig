@@ -55,6 +55,20 @@ config ARM_SCMI_RAW_MODE_SUPPORT_COEX
 	  operate normally, thing which could make an SCMI test suite using the
 	  SCMI Raw mode support unreliable. If unsure, say N.
 
+config ARM_SCMI_DEBUG_COUNTERS
+	bool "Enable SCMI communication debug metrics tracking"
+	select ARM_SCMI_NEED_DEBUGFS
+	depends on DEBUG_FS
+	default n
+	help
+	  Enables tracking of some key communication metrics for debug
+	  purposes. It may track metrics like how many messages were sent
+	  or received, were there any failures, what kind of failures, ..etc.
+
+	  Enable this option to create a new debugfs directory which contains
+	  such useful debug counters. This can be helpful for debugging and
+	  SCMI monitoring.
+
 config ARM_SCMI_HAVE_TRANSPORT
 	bool
 	help
@@ -193,4 +207,12 @@ config ARM_SCMI_POWER_CONTROL
 	  called scmi_power_control. Note this may needed early in boot to catch
 	  early shutdown/reboot SCMI requests.
 
+config MTK_TINYSYS_SCMI
+	tristate "Specify TINYSYS SCMI Interface Support"
+	depends on ARM_SCMI_PROTOCOL || (COMPILE_TEST && OF)
+	help
+	  TINYSYS SCMI is for MediaTek in-house power protocol
+	  Set Y to enable this feature.
+          Set N to disable this feature.
+	  If unsure, set N to stay with legancy feature.
 endmenu
