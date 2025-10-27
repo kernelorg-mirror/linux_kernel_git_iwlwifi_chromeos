@@ -566,7 +566,7 @@ static int mtk_vdec_s_ctrl(struct v4l2_ctrl *ctrl)
 		mtk_v4l2_vdec_dbg(3, ctx, "get secure handle: %d => 0x%x", sec_fd, ctrl->val);
 		break;
 	case V4L2_CID_MPEG_MTK_SET_SECURE_MODE:
-		if (!ctx->is_secure_playback) {
+		if (ctrl->val && !ctx->is_secure_playback) {
 			ret = mtk_vcodec_dec_optee_open(ctx->dev->optee_private);
 			if (ret) {
 				mtk_v4l2_vdec_err(ctx, "Failed to open decoder optee os");
@@ -759,9 +759,8 @@ static void mtk_vcodec_dec_reset_controls(struct v4l2_ctrl_config *cfg,
 static int mtk_vcodec_dec_ctrls_setup(struct mtk_vcodec_dec_ctx *ctx)
 {
 	unsigned int i;
-	struct v4l2_ctrl *ctrl;
 
-	v4l2_ctrl_handler_init(&ctx->ctrl_hdl, NUM_CTRLS + 2);
+	v4l2_ctrl_handler_init(&ctx->ctrl_hdl, NUM_CTRLS);
 	if (ctx->ctrl_hdl.error) {
 		mtk_v4l2_vdec_err(ctx, "v4l2_ctrl_handler_init failed\n");
 		return ctx->ctrl_hdl.error;
@@ -779,11 +778,6 @@ static int mtk_vcodec_dec_ctrls_setup(struct mtk_vcodec_dec_ctx *ctx)
 			return ctx->ctrl_hdl.error;
 		}
 	}
-
-	ctrl = v4l2_ctrl_new_std(&ctx->ctrl_hdl, &mtk_vcodec_dec_ctrl_ops,
-				 V4L2_CID_MPEG_MTK_GET_SECURE_HANDLE, 0, 65535, 1 , 0);
-	ctrl = v4l2_ctrl_new_std(&ctx->ctrl_hdl, &mtk_vcodec_dec_ctrl_ops,
-				 V4L2_CID_MPEG_MTK_SET_SECURE_MODE, 0, 65535, 1 , 0);
 
 	v4l2_ctrl_handler_setup(&ctx->ctrl_hdl);
 

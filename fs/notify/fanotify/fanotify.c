@@ -234,8 +234,10 @@ static int fanotify_get_response(struct fsnotify_group *group,
 
 	pr_debug("%s: group=%p event=%p\n", __func__, group, event);
 
-	ret = wait_event_killable(group->fanotify_data.access_waitq,
-				  event->state == FAN_EVENT_ANSWERED);
+	ret = wait_event_state(group->fanotify_data.access_waitq,
+				  event->state == FAN_EVENT_ANSWERED,
+				  (TASK_KILLABLE|TASK_FREEZABLE));
+
 	/* Signal pending? */
 	if (ret < 0) {
 		spin_lock(&group->notification_lock);
@@ -941,8 +943,10 @@ static int fanotify_handle_event(struct fsnotify_group *group, u32 mask,
 	if (FAN_GROUP_FLAG(group, FANOTIFY_FID_BITS)) {
 		fsid = fanotify_get_fsid(iter_info);
 		/* Racing with mark destruction or creation? */
-		if (!fsid.val[0] && !fsid.val[1])
-			return 0;
+		if (!fsid.val[0] && !fsid.val[1]) {
+			ret = 0;
+			goto finish;
+		}
 	}
 
 	event = fanotify_alloc_event(group, mask, data, data_type, dir,

@@ -129,6 +129,7 @@ int cfg80211_dev_rename(struct cfg80211_registered_device *rdev,
 	int result;
 
 	ASSERT_RTNL();
+	lockdep_assert_wiphy(&rdev->wiphy);
 
 	/* Ignore nop renames */
 	if (strcmp(newname, wiphy_name(&rdev->wiphy)) == 0)
@@ -195,6 +196,8 @@ int cfg80211_switch_netns(struct cfg80211_registered_device *rdev,
 			continue;
 		nl80211_notify_iface(rdev, wdev, NL80211_CMD_DEL_INTERFACE);
 	}
+
+	wiphy_lock(&rdev->wiphy);
 	nl80211_notify_wiphy(rdev, NL80211_CMD_DEL_WIPHY);
 
 	wiphy_net_set(&rdev->wiphy, net);
@@ -203,6 +206,8 @@ int cfg80211_switch_netns(struct cfg80211_registered_device *rdev,
 	WARN_ON(err);
 
 	nl80211_notify_wiphy(rdev, NL80211_CMD_NEW_WIPHY);
+	wiphy_unlock(&rdev->wiphy);
+
 	list_for_each_entry(wdev, &rdev->wiphy.wdev_list, list) {
 		if (!wdev->netdev)
 			continue;
@@ -546,6 +551,9 @@ use_default_name:
 	INIT_WORK(&rdev->mgmt_registrations_update_wk,
 		  cfg80211_mgmt_registrations_update_wk);
 	spin_lock_init(&rdev->mgmt_registrations_lock);
+	INIT_WORK(&rdev->wiphy_work, cfg80211_wiphy_work);
+	INIT_LIST_HEAD(&rdev->wiphy_work_list);
+	spin_lock_init(&rdev->wiphy_work_lock);
 
 #ifdef CONFIG_CFG80211_DEFAULT_PS
 	rdev->wiphy.flags |= WIPHY_FLAG_PS_ON_BY_DEFAULT;
@@ -563,9 +571,6 @@ use_default_name:
 		return NULL;
 	}
 
-	INIT_WORK(&rdev->wiphy_work, cfg80211_wiphy_work);
-	INIT_LIST_HEAD(&rdev->wiphy_work_list);
-	spin_lock_init(&rdev->wiphy_work_lock);
 	INIT_WORK(&rdev->rfkill_block, cfg80211_rfkill_block_work);
 	INIT_WORK(&rdev->conn_work, cfg80211_conn_work);
 	INIT_WORK(&rdev->event_work, cfg80211_event_work);
@@ -958,8 +963,10 @@ int wiphy_register(struct wiphy *wiphy)
 	rdev->wiphy.features |= NL80211_FEATURE_SCAN_FLUSH;
 
 	rtnl_lock();
+	wiphy_lock(&rdev->wiphy);
 	res = device_add(&rdev->wiphy.dev);
 	if (res) {
+		wiphy_unlock(&rdev->wiphy);
 		rtnl_unlock();
 		return res;
 	}
@@ -973,6 +980,7 @@ int wiphy_register(struct wiphy *wiphy)
 
 	cfg80211_debugfs_rdev_add(rdev);
 	nl80211_notify_wiphy(rdev, NL80211_CMD_NEW_WIPHY);
+	wiphy_unlock(&rdev->wiphy);
 
 	/* set up regulatory info */
 	wiphy_regulatory_register(wiphy);
@@ -1146,6 +1154,13 @@ void cfg80211_dev_free(struct cfg80211_registered_device *rdev)
 {
 	struct cfg80211_internal_bss *scan, *tmp;
 	struct cfg80211_beacon_registration *reg, *treg;
+	unsigned long flags;
+
+	spin_lock_irqsave(&rdev->wiphy_work_lock, flags);
+	WARN_ON(!list_empty(&rdev->wiphy_work_list));
+	spin_unlock_irqrestore(&rdev->wiphy_work_lock, flags);
+	cancel_work_sync(&rdev->wiphy_work);
+
 	rfkill_destroy(rdev->wiphy.rfkill);
 	list_for_each_entry_safe(reg, treg, &rdev->beacon_registrations, list) {
 		list_del(&reg->list);
@@ -1228,6 +1243,7 @@ static void _cfg80211_unregister_wdev(struct wireless_dev *wdev,
 	/* deleted from the list, so can't be found from nl80211 any more */
 	cqm_config = rcu_access_pointer(wdev->cqm_config);
 	kfree_rcu(cqm_config, rcu_head);
+	RCU_INIT_POINTER(wdev->cqm_config, NULL);
 
 	/*
 	 * Ensure that all events have been processed and
