@@ -215,6 +215,8 @@ int snd_card_new(struct device *parent, int idx, const char *xid,
 	mutex_init(&card->memory_mutex);
 #ifdef CONFIG_PM
 	init_waitqueue_head(&card->power_sleep);
+	init_waitqueue_head(&card->power_ref_sleep);
+	atomic_set(&card->power_ref, 0);
 #endif
 	init_waitqueue_head(&card->remove_sleep);
 	card->sync_irq = -1;
@@ -431,6 +433,7 @@ int snd_card_disconnect(struct snd_card *card)
 
 #ifdef CONFIG_PM
 	wake_up(&card->power_sleep);
+	snd_power_sync_ref(card);
 #endif
 	return 0;	
 }
@@ -532,13 +535,19 @@ int snd_card_free(struct snd_card *card)
 }
 EXPORT_SYMBOL(snd_card_free);
 
+/* check, if the character is in the valid ASCII range */
+static inline bool safe_ascii_char(char c)
+{
+	return isascii(c) && isalnum(c);
+}
+
 /* retrieve the last word of shortname or longname */
 static const char *retrieve_id_from_card_name(const char *name)
 {
 	const char *spos = name;
 
 	while (*name) {
-		if (isspace(*name) && isalnum(name[1]))
+		if (isspace(*name) && safe_ascii_char(name[1]))
 			spos = name + 1;
 		name++;
 	}
@@ -565,12 +574,12 @@ static void copy_valid_id_string(struct snd_card *card, const char *src,
 {
 	char *id = card->id;
 
-	while (*nid && !isalnum(*nid))
+	while (*nid && !safe_ascii_char(*nid))
 		nid++;
 	if (isdigit(*nid))
 		*id++ = isalpha(*src) ? *src : 'D';
 	while (*nid && (size_t)(id - card->id) < sizeof(card->id) - 1) {
-		if (isalnum(*nid))
+		if (safe_ascii_char(*nid))
 			*id++ = *nid;
 		nid++;
 	}
@@ -668,7 +677,7 @@ card_id_store_attr(struct device *dev, struct device_attribute *attr,
 
 	for (idx = 0; idx < copy; idx++) {
 		c = buf[idx];
-		if (!isalnum(c) && c != '_' && c != '-')
+		if (!safe_ascii_char(c) && c != '_' && c != '-')
 			return -EINVAL;
 	}
 	memcpy(buf1, buf, copy);
@@ -987,21 +996,28 @@ EXPORT_SYMBOL(snd_card_file_remove);
 
 #ifdef CONFIG_PM
 /**
- *  snd_power_wait - wait until the power-state is changed.
- *  @card: soundcard structure
- *  @power_state: expected power state
+ * snd_power_ref_and_wait - wait until the card gets powered up
+ * @card: soundcard structure
  *
- *  Waits until the power-state is changed.
+ * Take the power_ref reference count of the given card, and
+ * wait until the card gets powered up to SNDRV_CTL_POWER_D0 state.
+ * The refcount is down again while sleeping until power-up, hence this
+ * function can be used for syncing the floating control ops accesses,
+ * typically around calling control ops.
  *
- *  Return: Zero if successful, or a negative error code.
+ * The caller needs to pull down the refcount via snd_power_unref() later
+ * no matter whether the error is returned from this function or not.
+ *
+ * Return: Zero if successful, or a negative error code.
  */
-int snd_power_wait(struct snd_card *card, unsigned int power_state)
+int snd_power_ref_and_wait(struct snd_card *card)
 {
 	wait_queue_entry_t wait;
 	int result = 0;
 
+	snd_power_ref(card);
 	/* fastpath */
-	if (snd_power_get_state(card) == power_state)
+	if (snd_power_get_state(card) == SNDRV_CTL_POWER_D0)
 		return 0;
 	init_waitqueue_entry(&wait, current);
 	add_wait_queue(&card->power_sleep, &wait);
@@ -1010,13 +1026,33 @@ int snd_power_wait(struct snd_card *card, unsigned int power_state)
 			result = -ENODEV;
 			break;
 		}
-		if (snd_power_get_state(card) == power_state)
+		if (snd_power_get_state(card) == SNDRV_CTL_POWER_D0)
 			break;
+		snd_power_unref(card);
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(30 * HZ);
+		snd_power_ref(card);
 	}
 	remove_wait_queue(&card->power_sleep, &wait);
 	return result;
+}
+EXPORT_SYMBOL_GPL(snd_power_ref_and_wait);
+
+/**
+ * snd_power_wait - wait until the card gets powered up (old form)
+ * @card: soundcard structure
+ *
+ * Wait until the card gets powered up to SNDRV_CTL_POWER_D0 state.
+ *
+ * Return: Zero if successful, or a negative error code.
+ */
+int snd_power_wait(struct snd_card *card)
+{
+	int ret;
+
+	ret = snd_power_ref_and_wait(card);
+	snd_power_unref(card);
+	return ret;
 }
 EXPORT_SYMBOL(snd_power_wait);
 #endif /* CONFIG_PM */

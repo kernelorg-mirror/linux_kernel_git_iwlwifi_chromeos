@@ -694,6 +694,7 @@ void fuse_conn_put(struct fuse_conn *fc)
 	if (refcount_dec_and_test(&fc->count)) {
 		struct fuse_iqueue *fiq = &fc->iq;
 
+		terminate_fuse_watchdog(fc);
 		if (IS_ENABLED(CONFIG_FUSE_DAX))
 			fuse_dax_conn_free(fc);
 		if (fiq->ops->release)
@@ -1035,6 +1036,8 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_args *args,
 	if (!ok) {
 		fc->conn_init = 0;
 		fc->conn_error = 1;
+	} else {
+		init_fuse_watchdog(fc);
 	}
 
 	fuse_set_initialized(fc);
@@ -1078,6 +1081,8 @@ void fuse_send_init(struct fuse_conn *fc)
 	ia->args.force = true;
 	ia->args.nocreds = true;
 	ia->args.end = process_init_reply;
+
+	fuse_print_conn_mounts(fc, "init connection");
 
 	if (fuse_simple_background(fc, &ia->args, GFP_KERNEL) != 0)
 		process_init_reply(fc, &ia->args, -ENOTCONN);
