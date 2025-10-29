@@ -432,35 +432,6 @@ static ssize_t coredump_store(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_WO(coredump);
 
-static ssize_t coredump_disabled_show(struct device *dev,
-				      struct device_attribute *attr,
-				      char *buf)
-{
-	return sysfs_emit(buf, "%d\n", dev->coredump_disabled);
-}
-
-static ssize_t coredump_disabled_store(struct device *dev,
-				       struct device_attribute *attr,
-				       const char *buf, size_t count)
-{
-	bool disabled;
-
-	if (kstrtobool(buf, &disabled) < 0)
-		return -EINVAL;
-
-	dev->coredump_disabled = disabled;
-
-	return count;
-}
-static DEVICE_ATTR_RW(coredump_disabled);
-
-static struct attribute *dev_coredump_attrs[] = {
-	&dev_attr_coredump.attr,
-	&dev_attr_coredump_disabled.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(dev_coredump);
-
 static int driver_sysfs_add(struct device *dev)
 {
 	int ret;
@@ -480,7 +451,7 @@ static int driver_sysfs_add(struct device *dev)
 	if (!IS_ENABLED(CONFIG_DEV_COREDUMP) || !dev->driver->coredump)
 		return 0;
 
-	ret = device_add_groups(dev, dev_coredump_groups);
+	ret = device_create_file(dev, &dev_attr_coredump);
 	if (!ret)
 		return 0;
 
@@ -500,7 +471,7 @@ static void driver_sysfs_remove(struct device *dev)
 
 	if (drv) {
 		if (drv->coredump)
-			device_remove_groups(dev, dev_coredump_groups);
+			device_remove_file(dev, &dev_attr_coredump);
 		sysfs_remove_link(&drv->p->kobj, kobject_name(&dev->kobj));
 		sysfs_remove_link(&dev->kobj, "driver");
 	}
@@ -579,7 +550,7 @@ static void device_unbind_cleanup(struct device *dev)
 	arch_teardown_dma_ops(dev);
 	kfree(dev->dma_range_map);
 	dev->dma_range_map = NULL;
-	dev->driver = NULL;
+	device_set_driver(dev, NULL);
 	dev_set_drvdata(dev, NULL);
 	if (dev->pm_domain && dev->pm_domain->dismiss)
 		dev->pm_domain->dismiss(dev);
@@ -658,8 +629,7 @@ static int really_probe(struct device *dev, const struct device_driver *drv)
 	}
 
 re_probe:
-	// FIXME - this cast should not be needed "soon"
-	dev->driver = (struct device_driver *)drv;
+	device_set_driver(dev, drv);
 
 	/* If using pinctrl, bind pins now before probing */
 	ret = pinctrl_bind_pins(dev);
@@ -1044,7 +1014,7 @@ static int __device_attach(struct device *dev, bool allow_async)
 		if (ret == 0)
 			ret = 1;
 		else {
-			dev->driver = NULL;
+			device_set_driver(dev, NULL);
 			ret = 0;
 		}
 	} else {

@@ -496,6 +496,7 @@ struct dpm_watchdog {
 	struct device		*dev;
 	struct task_struct	*tsk;
 	struct timer_list	timer;
+	bool			fatal;
 };
 
 #define DECLARE_DPM_WATCHDOG_ON_STACK(wd) \
@@ -512,11 +513,23 @@ struct dpm_watchdog {
 static void dpm_watchdog_handler(struct timer_list *t)
 {
 	struct dpm_watchdog *wd = from_timer(wd, t, timer);
+	struct timer_list *timer = &wd->timer;
+	unsigned int time_left;
 
-	dev_emerg(wd->dev, "**** DPM device timeout ****\n");
-	show_stack(wd->tsk, NULL, KERN_EMERG);
-	panic("%s %s: unrecoverable failure\n",
-		dev_driver_string(wd->dev), dev_name(wd->dev));
+	if (wd->fatal) {
+		dev_emerg(wd->dev, "**** DPM device timeout ****\n");
+		show_stack(wd->tsk, NULL, KERN_EMERG);
+		panic("%s %s: unrecoverable failure\n",
+			dev_driver_string(wd->dev), dev_name(wd->dev));
+	}
+
+	time_left = CONFIG_DPM_WATCHDOG_TIMEOUT - CONFIG_DPM_WATCHDOG_WARNING_TIMEOUT;
+	dev_warn(wd->dev, "**** DPM device timeout after %u seconds; %u seconds until panic ****\n",
+		 CONFIG_DPM_WATCHDOG_WARNING_TIMEOUT, time_left);
+	show_stack(wd->tsk, NULL, KERN_WARNING);
+
+	wd->fatal = true;
+	mod_timer(timer, jiffies + HZ * time_left);
 }
 
 /**
@@ -530,10 +543,11 @@ static void dpm_watchdog_set(struct dpm_watchdog *wd, struct device *dev)
 
 	wd->dev = dev;
 	wd->tsk = current;
+	wd->fatal = CONFIG_DPM_WATCHDOG_TIMEOUT == CONFIG_DPM_WATCHDOG_WARNING_TIMEOUT;
 
 	timer_setup_on_stack(timer, dpm_watchdog_handler, 0);
 	/* use same timeout value for both suspend and resume */
-	timer->expires = jiffies + HZ * CONFIG_DPM_WATCHDOG_TIMEOUT;
+	timer->expires = jiffies + HZ * CONFIG_DPM_WATCHDOG_WARNING_TIMEOUT;
 	add_timer(timer);
 }
 
@@ -913,6 +927,11 @@ static void device_resume(struct device *dev, pm_message_t state, bool async)
 	if (dev->power.syscore)
 		goto Complete;
 
+	if (!dev->power.is_suspended)
+		goto Complete;
+
+	dev->power.is_suspended = false;
+
 	if (dev->power.direct_complete) {
 		/* Match the pm_runtime_disable() in __device_suspend(). */
 		pm_runtime_enable(dev);
@@ -930,9 +949,6 @@ static void device_resume(struct device *dev, pm_message_t state, bool async)
 	 * a resumed device, even if the device hasn't been completed yet.
 	 */
 	dev->power.is_prepared = false;
-
-	if (!dev->power.is_suspended)
-		goto Unlock;
 
 	if (dev->pm_domain) {
 		info = "power domain ";
@@ -971,9 +987,7 @@ static void device_resume(struct device *dev, pm_message_t state, bool async)
 
  End:
 	error = dpm_run_callback(callback, dev, state, info);
-	dev->power.is_suspended = false;
 
- Unlock:
 	device_unlock(dev);
 	dpm_watchdog_clear(&wd);
 
@@ -1254,14 +1268,13 @@ Skip:
 	dev->power.is_noirq_suspended = true;
 
 	/*
-	 * Skipping the resume of devices that were in use right before the
-	 * system suspend (as indicated by their PM-runtime usage counters)
-	 * would be suboptimal.  Also resume them if doing that is not allowed
-	 * to be skipped.
+	 * Devices must be resumed unless they are explicitly allowed to be left
+	 * in suspend, but even in that case skipping the resume of devices that
+	 * were in use right before the system suspend (as indicated by their
+	 * runtime PM usage counters and child counters) would be suboptimal.
 	 */
-	if (atomic_read(&dev->power.usage_count) > 1 ||
-	    !(dev_pm_test_driver_flags(dev, DPM_FLAG_MAY_SKIP_RESUME) &&
-	      dev->power.may_skip_resume))
+	if (!(dev_pm_test_driver_flags(dev, DPM_FLAG_MAY_SKIP_RESUME) &&
+	      dev->power.may_skip_resume) || !pm_runtime_need_not_resume(dev))
 		dev->power.must_resume = true;
 
 	if (dev->power.must_resume)
@@ -1628,6 +1641,7 @@ static int device_suspend(struct device *dev, pm_message_t state, bool async)
 			pm_runtime_disable(dev);
 			if (pm_runtime_status_suspended(dev)) {
 				pm_dev_dbg(dev, state, "direct-complete ");
+				dev->power.is_suspended = true;
 				goto Complete;
 			}
 
