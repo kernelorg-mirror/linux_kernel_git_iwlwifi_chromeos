@@ -2467,14 +2467,14 @@ struct ec_response_motion_sensor_data {
 	uint8_t sensor_num;
 	/* Each sensor is up to 3-axis. */
 	union {
-		int16_t                                  data[3];
+		int16_t             data[3];
 		struct __ec_todo_packed {
-			uint16_t                         reserved;
-			uint32_t                         timestamp;
+			uint16_t    reserved;
+			uint32_t    timestamp;
 		};
 		struct __ec_todo_unpacked {
 			struct ec_response_activity_data activity_data;
-			int16_t                          add_info[2];
+			int16_t     add_info[2];
 		};
 	};
 } __ec_todo_packed;
@@ -2737,9 +2737,7 @@ struct ec_params_motion_sense {
 			int16_t hys_degree;
 		} tablet_mode_threshold;
 
-		/*
-		 * Used for MOTIONSENSE_CMD_GET_ACTIVITY.
-		 */
+		/* Used for MOTIONSENSE_CMD_GET_ACTIVITY */
 		struct __ec_todo_unpacked {
 			uint8_t sensor_num;
 			uint8_t activity;  /* enum motionsensor_activity */
@@ -5076,9 +5074,12 @@ struct ec_response_pd_status {
 #define PD_EVENT_POWER_CHANGE      BIT(1)
 #define PD_EVENT_IDENTITY_RECEIVED BIT(2)
 #define PD_EVENT_DATA_SWAP         BIT(3)
+#define PD_EVENT_TYPEC             BIT(4)
 #define PD_EVENT_PPM               BIT(5)
+#define PD_EVENT_INIT              BIT(6)
+
 struct ec_response_host_event_status {
-	uint32_t status;      /* PD MCU host event status */
+	uint32_t status; /* PD MCU host event status */
 } __ec_align4;
 
 /* Set USB type-C port role and muxes */
@@ -6139,8 +6140,12 @@ struct ec_response_typec_vdm_response {
 #undef VDO_MAX_SIZE
 
 /*
- * Read/write interface for UCSI OPM <-> PPM communication.
+ * UCSI OPM-PPM commands
+ *
+ * These commands are used for communication between OPM and PPM.
+ * Only UCSI3.0 is tested.
  */
+
 #define EC_CMD_UCSI_PPM_SET 0x0140
 
 /* The data size is stored in the host command protocol header. */
@@ -6151,6 +6156,7 @@ struct ec_params_ucsi_ppm_set {
 
 #define EC_CMD_UCSI_PPM_GET 0x0141
 
+/* For 'GET' sub-commands, data will be returned as a raw payload. */
 struct ec_params_ucsi_ppm_get {
 	uint16_t offset;
 	uint8_t size;

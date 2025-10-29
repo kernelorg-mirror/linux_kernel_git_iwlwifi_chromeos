@@ -12,6 +12,7 @@
 #include "fw.h"
 #include "ps.h"
 #include "debug.h"
+#include "mac.h"
 
 static bool rtw_disable_msi;
 static bool rtw_pci_disable_aspm;
@@ -1602,6 +1603,7 @@ static struct rtw_hci_ops rtw_pci_ops = {
 	.link_ps = rtw_pci_link_ps,
 	.interface_cfg = rtw_pci_interface_cfg,
 	.dynamic_rx_agg = NULL,
+	.write_firmware_page = rtw_write_firmware_page,
 
 	.read8 = rtw_pci_read8,
 	.read16 = rtw_pci_read16,
@@ -1704,6 +1706,43 @@ static void rtw_pci_napi_deinit(struct rtw_dev *rtwdev)
 	netif_napi_del(&rtwpci->napi);
 	free_netdev(rtwpci->netdev);
 }
+
+static pci_ers_result_t rtw_pci_io_err_detected(struct pci_dev *pdev,
+						pci_channel_state_t state)
+{
+	struct net_device *netdev = pci_get_drvdata(pdev);
+
+	netif_device_detach(netdev);
+
+	return PCI_ERS_RESULT_NEED_RESET;
+}
+
+static pci_ers_result_t rtw_pci_io_slot_reset(struct pci_dev *pdev)
+{
+	struct ieee80211_hw *hw = pci_get_drvdata(pdev);
+	struct rtw_dev *rtwdev = hw->priv;
+
+	rtw_fw_recovery(rtwdev);
+
+	return PCI_ERS_RESULT_RECOVERED;
+}
+
+static void rtw_pci_io_resume(struct pci_dev *pdev)
+{
+	struct net_device *netdev = pci_get_drvdata(pdev);
+
+	/* ack any pending wake events, disable PME */
+	pci_enable_wake(pdev, PCI_D0, 0);
+
+	netif_device_attach(netdev);
+}
+
+const struct pci_error_handlers rtw_pci_err_handler = {
+	.error_detected = rtw_pci_io_err_detected,
+	.slot_reset = rtw_pci_io_slot_reset,
+	.resume = rtw_pci_io_resume,
+};
+EXPORT_SYMBOL(rtw_pci_err_handler);
 
 int rtw_pci_probe(struct pci_dev *pdev,
 		  const struct pci_device_id *id)

@@ -578,8 +578,8 @@ static void CalculateBytePerPixelAndBlockSizes(
 {
 	*BytePerPixelDETY = 0;
 	*BytePerPixelDETC = 0;
-	*BytePerPixelY = 0;
-	*BytePerPixelC = 0;
+	*BytePerPixelY = 1;
+	*BytePerPixelC = 1;
 
 	if (SourcePixelFormat == dml2_444_64) {
 		*BytePerPixelDETY = 8;
@@ -2765,7 +2765,7 @@ static double dml_get_return_bandwidth_available(
 	return return_bw_mbps;
 }
 
-static void calculate_bandwidth_available(
+static noinline_for_stack void calculate_bandwidth_available(
 	double avg_bandwidth_available_min[dml2_core_internal_soc_state_max],
 	double avg_bandwidth_available[dml2_core_internal_soc_state_max][dml2_core_internal_bw_max],
 	double urg_bandwidth_available_min[dml2_core_internal_soc_state_max], // min between SDP and DRAM
@@ -3518,7 +3518,7 @@ static void CalculateUrgentBurstFactor(
 
 }
 
-static void CalculateDCFCLKDeepSleep(
+static noinline_for_stack void CalculateDCFCLKDeepSleep(
 	const struct dml2_display_cfg *display_cfg,
 	unsigned int NumberOfActiveSurfaces,
 	unsigned int BytePerPixelY[],
@@ -3630,13 +3630,12 @@ static unsigned int CalculateMaxVStartup(
 	double line_time_us = (double)timing->h_total / ((double)timing->pixel_clock_khz / 1000);
 	unsigned int vblank_actual = timing->v_total - timing->v_active;
 	unsigned int vblank_nom_default_in_line = (unsigned int)math_floor2((double)vblank_nom_default_us / line_time_us, 1.0);
-	unsigned int vblank_nom_input = (unsigned int)math_min2(timing->vblank_nom, vblank_nom_default_in_line);
-	unsigned int vblank_avail = (vblank_nom_input == 0) ? vblank_nom_default_in_line : vblank_nom_input;
+	unsigned int vblank_avail = (timing->vblank_nom == 0) ? vblank_nom_default_in_line : (unsigned int)timing->vblank_nom;
 
 	vblank_size = (unsigned int)math_min2(vblank_actual, vblank_avail);
 
 	if (timing->interlaced && !ptoi_supported)
-		max_vstartup_lines = (unsigned int)(math_floor2(vblank_size / 2.0, 1.0));
+		max_vstartup_lines = (unsigned int)(math_floor2((vblank_size - 1) / 2.0, 1.0));
 	else
 		max_vstartup_lines = vblank_size - (unsigned int)math_max2(1.0, math_ceil2(write_back_delay_us / line_time_us, 1.0));
 #ifdef __DML_VBA_DEBUG__
@@ -4058,7 +4057,7 @@ static bool ValidateODMMode(enum dml2_odm_mode ODMMode,
 	return true;
 }
 
-static void CalculateODMMode(
+static noinline_for_stack void CalculateODMMode(
 	unsigned int MaximumPixelsPerLinePerDSCUnit,
 	unsigned int HActive,
 	enum dml2_output_format_class OutFormat,
@@ -4155,7 +4154,7 @@ static void CalculateODMMode(
 #endif
 }
 
-static void CalculateOutputLink(
+static noinline_for_stack void CalculateOutputLink(
 	struct dml2_core_internal_scratch *s,
 	double PHYCLK,
 	double PHYCLKD18,
@@ -4652,7 +4651,10 @@ static void calculate_tdlut_setting(
 	//the tdlut is fetched during the 2 row times of prefetch.
 	if (p->setup_for_tdlut) {
 		*p->tdlut_groups_per_2row_ub = (unsigned int)math_ceil2((double) *p->tdlut_bytes_per_frame / *p->tdlut_bytes_per_group, 1);
-		*p->tdlut_opt_time = (*p->tdlut_bytes_per_frame - p->cursor_buffer_size * 1024) / tdlut_drain_rate;
+		if (*p->tdlut_bytes_per_frame > p->cursor_buffer_size * 1024)
+			*p->tdlut_opt_time = (*p->tdlut_bytes_per_frame - p->cursor_buffer_size * 1024) / tdlut_drain_rate;
+		else
+			*p->tdlut_opt_time = 0;
 		*p->tdlut_drain_time = p->cursor_buffer_size * 1024 / tdlut_drain_rate;
 	}
 
@@ -6719,7 +6721,7 @@ static void calculate_bytes_to_fetch_required_to_hide_latency(
 	}
 }
 
-static void calculate_vactive_det_fill_latency(
+static noinline_for_stack void calculate_vactive_det_fill_latency(
 		const struct dml2_display_cfg *display_cfg,
 		unsigned int num_active_planes,
 		unsigned int bytes_required_l[],

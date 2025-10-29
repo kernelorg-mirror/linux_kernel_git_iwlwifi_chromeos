@@ -22,6 +22,7 @@
 #include <linux/platform_data/cros_ec_proto.h>
 #include <linux/platform_device.h>
 #include <linux/poll.h>
+#include <linux/revocable.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
@@ -31,18 +32,14 @@
 /* Arbitrary bounded size for the event queue */
 #define CROS_MAX_EVENT_LEN	PAGE_SIZE
 
-struct chardev_data {
-	struct cros_ec_dev *ec_dev;
-	struct miscdevice misc;
-};
-
 struct chardev_priv {
-	struct cros_ec_dev *ec_dev;
+	struct revocable *ec_dev_rev;
 	struct notifier_block notifier;
 	wait_queue_head_t wait_event;
 	unsigned long event_mask;
 	struct list_head events;
 	size_t event_len;
+	u16 cmd_offset;
 };
 
 struct ec_event {
@@ -52,28 +49,36 @@ struct ec_event {
 	u8 data[];
 };
 
-static int ec_get_version(struct cros_ec_dev *ec, char *str, int maxlen)
+static int ec_get_version(struct chardev_priv *priv, char *str, int maxlen)
 {
 	static const char * const current_image_name[] = {
 		"unknown", "read-only", "read-write", "invalid",
 	};
 	struct ec_response_get_version *resp;
 	struct cros_ec_command *msg;
+	struct cros_ec_device *ec_dev;
 	int ret;
 
 	msg = kzalloc(sizeof(*msg) + sizeof(*resp), GFP_KERNEL);
 	if (!msg)
 		return -ENOMEM;
 
-	msg->command = EC_CMD_GET_VERSION + ec->cmd_offset;
+	msg->command = EC_CMD_GET_VERSION + priv->cmd_offset;
 	msg->insize = sizeof(*resp);
 
-	ret = cros_ec_cmd_xfer_status(ec->ec_dev, msg);
-	if (ret < 0) {
-		snprintf(str, maxlen,
-			 "Unknown EC version, returned error: %d\n",
-			 msg->result);
-		goto exit;
+	REVOCABLE(priv->ec_dev_rev, ec_dev) {
+		if (!ec_dev) {
+			ret = -ENODEV;
+			goto exit;
+		}
+
+		ret = cros_ec_cmd_xfer_status(ec_dev, msg);
+		if (ret < 0) {
+			snprintf(str, maxlen,
+				 "Unknown EC version, returned error: %d\n",
+				 msg->result);
+			goto exit;
+		}
 	}
 
 	resp = (struct ec_response_get_version *)msg->data;
@@ -96,22 +101,30 @@ static int cros_ec_chardev_mkbp_event(struct notifier_block *nb,
 {
 	struct chardev_priv *priv = container_of(nb, struct chardev_priv,
 						 notifier);
-	struct cros_ec_device *ec_dev = priv->ec_dev->ec_dev;
+	struct cros_ec_device *ec_dev;
 	struct ec_event *event;
-	unsigned long event_bit = 1 << ec_dev->event_data.event_type;
-	int total_size = sizeof(*event) + ec_dev->event_size;
+	unsigned long event_bit;
+	int total_size;
 
-	if (!(event_bit & priv->event_mask) ||
-	    (priv->event_len + total_size) > CROS_MAX_EVENT_LEN)
-		return NOTIFY_DONE;
+	REVOCABLE(priv->ec_dev_rev, ec_dev) {
+		if (!ec_dev)
+			return NOTIFY_DONE;
 
-	event = kzalloc(total_size, GFP_KERNEL);
-	if (!event)
-		return NOTIFY_DONE;
+		event_bit = 1 << ec_dev->event_data.event_type;
+		total_size = sizeof(*event) + ec_dev->event_size;
 
-	event->size = ec_dev->event_size;
-	event->event_type = ec_dev->event_data.event_type;
-	memcpy(event->data, &ec_dev->event_data.data, ec_dev->event_size);
+		if (!(event_bit & priv->event_mask) ||
+		    (priv->event_len + total_size) > CROS_MAX_EVENT_LEN)
+			return NOTIFY_DONE;
+
+		event = kzalloc(total_size, GFP_KERNEL);
+		if (!event)
+			return NOTIFY_DONE;
+
+		event->size = ec_dev->event_size;
+		event->event_type = ec_dev->event_data.event_type;
+		memcpy(event->data, &ec_dev->event_data.data, ec_dev->event_size);
+	}
 
 	spin_lock(&priv->wait_event.lock);
 	list_add_tail(&event->node, &priv->events);
@@ -161,7 +174,8 @@ out:
 static int cros_ec_chardev_open(struct inode *inode, struct file *filp)
 {
 	struct miscdevice *mdev = filp->private_data;
-	struct cros_ec_dev *ec_dev = dev_get_drvdata(mdev->parent);
+	struct cros_ec_dev *ec = dev_get_drvdata(mdev->parent);
+	struct cros_ec_device *ec_dev = ec->ec_dev;
 	struct chardev_priv *priv;
 	int ret;
 
@@ -169,20 +183,31 @@ static int cros_ec_chardev_open(struct inode *inode, struct file *filp)
 	if (!priv)
 		return -ENOMEM;
 
-	priv->ec_dev = ec_dev;
+	priv->ec_dev_rev = revocable_alloc(ec_dev->revocable_provider);
+	if (!priv->ec_dev_rev) {
+		ret = -ENOMEM;
+		goto free_priv;
+	}
+
+	priv->cmd_offset = ec->cmd_offset;
 	filp->private_data = priv;
 	INIT_LIST_HEAD(&priv->events);
 	init_waitqueue_head(&priv->wait_event);
 	nonseekable_open(inode, filp);
 
 	priv->notifier.notifier_call = cros_ec_chardev_mkbp_event;
-	ret = blocking_notifier_chain_register(&ec_dev->ec_dev->event_notifier,
+	ret = blocking_notifier_chain_register(&ec_dev->event_notifier,
 					       &priv->notifier);
 	if (ret) {
 		dev_err(ec_dev->dev, "failed to register event notifier\n");
-		kfree(priv);
+		goto free_revocable;
 	}
 
+	return 0;
+free_revocable:
+	revocable_free(priv->ec_dev_rev);
+free_priv:
+	kfree(priv);
 	return ret;
 }
 
@@ -204,7 +229,6 @@ static ssize_t cros_ec_chardev_read(struct file *filp, char __user *buffer,
 	char msg[sizeof(struct ec_response_get_version) +
 		 sizeof(CROS_EC_DEV_VERSION)];
 	struct chardev_priv *priv = filp->private_data;
-	struct cros_ec_dev *ec_dev = priv->ec_dev;
 	size_t count;
 	int ret;
 
@@ -238,7 +262,7 @@ static ssize_t cros_ec_chardev_read(struct file *filp, char __user *buffer,
 	if (*offset != 0)
 		return 0;
 
-	ret = ec_get_version(ec_dev, msg, sizeof(msg));
+	ret = ec_get_version(priv, msg, sizeof(msg));
 	if (ret)
 		return ret;
 
@@ -254,11 +278,15 @@ static ssize_t cros_ec_chardev_read(struct file *filp, char __user *buffer,
 static int cros_ec_chardev_release(struct inode *inode, struct file *filp)
 {
 	struct chardev_priv *priv = filp->private_data;
-	struct cros_ec_dev *ec_dev = priv->ec_dev;
+	struct cros_ec_device *ec_dev;
 	struct ec_event *event, *e;
 
-	blocking_notifier_chain_unregister(&ec_dev->ec_dev->event_notifier,
-					   &priv->notifier);
+	REVOCABLE(priv->ec_dev_rev, ec_dev) {
+		if (ec_dev)
+			blocking_notifier_chain_unregister(&ec_dev->event_notifier,
+							   &priv->notifier);
+	}
+	revocable_free(priv->ec_dev_rev);
 
 	list_for_each_entry_safe(event, e, &priv->events, node) {
 		list_del(&event->node);
@@ -272,10 +300,11 @@ static int cros_ec_chardev_release(struct inode *inode, struct file *filp)
 /*
  * Ioctls
  */
-static long cros_ec_chardev_ioctl_xcmd(struct cros_ec_dev *ec, void __user *arg)
+static long cros_ec_chardev_ioctl_xcmd(struct chardev_priv *priv, void __user *arg)
 {
 	struct cros_ec_command *s_cmd;
 	struct cros_ec_command u_cmd;
+	struct cros_ec_device *ec_dev;
 	long ret;
 
 	if (copy_from_user(&u_cmd, arg, sizeof(u_cmd)))
@@ -301,11 +330,18 @@ static long cros_ec_chardev_ioctl_xcmd(struct cros_ec_dev *ec, void __user *arg)
 		goto exit;
 	}
 
-	s_cmd->command += ec->cmd_offset;
-	ret = cros_ec_cmd_xfer(ec->ec_dev, s_cmd);
-	/* Only copy data to userland if data was received. */
-	if (ret < 0)
-		goto exit;
+	s_cmd->command += priv->cmd_offset;
+	REVOCABLE(priv->ec_dev_rev, ec_dev) {
+		if (!ec_dev) {
+			ret = -ENODEV;
+			goto exit;
+		}
+
+		ret = cros_ec_cmd_xfer(ec_dev, s_cmd);
+		/* Only copy data to userland if data was received. */
+		if (ret < 0)
+			goto exit;
+	}
 
 	if (copy_to_user(arg, s_cmd, sizeof(*s_cmd) + s_cmd->insize))
 		ret = -EFAULT;
@@ -314,27 +350,31 @@ exit:
 	return ret;
 }
 
-static long cros_ec_chardev_ioctl_readmem(struct cros_ec_dev *ec,
-					   void __user *arg)
+static long cros_ec_chardev_ioctl_readmem(struct chardev_priv *priv, void __user *arg)
 {
-	struct cros_ec_device *ec_dev = ec->ec_dev;
+	struct cros_ec_device *ec_dev;
 	struct cros_ec_readmem s_mem = { };
 	long num;
 
-	/* Not every platform supports direct reads */
-	if (!ec_dev->cmd_readmem)
-		return -ENOTTY;
+	REVOCABLE(priv->ec_dev_rev, ec_dev) {
+		if (!ec_dev)
+			return -ENODEV;
 
-	if (copy_from_user(&s_mem, arg, sizeof(s_mem)))
-		return -EFAULT;
+		/* Not every platform supports direct reads */
+		if (!ec_dev->cmd_readmem)
+			return -ENOTTY;
 
-	if (s_mem.bytes > sizeof(s_mem.buffer))
-		return -EINVAL;
+		if (copy_from_user(&s_mem, arg, sizeof(s_mem)))
+			return -EFAULT;
 
-	num = ec_dev->cmd_readmem(ec_dev, s_mem.offset, s_mem.bytes,
-				  s_mem.buffer);
-	if (num <= 0)
-		return num;
+		if (s_mem.bytes > sizeof(s_mem.buffer))
+			return -EINVAL;
+
+		num = ec_dev->cmd_readmem(ec_dev, s_mem.offset, s_mem.bytes,
+					  s_mem.buffer);
+		if (num <= 0)
+			return num;
+	}
 
 	if (copy_to_user((void __user *)arg, &s_mem, sizeof(s_mem)))
 		return -EFAULT;
@@ -346,16 +386,15 @@ static long cros_ec_chardev_ioctl(struct file *filp, unsigned int cmd,
 				   unsigned long arg)
 {
 	struct chardev_priv *priv = filp->private_data;
-	struct cros_ec_dev *ec = priv->ec_dev;
 
 	if (_IOC_TYPE(cmd) != CROS_EC_DEV_IOC)
 		return -ENOTTY;
 
 	switch (cmd) {
 	case CROS_EC_DEV_IOCXCMD:
-		return cros_ec_chardev_ioctl_xcmd(ec, (void __user *)arg);
+		return cros_ec_chardev_ioctl_xcmd(priv, (void __user *)arg);
 	case CROS_EC_DEV_IOCRDMEM:
-		return cros_ec_chardev_ioctl_readmem(ec, (void __user *)arg);
+		return cros_ec_chardev_ioctl_readmem(priv, (void __user *)arg);
 	case CROS_EC_DEV_IOCEVENTMASK:
 		priv->event_mask = arg;
 		return 0;
@@ -377,31 +416,30 @@ static const struct file_operations chardev_fops = {
 
 static int cros_ec_chardev_probe(struct platform_device *pdev)
 {
-	struct cros_ec_dev *ec_dev = dev_get_drvdata(pdev->dev.parent);
-	struct cros_ec_platform *ec_platform = dev_get_platdata(ec_dev->dev);
-	struct chardev_data *data;
+	struct cros_ec_dev *ec = dev_get_drvdata(pdev->dev.parent);
+	struct cros_ec_platform *ec_platform = dev_get_platdata(ec->dev);
+	struct miscdevice *misc;
 
 	/* Create a char device: we want to create it anew */
-	data = devm_kzalloc(&pdev->dev, sizeof(*data), GFP_KERNEL);
-	if (!data)
+	misc = devm_kzalloc(&pdev->dev, sizeof(*misc), GFP_KERNEL);
+	if (!misc)
 		return -ENOMEM;
 
-	data->ec_dev = ec_dev;
-	data->misc.minor = MISC_DYNAMIC_MINOR;
-	data->misc.fops = &chardev_fops;
-	data->misc.name = ec_platform->ec_name;
-	data->misc.parent = pdev->dev.parent;
+	misc->minor = MISC_DYNAMIC_MINOR;
+	misc->fops = &chardev_fops;
+	misc->name = ec_platform->ec_name;
+	misc->parent = pdev->dev.parent;
 
-	dev_set_drvdata(&pdev->dev, data);
+	dev_set_drvdata(&pdev->dev, misc);
 
-	return misc_register(&data->misc);
+	return misc_register(misc);
 }
 
 static void cros_ec_chardev_remove(struct platform_device *pdev)
 {
-	struct chardev_data *data = dev_get_drvdata(&pdev->dev);
+	struct miscdevice *misc = dev_get_drvdata(&pdev->dev);
 
-	misc_deregister(&data->misc);
+	misc_deregister(misc);
 }
 
 static const struct platform_device_id cros_ec_chardev_id[] = {
